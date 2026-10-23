@@ -288,7 +288,7 @@ export interface AfterRunOptions {
 }
 
 /** Everything after analysis: plugin reporters, OTLP export, results-server publish and publishers. */
-export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRunOptions, ctx: { loaded: LoadedConfig; cwd: string; client?: ResultsClient; io: CliIO; out: (s: string) => void }): Promise<void> {
+export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRunOptions, ctx: { loaded: LoadedConfig; cwd: string; client?: ResultsClient; io: CliIO; out: (s: string) => void }): Promise<{ runUrl?: string }> {
   const run = JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')) as RunResult;
   for (const name of o.pluginReporters) {
     const r = registries.reporters.get(name);
@@ -330,6 +330,7 @@ export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRu
     const results = await runPublishers(ctx.loaded.config.publishers as never, { run, runDir, analysis, resolveSecret: secretResolver(ctx.loaded, ctx.cwd), runUrl });
     for (const r of results) (r.ok ? ctx.out : ctx.io.err)(`publish ${r.publisher}: ${r.message}`);
   }
+  return { runUrl };
 }
 
 /** Branch and commit from common CI variables (GitHub Actions, Azure Pipelines, GitLab). */

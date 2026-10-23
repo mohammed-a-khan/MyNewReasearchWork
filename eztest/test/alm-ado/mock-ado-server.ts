@@ -102,6 +102,9 @@ export async function startMockAdoServer(o: MockAdoOptions = {}) {
     threads: new Map<string, Array<{ id: number; status: string; isDeleted: boolean; threadContext?: unknown; comments: Array<{ id: number; content: string; isDeleted: boolean }> }>>(),
     identities: [] as Array<{ id: string; providerDisplayName: string; filterValues: string[] }>,
     entraTokens: [] as string[],
+    /** Builds: tags and associated work items (deployment test records). */
+    buildTags: new Map<number, string[]>(),
+    buildWorkItems: new Map<number, number[]>(),
   };
   const requests: MockRequest[] = [];
   const faults: { resultsPatch404?: boolean; flakyApi404?: boolean } = {};
@@ -446,6 +449,19 @@ export async function startMockAdoServer(o: MockAdoOptions = {}) {
       if (faults.flakyApi404) return adoError(res, 404, 'API resource location not found');
       state.flaky.push({ testCaseReferenceId: Number(m[1]), body });
       return json(res, 200, { testCaseReferenceId: Number(m[1]), ...(body as object) });
+    }
+
+    // ------------------------------------------------------------ builds (tags, associated work items)
+    if ((m = /^\/_apis\/build\/builds\/(\d+)\/tags\/([^/]+)$/i.exec(p)) && method === 'PUT') {
+      const list = state.buildTags.get(Number(m[1])) ?? [];
+      const tag = decodeURIComponent(m[2]);
+      if (!list.includes(tag)) list.push(tag);
+      state.buildTags.set(Number(m[1]), list);
+      return json(res, 200, { count: list.length, value: list });
+    }
+    if ((m = /^\/_apis\/build\/builds\/(\d+)\/workitems$/i.exec(p)) && method === 'GET') {
+      const ids = state.buildWorkItems.get(Number(m[1])) ?? [];
+      return json(res, 200, { count: ids.length, value: ids.map((i) => ({ id: String(i), url: `http://x/_apis/wit/workItems/${i}` })) });
     }
 
     // ------------------------------------------------------------ git

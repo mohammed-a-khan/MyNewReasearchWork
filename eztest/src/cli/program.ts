@@ -25,7 +25,8 @@ import { registerAdoCommands } from './ado.js';
 import { registerGitCommands } from './git.js';
 import { findJourneyFiles, loadJourneys, filterJourneys } from './journeys.js';
 import { isCodeJourneyFile, loadCodeJourneys } from '../runner/code-journeys.js';
-import { initProject } from './init.js';
+import { initProject, CI_SYSTEMS, type CiSystemName } from './init.js';
+import { checkPipelineRequires, finishPipelineRun, isAroundJourney, preparePipelineRun, registerPipelineCommands, selectForPipeline, type PipelineRun } from './pipelines.js';
 import { registerOpsCommands } from './ops.js';
 import { registerAppCommands } from '../apps/cli.js';
 import { registerContractCommands } from './contracts.js';
@@ -117,8 +118,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .command('init')
     .description('create eztest.config.yaml, an example journey and a readiness policy')
     .argument('[dir]', 'project directory', '.')
-    .addOption(new Option('--ci <provider>', 'also add a CI pipeline').choices(['github', 'azure']))
-    .action(async (dir: string, o: { ci?: 'github' | 'azure' }) => {
+    .addOption(new Option('--ci <system>', 'also add CI pipelines: PR smoke, scheduled nightly regression, on-deploy per environment, shards, JUnit, report, readiness gate').choices([...CI_SYSTEMS]))
+    .action(async (dir: string, o: { ci?: CiSystemName }) => {
       const r = await initProject(resolve(io.cwd, dir), { ci: o.ci });
       for (const f of r.created) io.out(`created  ${f}`);
       for (const f of r.skipped) io.out(`exists   ${f} (left unchanged)`);
@@ -173,10 +174,15 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .addOption(new Option('--manual <mode>', 'manual steps: prompt the tester in this terminal, or skip (recorded as not executed)').choices(['prompt', 'skip']))
     .option('--time-travel', 'record DOM snapshots per step (time-travel trace; feeds the UI coverage map)')
     .option('--watch', 'after the run, re-run changed journeys (and the journeys that call them) on every save')
+    .option('--pipeline <name>', 'run a pipelines: entry (its tags, environment, browsers, shards, gate and deployment record); "auto" detects it from the CI stage')
     .action(async (paths: string[], o) => {
      let web: WebServerHandle | undefined;
      const runOnce = async (onlyIds?: string[]): Promise<void> => {
       const overrides: Record<string, unknown> = {};
+      // --pipeline: the entry's environment, browsers, retries, workers, impact, budget and CI shard (flags win).
+      // EZTEST_PIPELINE names it too (the EZTest task and the YAML templates set it).
+      if (!o.pipeline && io.env.EZTEST_PIPELINE) o.pipeline = io.env.EZTEST_PIPELINE;
+      const pipe: PipelineRun | undefined = o.pipeline ? await preparePipelineRun(o, overrides, io, load) : undefined;
       if (o.browser) overrides.browser = o.browser;
       if (o.browsers?.length) overrides.browsers = o.browsers;
       if (o.headed) overrides.headless = false;
@@ -220,9 +226,18 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       }
       // Journeys tagged @library are reusable sub-journeys ("Run journey ..."): callable, not run on their own.
       const filtered = filterJourneys(all, { tags: o.tags, exclude: o.excludeTags, grep: o.grep, ids: onlyIds }).filter((j) => !j.tags.includes('library'));
-      const prepared = await prepareSelection(filtered, o, { loaded, cwd: io.cwd, client, warn });
+      // Setup:/Teardown: journeys run around whatever is selected (not filtered by tags, not sharded).
+      const around = filterJourneys(all, { exclude: o.excludeTags }).filter(isAroundJourney);
+      let tests = filtered.filter((j) => !isAroundJourney(j));
+      if (pipe) tests = selectForPipeline(pipe, tests, out);
+      if (pipe && !(await checkPipelineRequires(pipe, client, io))) {
+        plugins.off();
+        process.exitCode = 1;
+        return;
+      }
+      const prepared = await prepareSelection(tests, o, { loaded, cwd: io.cwd, client, warn });
       for (const line of prepared.lines) out(line);
-      const journeys = prepared.journeys;
+      const journeys = prepared.journeys.length ? [...prepared.journeys, ...around] : prepared.journeys;
       if (o.plan) {
         if (prepared.plan) for (const s of prepared.plan.shards) out(`plan shard ${s.index}/${prepared.plan.total}: ${s.journeyIds.length} journeys, ~${Math.round(s.estimatedMs / 1000)} s`);
         out(`would run ${journeys.length} journeys: ${journeys.map((j) => j.id).join(', ')}`);
@@ -283,6 +298,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         addons,
+        ...(client ? { serverClient: client } : {}),
+        ...(pipe ? { pipeline: pipe.resolution.name } : {}),
         logger: log ? log.child({}) : createMaskedLogger(cfg.logLevel === 'debug' ? 'debug' : 'warn', loaded.masker),
         runOptions: {
           events,
@@ -341,7 +358,9 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         for (const [fmt, p] of Object.entries(a.reports)) out(`report ${fmt}: ${p}`);
       }
       if (prepared.shard) out(`shard ${prepared.shard.index}/${prepared.shard.total} done; combine the shards with: eztest merge <shard run dirs> -o <dir>`);
-      await afterRun(runDir, analysis, { publish: o.publish, otlp: o.otlp, pluginReporters }, { loaded, cwd: io.cwd, client, io, out });
+      const published = await afterRun(runDir, analysis, { publish: o.publish, otlp: o.otlp, pluginReporters }, { loaded, cwd: io.cwd, client, io, out });
+      // Deployment test record (results server, Azure DevOps) and the pipeline's readiness gate.
+      const gateExit = pipe ? await finishPipelineRun(pipe, runDir, analysis.readiness, { loaded, io, out, client, runUrl: published.runUrl }) : undefined;
       plugins.off();
       // Quarantined journeys still run, but their failures do not fail the run (see .eztest/quarantine.json).
       let activeQuarantine: string[] = [];
@@ -354,7 +373,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       }
       const excused = run.journeys.filter((j) => activeQuarantine.includes(j.journeyId) && (j.status === 'failed' || j.status === 'error'));
       if (excused.length) io.out(`quarantined (not failing the run): ${excused.map((j) => `${j.journeyId} ${j.status}`).join(', ')}`);
-      process.exitCode = exitCodeFor(run, activeQuarantine);
+      process.exitCode = gateExit ?? exitCodeFor(run, activeQuarantine);
       // Burn-in and flakiness verdicts.
       const flakyIds = new Set<string>();
       if (prepared.order?.repeat) {
@@ -847,6 +866,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     });
 
   registerScaleCommands(program, io, (o) => load(o));
+  registerPipelineCommands(program, io, (o) => load(o));
   registerCoverageCommands(program, io, (o) => load(o));
   registerManualCommands(program, io, (o) => load(o));
   registerDoctorCommand(program, io, (o) => load(o));
