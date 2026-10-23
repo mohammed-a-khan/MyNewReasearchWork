@@ -27,6 +27,9 @@ export const PERMISSIONS = {
   'run.publish': 'tester',
   'lock.use': 'tester',
   'triage.override': 'tester',
+  /** Write the shared store and data pools (save, delete, add, claim); deployment test records. */
+  'store.write': 'tester',
+  'deployment.record': 'tester',
   'heal.decide': 'approver',
   'quarantine.change': 'approver',
   'readiness.sign': 'approver',

@@ -44,4 +44,6 @@ export type { Expect, ValueMatchers, TextMatchers, RowCompareOptions, RowFinding
 export type { JourneyOptions, JourneyFn, SdkContext, CodeStepFn, Row } from './types.js';
 export { SdkContextError, StepFailure } from './runtime.js';
 export { actors, as } from './actors.js';
+export { store } from './store.js';
+export type { StoreSurface, StoreSaveOptions } from './store.js';
 export type { Actors, ActorHandle } from './actors.js';

@@ -29,6 +29,7 @@ import {
 } from './auth.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { ContractRegistry } from './contracts.js';
+import { SharedDataRegistry } from './datastore.js';
 import { OidcClient, OidcError, safeNext } from './oidc.js';
 import { checkName, isStateKind, ResultsService, ServiceError } from './service.js';
 import { Store, type DbConnectionSpec } from './store.js';
@@ -124,6 +125,7 @@ export async function startResultsServer(o: ServerOptions): Promise<ServerHandle
   const store = await Store.open(dbSpec);
   const service = new ResultsService(store, cfg.dataDir, { maxUploadBytes: cfg.maxUploadMb * 1024 * 1024, retention: cfg.retention });
   const contracts = new ContractRegistry(store, service.audit, (p) => service.ensureProject(p));
+  const shared = new SharedDataRegistry(store, service.audit, (p) => service.ensureProject(p));
   const bootstrapHash = o.bootstrapToken ? sha256hex(o.bootstrapToken) : undefined;
   const authLimiter = new RateLimiter(cfg.authRateLimit, cfg.authRateLimit);
   const secure = !!cfg.tls || (cfg.publicUrl?.startsWith('https:') ?? false);
@@ -340,6 +342,77 @@ export async function startResultsServer(o: ServerOptions): Promise<ServerHandle
     if (c.params[1] === 'renew') return { renewed: await service.renewLock(p, key, String(b.token ?? ''), Number(b.ttlMs ?? 120_000)) };
     if (c.params[1] === 'release') return { released: await service.releaseLock(p, key, String(b.token ?? '')) };
     throw new HttpError(404, 'Unknown lock operation');
+  });
+
+  // ---------------------------------------------------------------- shared test data and deployment records
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  add('GET', '/api/projects/:p/store', async (c) => {
+    const p = project(c);
+    need(c, p, 'read');
+    return shared.list(p, c.url.searchParams.get('namespace') ?? undefined);
+  });
+  add('GET', '/api/projects/:p/store/:ns/:key', async (c) => {
+    const p = project(c);
+    need(c, p, 'read');
+    const e = await shared.get(p, c.params[1], c.params[2]);
+    if (!e) throw new HttpError(404, `No "${c.params[2]}" in namespace "${c.params[1]}"`);
+    return e;
+  });
+  add('PUT', '/api/projects/:p/store/:ns/:key', async (c) => {
+    const p = project(c);
+    need(c, p, 'store.write');
+    return shared.put(p, c.params[1], c.params[2], await readBody(c.req, 1024 * 1024), c.who);
+  });
+  add('DELETE', '/api/projects/:p/store/:ns/:key', async (c) => {
+    const p = project(c);
+    need(c, p, 'store.write');
+    return { deleted: await shared.delete(p, c.params[1], c.params[2], c.who) };
+  });
+  add('POST', '/api/projects/:p/store-purge', async (c) => {
+    const p = project(c);
+    need(c, p, 'store.write');
+    const b = await readBody(c.req, 16 * 1024);
+    return { purged: await shared.purgeExpired(p, str(b.namespace) || undefined, c.who) };
+  });
+  add('GET', '/api/projects/:p/pools', async (c) => {
+    const p = project(c);
+    need(c, p, 'read');
+    return shared.pools(p, c.url.searchParams.get('namespace') ?? undefined);
+  });
+  add('GET', '/api/projects/:p/pools/:ns/:pool', async (c) => {
+    const p = project(c);
+    need(c, p, 'read');
+    return shared.items(p, c.params[1], c.params[2]);
+  });
+  add('POST', '/api/projects/:p/pools/:ns/:pool/:op', async (c) => {
+    const p = project(c);
+    need(c, p, 'store.write');
+    const [, n, pool, op] = c.params;
+    const b = await readBody(c.req, 16 * 1024 * 1024);
+    if (op === 'items') return shared.add(p, n, pool, b, c.who);
+    if (op === 'claim') {
+      const item = await shared.claim(p, n, pool, str(b.owner), Number(b.leaseMs ?? 1_800_000), c.who);
+      return item ? { claimed: true, item } : { claimed: false };
+    }
+    if (op === 'release') return { released: await shared.release(p, n, pool, str(b.id), str(b.owner), c.who) };
+    if (op === 'consume') return { consumed: await shared.consume(p, n, pool, str(b.id), str(b.owner), c.who) };
+    throw new HttpError(404, 'Unknown pool operation');
+  });
+  add('DELETE', '/api/projects/:p/pools/:ns/:pool/items/:id', async (c) => {
+    const p = project(c);
+    need(c, p, 'store.write');
+    return { removed: await shared.remove(p, c.params[1], c.params[2], c.params[3], c.who) };
+  });
+  add('POST', '/api/projects/:p/deployments', async (c) => {
+    const p = project(c);
+    need(c, p, 'deployment.record');
+    return shared.recordDeployment(p, await readBody(c.req, 4 * 1024 * 1024), c.who);
+  });
+  add('GET', '/api/projects/:p/deployments', async (c) => {
+    const p = project(c);
+    need(c, p, 'read');
+    const q = c.url.searchParams;
+    return shared.deployments(p, { environment: q.get('environment') ?? undefined, version: q.get('version') ?? undefined, pipeline: q.get('pipeline') ?? undefined, limit: Number(q.get('limit') ?? 500) });
   });
 
   // ---------------------------------------------------------------- EZTest contracts

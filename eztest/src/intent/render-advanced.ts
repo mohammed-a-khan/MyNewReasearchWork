@@ -5,6 +5,7 @@
  */
 import { clockStepToText } from './rules-clock.js';
 import { integrationStepToText } from '../integration/rules.js';
+import { storeStepToText } from '../store/rules.js';
 import type { Condition, FlowSpec, Step } from '../core/index.js';
 import { conditionToText } from './conditions.js';
 import { quoteText } from './quotes.js';
@@ -284,6 +285,7 @@ export function advancedStepToText(s: Step): string {
     }
   }
   if (s.action === 'integration') return integrationStepToText(s);
+  if (s.action === 'store') return storeStepToText(s);
   return cannot(s, 'no plain-English form');
 }
 

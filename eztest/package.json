@@ -264,6 +264,14 @@
       "types": "./dist/sdk/index.d.ts",
       "import": "./dist/sdk/index.js"
     },
+    "./store": {
+      "types": "./dist/store/index.d.ts",
+      "import": "./dist/store/index.js"
+    },
+    "./pipelines": {
+      "types": "./dist/pipelines/index.d.ts",
+      "import": "./dist/pipelines/index.js"
+    },
     "./elements": {
       "types": "./dist/elements/index.d.ts",
       "import": "./dist/elements/index.js"

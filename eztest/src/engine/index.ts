@@ -32,6 +32,8 @@ import type { CompareDocumentHandler, DataHandler, DbHandler, Lens, RunHooks, Ru
 import { loadJourneyFile } from '../intent/index.js';
 import { SmtpSink, TwilioSmsProvider, TwilioVoiceProvider, loadTranscriptFixtures } from '../messaging/index.js';
 import { runJourneys } from '../runner/index.js';
+import { ResultsClient } from '../server/client.js';
+import { storeFromConfig, type SharedStore } from '../store/index.js';
 import { branchBaselineDir, seedBranchBaselinesSync } from '../git/branch.js';
 import { createD365Integration, type D365Integration } from '../d365/index.js';
 import { createSalesforceIntegration, type SalesforceIntegration } from '../salesforce/index.js';
@@ -51,6 +53,12 @@ export interface EngineOptions {
   logger?: Logger;
   /** Extra runner options that win over config-derived ones (e.g. lenses, custom steps). */
   runOptions?: Partial<RunOptions>;
+  /** The results server client (the shared store uses it when store.backend is auto/server). Default: from `server:`. */
+  serverClient?: ResultsClient;
+  /** Where the pipeline outputs of values saved "for the pipeline" go (default: stdout, unmasked: CI logging commands). */
+  pipelineOut?: (line: string) => void;
+  /** Name of the `pipelines:` entry being run (recorded in the store export). */
+  pipeline?: string;
 }
 
 export interface Engine {
@@ -65,6 +73,8 @@ export interface Engine {
   runOptions: RunOptions;
   run(journeys: Journey[]): Promise<RunResult>;
   close(): Promise<void>;
+  /** The shared store and data pools (docs/shared-data.md). */
+  store: SharedStore;
 }
 
 function resolvePath(cwd: string, p: string): string {
@@ -312,6 +322,37 @@ export async function hooksFromConfig(config: EzTestConfig, pool: Journey[], res
   return { beforeAll: await all(h.beforeAll), afterAll: await all(h.afterAll), beforeEach: await all(h.beforeEach), afterEach: await all(h.afterEach) };
 }
 
+/**
+ * Separate `Setup:` / `Teardown:` journeys (tagged setup / teardown) from the tests: they become beforeAll /
+ * afterAll hooks, after the config's own hooks (setup) and before them (teardown).
+ */
+export function splitSetupJourneys(journeys: Journey[], configHooks?: RunHooks, extra?: RunHooks): { journeys: Journey[]; hooks?: RunHooks } {
+  const setup = journeys.filter((j) => j.tags.includes('setup'));
+  const teardown = journeys.filter((j) => j.tags.includes('teardown') && !j.tags.includes('setup'));
+  const tests = journeys.filter((j) => !setup.includes(j) && !teardown.includes(j));
+  const base: RunHooks = { ...(configHooks ?? {}), ...(extra ?? {}) };
+  if (!setup.length && !teardown.length) return { journeys: tests, ...(configHooks || extra ? { hooks: base } : {}) };
+  const ids = (l: Journey[] | undefined) => new Set((l ?? []).map((j) => j.id));
+  const before = ids(base.beforeAll);
+  const after = ids(base.afterAll);
+  return {
+    journeys: tests,
+    hooks: { ...base, beforeAll: [...(base.beforeAll ?? []), ...setup.filter((j) => !before.has(j.id))], afterAll: [...teardown.filter((j) => !after.has(j.id)), ...(base.afterAll ?? [])] },
+  };
+}
+
+/** A results-server client from `server:` (token from server.token or EZTEST_SERVER_TOKEN), for the shared store. */
+async function engineServerClient(config: EzTestConfig, vault: IdentityVault, masker: { add(v: string): unknown }): Promise<ResultsClient> {
+  const s = config.server!;
+  const ref = s.token ?? (process.env.EZTEST_SERVER_TOKEN ? 'secret://env/EZTEST_SERVER_TOKEN' : undefined);
+  let token: string | undefined;
+  if (ref) {
+    token = ref.startsWith('secret://') ? await vault.registry.resolve(ref) : ref;
+    masker.add(token);
+  }
+  return new ResultsClient({ url: s.url, token, project: s.project ?? config.project ?? 'default', timeoutMs: s.timeoutMs });
+}
+
 /** Mail and SMS providers from config. Secret references are resolved through the vault and masked. */
 export async function messagingFromConfig(config: EzTestConfig, vault: IdentityVault, masker: { add(v: string): unknown }): Promise<Pick<RunOptions, 'mail' | 'sms' | 'voice'>> {
   const out: Pick<RunOptions, 'mail' | 'sms' | 'voice'> = {};
@@ -418,6 +459,11 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
   });
   // Cross-browser matrix and remote endpoints (browser.connect); secret:// values resolved and masked.
   const browserOpts = await browserRunOptions(config, (ref) => vault.registry.resolve(ref), (v) => loaded.masker.add(v));
+  // Shared test data: the store and data pools (local files, or the results server when configured).
+  const serverClient = opts.serverClient ?? (config.server?.url ? await engineServerClient(config, vault, loaded.masker) : undefined);
+  const store = await storeFromConfig(config, {
+    cwd, client: serverClient, resolveSecret: (ref) => vault.registry.resolve(ref), addSecret: (v) => loaded.masker.add(v), env: { ...loaded.variables, ...process.env }, logger,
+  });
   const runOptions: RunOptions = {
     baseUrl: config.baseUrl,
     browser: config.browser,
@@ -443,7 +489,17 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
       : undefined,
     login,
     relogin: pooled?.relogin,
-    ...(pooled ? { lifecycle: { journeyEnd: pooled.journeyEnd } } : {}),
+    // Pooled accounts are released and shared-store pool claims settled (consumed on pass, released on failure) per attempt.
+    lifecycle: {
+      journeyEnd: async (j, r) => {
+        try {
+          await pooled?.journeyEnd(j, r);
+        } finally {
+          await store.journeyEnd(j, r);
+        }
+      },
+    },
+    store,
     // Reliability (docs/reliability.md).
     reliability: { actionability: rel.actionability, appIdle: rel.appIdle, verifyFill: rel.verifyFill, reresolve: rel.reresolve, ...(rel.slowMo ? { slowMo: rel.slowMo } : {}) },
     circuitBreaker: rel.circuitBreaker,
@@ -514,14 +570,28 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
       if (rel.orphanSweep && Object.keys(config.data.entities).length && existsSync(cleanupDir)) {
         await (await ensureFabric()).sweepOrphans(cleanupDir).catch((e: Error) => logger.warn('orphan sweep failed', { message: e.message }));
       }
-      const hooks = await hooksFromConfig(config, [...(runOptions.library ?? []), ...journeys], runOptions.resolveJourney);
-      const run = await runJourneys(journeys, hooks ? { ...runOptions, hooks: { ...hooks, ...(runOptions.hooks ?? {}) } } : runOptions);
+      const configHooks = await hooksFromConfig(config, [...(runOptions.library ?? []), ...journeys], runOptions.resolveJourney);
+      // `Setup:` / `Teardown:` journeys run once, before / after all others; a setup's Returns: become run-wide values.
+      const { journeys: tests, hooks } = splitSetupJourneys(journeys, configHooks, runOptions.hooks);
+      if (!tests.length) throw new EzTestError('Only Setup:/Teardown: journeys were selected; there is nothing to run between them', 'NO_JOURNEYS');
+      let run: RunResult;
+      try {
+        run = await runJourneys(tests, hooks ? { ...runOptions, hooks } : runOptions);
+      } finally {
+        await store.releaseOutstanding().catch((e: Error) => logger.warn('pool claims not released', { message: e.message }));
+      }
+      // Values saved "for the pipeline": store-export.json and the CI's output variables.
+      if (config.store.pipelineOutputs) {
+        await store.finish({ runDir: join(runOptions.outputDir, run.runId), outputDir: runOptions.outputDir, runId: run.runId, pipeline: opts.pipeline, out: opts.pipelineOut ?? ((l) => process.stdout.write(l + '\n')) })
+          .catch((e: Error) => logger.warn(`pipeline outputs not written: ${e.message}`));
+      }
       // API coverage against api.spec, recorded next to the run (report, Studio and the apiCoverage gate read it).
       if (integration.specs.length && run.journeys.length) {
         await recordApiCoverage(join(runOptions.outputDir, run.runId), integration.specs).catch((e: Error) => logger.warn(`API coverage not recorded: ${e.message}`));
       }
       return run;
     },
+    store,
     async close() {
       if (fabric) await fabric.release();
       await stopMail?.stop();

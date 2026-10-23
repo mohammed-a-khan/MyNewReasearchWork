@@ -43,7 +43,7 @@ export interface ParseEzOptions {
   source?: string;
 }
 
-const HEADER = /^(journey|name|id|tags|role|requirements?|risk|locks?|base\s*url|variables|vars|description|lenses|data|params|parameters|returns|device|viewport|locale|time\s*zone|colou?r\s*scheme|reduced\s*motion|geolocation|permissions|user\s*agent|touch|offline|http\s*credentials|extra\s*headers|headers|loaders|platform|story|app|electron|requires|depends\s*on|capabilities|actors|browsers|clock|type|assignee|assigned\s*to|preconditions?)\s*:\s*(.*)$/i;
+const HEADER = /^(journey|setup|teardown|name|id|tags|role|requirements?|risk|locks?|base\s*url|variables|vars|description|lenses|data|params|parameters|returns|device|viewport|locale|time\s*zone|colou?r\s*scheme|reduced\s*motion|geolocation|permissions|user\s*agent|touch|offline|http\s*credentials|extra\s*headers|headers|loaders|platform|story|app|electron|requires|depends\s*on|capabilities|actors|browsers|clock|type|assignee|assigned\s*to|preconditions?)\s*:\s*(.*)$/i;
 const EXPECT = /^(?:(?:then|and|also)\s+)?(?:expect|verify)\s+(?:that\s+)?(.+)$/i;
 const SOFT = /^(?:(?:then|and|also)\s+)?(?:(?:expect|verify)\s+softly|soft(?:ly)?\s+(?:expect|verify))\b/i;
 const END = /^(?:end(?:\s+(?:if|unless|repeat|for(?:\s+each)?|each|loop|while|retry|try|group|frame|in\s+frame|block|journey))?|done|next|endif)\s*[.;]?$/i;
@@ -393,9 +393,12 @@ function applyHeader(j: JourneyInput, key: string, value: string, where: string)
   switch (key) {
     case 'journey':
     case 'name': j.name = value; break;
+    // A run-wide setup / teardown journey (docs/shared-data.md#run-wide-values): runs once before / after every other journey.
+    case 'setup':
+    case 'teardown': j.name = value; j.tags = [...new Set([...(j.tags ?? []), key])]; break;
     case 'id': j.id = value; break;
     case 'description': j.description = value; break;
-    case 'tags': j.tags = splitList(value).map((t) => t.replace(/^@/, '')); break;
+    case 'tags': j.tags = [...new Set([...(j.tags ?? []).filter((t) => t === 'setup' || t === 'teardown'), ...splitList(value).map((t) => t.replace(/^@/, ''))])]; break;
     case 'role': j.role = value; break;
     case 'requirement':
     case 'requirements': j.requirements = value.split(',').map((s) => s.trim()).filter(Boolean); break;
@@ -716,10 +719,12 @@ function renderSteps(steps: Step[], depth: number, out: string[], top: boolean):
  * CSS-only targets whose description does not reproduce the locators).
  */
 export function journeyToEzScript(journey: Journey): string {
-  const out: string[] = [`Journey: ${journey.name}`];
+  const kind = journey.tags.includes('setup') ? 'Setup' : journey.tags.includes('teardown') ? 'Teardown' : 'Journey';
+  const out: string[] = [`${kind}: ${journey.name}`];
   if (journey.id !== slugify(journey.name)) out.push(`Id: ${journey.id}`);
   if (journey.description) out.push(`Description: ${journey.description}`);
-  if (journey.tags.length) out.push(`Tags: ${journey.tags.map((t) => `@${t.replace(/^@/, '')}`).join(' ')}`);
+  const tags = journey.tags.filter((t) => kind === 'Journey' || t !== kind.toLowerCase());
+  if (tags.length) out.push(`Tags: ${tags.map((t) => `@${t.replace(/^@/, '')}`).join(' ')}`);
   if (journey.role) out.push(`Role: ${journey.role}`);
   if (journey.requirements.length) out.push(`Requirements: ${journey.requirements.join(', ')}`);
   if (journey.risk !== 3) out.push(`Risk: ${journey.risk}`);

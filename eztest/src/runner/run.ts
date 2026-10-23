@@ -20,7 +20,8 @@ import { collectRunVcs, runVcsEnvironment } from '../git/branch.js';
 import { collectHealProposals } from '../heal/proposals.js';
 import { FingerprintStore } from '../heal/store.js';
 import { EvidenceWriter } from './evidence.js';
-import { blockedByHook, expandExamples, hookJourneys, runAllHook } from './journey-hooks.js';
+import { blockedByHook, expandExamples, hookJourneys, runAllHook, runWideValues } from './journey-hooks.js';
+import { maskDeep } from './dom.js';
 import { createRunExtensions } from './extensions.js';
 import { resolveExamplesSources } from './examples-source.js';
 import { attemptNetwork, cancelledJourney, noRowsJourney, runJourneyAttempt, type JourneyRunEnv } from './journey.js';
@@ -189,7 +190,10 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
    * prerequisites: web journeys get them in the ledger; platform drivers (which have no ledger hook) get
    * them as journey variables (strings, JSON for objects).
    */
-  const runAttempt = async (j: Journey, attempt: number, seed?: Record<string, unknown>): Promise<JourneyResult> => {
+  // Run-wide values: the Returns: of setup (beforeAll) journeys, seeded into every journey (Depends on: values win).
+  let runSeed: Record<string, unknown> = {};
+  const runAttempt = async (j: Journey, attempt: number, handoff?: Record<string, unknown>): Promise<JourneyResult> => {
+    const seed = Object.keys(runSeed).length ? { ...runSeed, ...(handoff ?? {}) } : handoff;
     const platform = platformOf(j, options);
     if (platform === 'web') {
       const failedLaunch = launchErrors.get(j.browser ?? primaryBrowser.id);
@@ -315,6 +319,8 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   };
   try {
     const pre = await runAllHook('beforeAll', env);
+    runSeed = runWideValues(options.hooks?.beforeAll ?? [], pre);
+    if (Object.keys(runSeed).length) logger.info('run-wide values from setup journeys', { keys: Object.keys(runSeed) });
     const failedHook = pre.find((r) => r.status === 'failed' || r.status === 'error');
     if (failedHook) journeys.forEach((j, i) => { results[i] = blockedByHook(j, failedHook, envOf(j).browserName); });
     else await Promise.all(Array.from({ length: Math.min(concurrency, journeys.length) }, worker));
@@ -341,7 +347,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     }
     // Journeys whose Browsers: header leaves out every browser of this run.
     for (const { journey: j, reason } of matrix.excluded) results.push({ ...notRun(j, reason, 'NotOnThisBrowser'), browser: j.browsers?.join(',') });
-    results.push(...(await runAllHook('afterAll', env)));
+    results.push(...(await runAllHook('afterAll', env, Object.keys(runSeed).length ? runSeed : undefined)));
   } finally {
     for (const e of envs.values()) await e.contextPool?.closeAll();
     for (const d of usedDrivers) await d.close?.().catch((e: unknown) => logger.warn('platform driver close failed', { driver: d.name, message: (e as Error).message }));
@@ -378,6 +384,8 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   }
   if (health.preflight || health.circuit) run.health = health;
   if (multiBrowser) run.browsers = browserSummaries(results, wanted, browsers);
+  // Ledgers can hold secrets (credentials, secret shared-store values): masked in the stored run.
+  if (options.mask) for (const r of results) r.ledger = maskDeep(r.ledger, options.mask) as Record<string, unknown>;
   if (contextPool) run.environment.contextReuse = `${contextPool.created} created, ${contextPool.reused} reused`;
   await writeFile(join(runDir, 'run.json'), JSON.stringify(run, null, 2));
   options.events?.emit({ type: 'run:end', runId });

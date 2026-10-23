@@ -272,7 +272,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, env: 
     const s = slot.session ?? session;
     return {
       runId: env.runId, runDir: env.runDir, journey: j, step, get page() { return s.page; }, context: slot.context ?? context, ledger: l, attempt, baseUrl, logger: env.logger, evidence,
-      vars: v, interpolate: (str: string) => interpolate(str, v()), session: s, ...(labelled() ? { actor: slot.name } : {}),
+      vars: v, interpolate: (str: string) => interpolate(str, v()), session: s, ...(labelled() ? { actor: slot.name } : {}), rootJourneyId: journey.id,
     };
   };
   const jx = env.extensions?.startJourney({ journey, attempt, page, context, ledger, vars, ctxFor: (s) => ctxFor(s), runtime: env, browserName: env.browserName });
