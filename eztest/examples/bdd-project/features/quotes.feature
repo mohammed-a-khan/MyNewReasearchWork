@@ -9,6 +9,7 @@ Feature: Price quotes
       """
     Then the quote total is 39.98
     And the quote is for "Widget"
+    And it costs 2 widget prices
 
   # EZTest extension: the Examples rows come from a data file (csv, xlsx, json) or a named query.
   Scenario Outline: Quote <qty> x <sku>

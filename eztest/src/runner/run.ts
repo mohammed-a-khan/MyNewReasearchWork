@@ -37,6 +37,20 @@ import { safeName } from './evidence.js';
 import type { HealthCheckResult, RunHealth } from '../core/index.js';
 import { driverFor, noDriverJourney, platformOf, type PlatformDriver } from './platform.js';
 import { bddRecord } from './bdd-run.js';
+import { bddAllJourneys, clearBddAllState } from './bdd-all.js';
+
+/** Run the Gherkin BeforeAll / AfterAll hook journeys of a run's scenarios (tagged hook, bdd). */
+async function runBddAllHooks(journeys: Journey[], kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv): Promise<JourneyResult[]> {
+  const out: JourneyResult[] = [];
+  for (const h of await bddAllJourneys(journeys, kind, env.opts.baseDir ?? process.cwd())) {
+    if (env.opts.signal?.aborted) break;
+    env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
+    const r = await runJourneyAttempt(h, 1, env);
+    out.push(r);
+    env.opts.events?.emit({ type: 'journey:end', journeyId: h.id, status: r.status });
+  }
+  return out;
+}
 import { describeBrowser, expandBrowserMatrix, openBrowser, runBrowsers, type ResolvedBrowser } from './browsers.js';
 
 /** Stand-in when every journey runs on a platform driver: using it is a bug, so it fails loudly. */
@@ -322,7 +336,9 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     const pre = await runAllHook('beforeAll', env);
     runSeed = runWideValues(options.hooks?.beforeAll ?? [], pre);
     if (Object.keys(runSeed).length) logger.info('run-wide values from setup journeys', { keys: Object.keys(runSeed) });
-    const failedHook = pre.find((r) => r.status === 'failed' || r.status === 'error');
+    // Gherkin BeforeAll hooks: once per run, before the scenarios they apply to (src/runner/bdd-all.ts).
+    if (!pre.some((r) => r.status === 'failed' || r.status === 'error')) pre.push(...(await runBddAllHooks(journeys, 'beforeAll', env)));
+    const failedHook = pre.find((r) => (r.status === 'failed' || r.status === 'error') && !r.tags.includes('bdd'));
     if (failedHook) journeys.forEach((j, i) => { results[i] = blockedByHook(j, failedHook, envOf(j).browserName); });
     else await Promise.all(Array.from({ length: Math.min(concurrency, journeys.length) }, worker));
     // Isolated retries run one at a time after everything else (no parallel interference).
@@ -348,8 +364,12 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     }
     // Journeys whose Browsers: header leaves out every browser of this run.
     for (const { journey: j, reason } of matrix.excluded) results.push({ ...notRun(j, reason, 'NotOnThisBrowser'), browser: j.browsers?.join(',') });
+    // Gherkin AfterAll hooks: once, for the scenarios that ran.
+    const ran = new Set(results.filter((r) => r && r.status !== 'skipped' && !r.steps.some((x) => x.error?.name === 'BeforeAllFailed')).map((r) => r.journeyId));
+    results.push(...(await runBddAllHooks(journeys.filter((j) => ran.has(j.id)), 'afterAll', env)));
     results.push(...(await runAllHook('afterAll', env, Object.keys(runSeed).length ? runSeed : undefined)));
   } finally {
+    clearBddAllState(env.runDir);
     for (const e of envs.values()) await e.contextPool?.closeAll();
     for (const d of usedDrivers) await d.close?.().catch((e: unknown) => logger.warn('platform driver close failed', { driver: d.name, message: (e as Error).message }));
     // Launched browsers are closed; attached (remote) ones only lose the contexts this run created.

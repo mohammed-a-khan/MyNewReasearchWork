@@ -7,7 +7,7 @@
  * hierarchy; undefined, ambiguous and failing steps.
  */
 import { afterEach, describe, expect, it } from '../support/testkit.js';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { verifyEvidence, type StepResult } from '../../src/core/index.js';
 import { bddProject, byId, cli, flat, latestRun, tree } from './helpers.js';
@@ -31,6 +31,8 @@ describe('native BDD through eztest run (real browser, demo app)', () => {
     const summary = run.journeys.map((j) => `${j.journeyId} ${j.status}\n${tree(j.steps, 1)}`).join('\n');
     expect(errors(r.err), summary).toBe('');
     expect(run.journeys.map((j) => j.journeyId).sort(), summary).toEqual([
+      'bdd-after-all--report-shared-values',
+      'bdd-before-all--price-list',
       'orders-ordering--eu-customers-come-from-the-database',
       'orders-ordering--place-an-order-through-the-ui',
       'orders-ordering--signed-in-as-user-1',
@@ -90,6 +92,20 @@ describe('native BDD through eztest run (real browser, demo app)', () => {
     expect(gadget.steps[0].intent).toMatch(/^Before hook: api scenarios/);
     expect(gadget.steps.find((s) => s.intent === 'And the quote is for "Gadget"')!.gherkin?.pattern).toBe('/^the quote is for "([^"]+)"$/');
     expect(gadget.ledger.hookLog).toEqual(['before-api', 'before:EZ Shop', 'after:passed']);
+    // BeforeAll ran once for the run (before the scenarios), and its shared values reached the @api Worlds only.
+    const beforeAll = byId(run, 'bdd-before-all--price-list');
+    expect(run.journeys.filter((j) => j.journeyId.startsWith('bdd-before-all')).length).toBe(1);
+    expect(run.journeys.indexOf(beforeAll)).toBe(0);
+    expect(beforeAll.tags).toEqual(['hook', 'beforeAll', 'bdd']);
+    expect(beforeAll.steps[0].gherkin).toMatchObject({ kind: 'beforeAll', match: 'hook' });
+    expect(beforeAll.steps[0].children!.map((c) => c.intent)).toEqual([expect.stringMatching(/^Call API POST \/api\/public\/quote/)]);
+    expect(gadget.ledger.unitPrice).toBe('19.99');
+    expect(byId(run, 'quotes--quote-sku-x-qty-from-a-workbook-sku-100').ledger.unitPrice).toBe('19.99');
+    expect(place.ledger.unitPrice).toBeNull();
+    // AfterAll ran once at the end and saw every BeforeAll's values.
+    const afterAll = byId(run, 'bdd-after-all--report-shared-values');
+    expect(run.journeys.at(-1)).toBe(afterAll);
+    expect(afterAll.steps[0].evidence.length).toBe(1);
     const json = byId(run, 'quotes--quote-from-a-json-request');
     expect(json.steps.find((s) => s.intent === 'When I post this quote request:')!.children!.some((c) => /^POST /.test(c.intent) || /quote/.test(c.intent))).toBe(true);
     // Outlines from a CSV file (filtered) and an XLSX sheet: one result per row.
@@ -153,11 +169,34 @@ describe('native BDD through eztest run (real browser, demo app)', () => {
     expect(gs(throws)[0].children!.at(-1)!.intent).toMatch(/^Code error at hooks\.steps\.ts:\d+$/);
     expect(gs(throws)[0].error?.message).toBe('business rule violated');
 
+    // A failing BeforeAll fails the scenarios it applies to, without running them; the others are not affected.
+    expect(run.journeys.find((j) => j.journeyId.startsWith('bdd-before-all--steps-hooks-steps-ts-'))!.status).toBe('failed');
+    const broken = byId(run, 'problems--a-beforeall-that-fails');
+    expect(broken.status).toBe('failed');
+    expect(broken.steps[0].error?.name).toBe('BeforeAllFailed');
+    expect(broken.steps[0].error?.message).toMatch(/setup service down/);
+    expect(gs(broken).map((s) => s.status)).toEqual(['skipped']);
     const hooks = byId(run, 'hooks--hooks-around-every-step');
     expect(hooks.status, tree(hooks.steps)).toBe('passed');
     expect(hooks.ledger.hookLog).toEqual(['before:EZ Shop', 'step:5', 'after-step:passed', 'step:6', 'after-step:passed', 'after:passed']);
     // With step hooks, an EZTest phrasing runs inside a group for its Gherkin step.
     expect(gs(hooks)[1].children!.map((c) => c.intent)).toEqual(['Open "/login"']);
+  });
+
+  it('a scenario called from an .ez journey runs the BeforeAll it needs itself, once', async () => {
+    const p = await bddProject();
+    restore = p.restore;
+    await mkdir(join(p.project, 'journeys'), { recursive: true });
+    await writeFile(join(p.project, 'journeys', 'calls.ez'), 'Journey: Calls two scenarios\nId: calls-scenarios\n\nRun journey "quotes--quote-for-a-gadget"\nRun journey "quotes--quote-from-a-json-request"\n');
+    const r = await cli(p.project, ['run', '--grep', '^calls-scenarios$']);
+    const { run } = await latestRun(p.project);
+    const j = byId(run, 'calls-scenarios');
+    expect(j.status, tree(j.steps)).toBe('passed');
+    expect(r.exitCode).toBe(0);
+    // No hook journey (the run had no scenario of its own): the first called scenario ran the BeforeAll inside its result.
+    expect(run.journeys.map((x) => x.journeyId)).toEqual(['calls-scenarios']);
+    const all = flat(j.steps).filter((s) => s.gherkin?.kind === 'beforeAll');
+    expect(all.map((s) => s.intent)).toEqual([expect.stringMatching(/^BeforeAll hook: price list/)]);
   });
 
   it('validate binds every step and prints snippets for undefined ones', async () => {

@@ -398,6 +398,7 @@ export async function runCodeJourney(journey: Journey, scope: FlowScope, flow: F
   if (!journey.code) throw new EzTestError(`Journey "${journey.id}" is not a code journey`, 'NOT_CODE');
   // Gherkin scenarios (.feature files) bind their steps to step definitions or EZTest phrasings.
   if (journey.bdd) return (await import('./bdd-run.js')).runBddScenario(journey, scope, flow);
+  if (journey.bddAll) return (await import('./bdd-all.js')).runBddAllHook(journey, scope, flow);
   const target = await resolveCodeTarget(`${journey.code.file}#journey:${journey.code.name}`, [], { cwd: flow.opts.baseDir ?? process.cwd() });
   const root = newNode();
   const host = new Host(scope, flow, journey.code.file, root);

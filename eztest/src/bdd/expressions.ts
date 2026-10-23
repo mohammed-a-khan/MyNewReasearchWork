@@ -277,31 +277,125 @@ class CompiledExpression implements StepExpression {
   }
 }
 
+/** A capturing group of a regex source: its 1-based number, name, source text and nesting depth. */
+export interface RegexGroup {
+  index: number;
+  name?: string;
+  source: string;
+  depth: number;
+}
+
+/** The capturing groups of a regex source, in the order of their opening parentheses. */
+export function regexGroups(source: string): RegexGroup[] {
+  const out: RegexGroup[] = [];
+  const stack: Array<{ group?: RegexGroup; start: number }> = [];
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') {
+      inClass = true;
+      continue;
+    }
+    if (c === '(') {
+      let start = i + 1;
+      let group: RegexGroup | undefined;
+      if (source[i + 1] === '?') {
+        const named = /^\?<([A-Za-z_$][\w$]*)>/.exec(source.slice(i + 1));
+        if (named) {
+          group = { index: 0, name: named[1], source: '', depth: stack.filter((x) => x.group).length };
+          start = i + 1 + named[0].length;
+        }
+      } else {
+        group = { index: 0, source: '', depth: stack.filter((x) => x.group).length };
+      }
+      if (group) {
+        out.push(group);
+        group.index = out.length;
+      }
+      stack.push({ group, start });
+      continue;
+    }
+    if (c === ')') {
+      const top = stack.pop();
+      if (top?.group) top.group.source = source.slice(top.start, i);
+    }
+  }
+  return out;
+}
+
+/**
+ * A regular expression definition. Top-level capture groups are the arguments:
+ * a group named after a parameter type (`(?<int>\d+)`, `(?<money>...)`) is converted with
+ * that type; an unnamed group whose pattern is a parameter type's own (`(\d+)`, `(-?\d+)`,
+ * the {float} or {string} pattern, a custom type's regexp) is converted with that type too;
+ * any other group arrives as a string (undefined when it did not take part).
+ */
 class RegexpExpression implements StepExpression {
   readonly kind = 'regexp' as const;
   readonly source: string;
   readonly parameters: string[];
   readonly regexp: RegExp;
+  private readonly groups: Array<{ group: RegexGroup; type?: ParameterType }>;
 
-  constructor(re: RegExp) {
+  constructor(re: RegExp, reg: ParameterTypeRegistry) {
     this.source = re.toString();
     const flags = re.flags.replace(/[gy]/g, '');
     this.regexp = new RegExp(re.source, flags.includes('d') ? flags : `${flags}d`);
-    this.parameters = Array.from({ length: groupCount(re.source) }, () => '');
+    const top = regexGroups(re.source).filter((g) => g.depth === 0);
+    const types = reg.all();
+    // By source: built-in int and float first, then the other types (a custom type wins over {word} / {}).
+    const bySource = (src: string) =>
+      types.find((t) => (t.name === 'int' || t.name === 'float' || t.name === 'string') && t.sources.includes(src))
+      ?? types.find((t) => !t.builtin && t.sources.includes(src));
+    // A name that is no parameter type is just a name: the group stays a string unless its pattern matches a type.
+    this.groups = top.map((group) => ({ group, type: (group.name ? reg.get(group.name) : undefined) ?? bySource(group.source) }));
+    this.parameters = this.groups.map((g) => g.type?.name ?? '');
   }
 
-  match(text: string): ExpressionMatch | null {
+  match(text: string, world?: unknown): ExpressionMatch | null {
     const m = this.regexp.exec(text);
     if (!m) return null;
     const ind = (m as RegExpExecArray & { indices?: Array<[number, number] | undefined> }).indices;
-    const args = m.slice(1);
-    return { args, spans: args.map((_a, i) => ({ start: ind?.[i + 1]?.[0] ?? -1, end: ind?.[i + 1]?.[1] ?? -1, parameter: '' })) };
+    const args = this.groups.map(({ group, type }) => {
+      const v = m[group.index];
+      if (v === undefined || !type) return v;
+      return convert(type, v, world);
+    });
+    return { args, spans: this.groups.map(({ group, type }) => ({ start: ind?.[group.index]?.[0] ?? -1, end: ind?.[group.index]?.[1] ?? -1, parameter: type?.name ?? '' })) };
   }
+}
+
+/** Convert a captured value with a parameter type: its own regexp gives the inner groups the transformer receives. */
+function convert(type: ParameterType, value: string, world: unknown): unknown {
+  for (let k = 0; k < type.sources.length; k++) {
+    const m = new RegExp(`^(?:${type.sources[k]})$`).exec(value);
+    if (!m) continue;
+    if (type.builtin) {
+      // Built-ins read their inner groups by position across all alternatives.
+      const inner: Array<string | undefined> = [];
+      type.sources.forEach((src, j) => {
+        const n = groupCount(src);
+        for (let q = 0; q < n; q++) inner.push(j === k ? m[q + 1] : undefined);
+      });
+      return type.transform(world, value, inner);
+    }
+    return type.transform(world, value, m.slice(1).filter((x) => x !== undefined));
+  }
+  // The value does not fit the type's own pattern (a looser group): the whole text.
+  return type.transform(world, value, []);
 }
 
 /** Compile a step pattern (an expression string or a RegExp). */
 export function stepExpression(pattern: string | RegExp, reg: ParameterTypeRegistry): StepExpression {
-  if (pattern instanceof RegExp) return new RegexpExpression(pattern);
+  if (pattern instanceof RegExp) return new RegexpExpression(pattern, reg);
   if (typeof pattern !== 'string' || !pattern.trim()) throw new EzTestError('A step definition needs a pattern: an expression string or a RegExp', 'BAD_STEP_EXPRESSION');
   return new CompiledExpression(pattern, reg);
 }

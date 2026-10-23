@@ -16,3 +16,7 @@ Feature: Problems are reported
 
   Scenario: A step definition that throws
     Given the step throws "business rule violated"
+
+  @broken-setup
+  Scenario: A BeforeAll that fails
+    Given the shop is open

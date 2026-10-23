@@ -27,6 +27,12 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
   - Results has a Features tab grouping a run by feature and rule.
   - New route: `GET /api/bdd/definitions`.
 - **Example project:** [examples/bdd-project](examples/bdd-project).
+- **BeforeAll / AfterAll hooks.** They run once per run, before and after the scenarios they apply to (tag-filtered), as hook journeys with the full SDK, evidence and a result. Every worker of the run shares them; with `--shard` they run once per shard. Values a BeforeAll sets on `ctx.shared` (or returns) are copied into the Worlds of its scenarios. A failed BeforeAll fails those scenarios without running them.
+- **Typed regex groups.** A regex definition's top-level groups are converted: named after a parameter type (`(?<int>\d+)`, `(?<money>...)`), or with a type's own pattern (`(\d+)`, a custom type's regexp). Other groups stay strings.
+- **Quieter results.** An After hook that passed without SDK calls or attachments is no longer listed; `attach()` evidence belongs to the step or hook that made it.
+- **Heals of Gherkin steps.** Heal proposals in the HTML/JSON/JUnit reports now include nested steps (code journey `step()` groups, Gherkin steps with step hooks or form tables), as `heal-proposals.json` and Quality > Heal review already did. Accepting the heal of a step that ran as an EZTest phrasing writes it to `<file>.feature.locators.json`, which later runs apply first. A heal inside TypeScript gets a message naming the line to change.
+- **Native apps:** `@platform:android|ios`, `@app:`, `@capability:` and `@browser:` tags; a scenario runs on the mobile executor.
+- **Scenarios as sub-journeys:** `Run journey "<scenario id>"` runs a Gherkin scenario with its bindings and hooks (it used to fail on its first step).
 
 ### Shared test data across journeys, suites, runs and pipeline stages
 
@@ -48,6 +54,9 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 - **Azure templates:** `schedules:` (nightly and weekly) in the multi-stage example, a run-after-deployment deployment job (`deploymentEnvironment`) and a `pipeline` parameter in `eztest-stage.yml` / `eztest-steps.yml`, and release-gate guidance ([docs/azure-devops.md](docs/azure-devops.md#deployments-and-release-gates)).
 
 ### Fixed
+
+- **Closing a browser no longer keeps the process alive for seconds.** The grace timers of the Chromium, Firefox and Electron kill sequence were not cleared when the browser exited first; a CLI run or a test worker then waited up to 5 s (seen as an open Timeout handle).
+- **Environment variables that are not settings no longer degrade `doctor` or other output.** `EZTEST_*` variables that name no configuration key (`EZTEST_ADO_ORG_URL` instead of `EZTEST_ADO__ORG_URL`) are reported apart from the config's warnings (`LoadedConfig.envWarnings`), on stderr only, and leave `doctor`'s config check `ok`. `doctor --json` writes every warning to stderr and keeps the JSON report clean (config warnings are counted in it). `EZTEST_ADO_PAT` and `EZTEST_ADO_PLAN` are EZTest's own variables and not read as settings.
 
 - Recording in Studio or with `eztest record` in a project without a `baseUrl` now writes the recorded site as the journey's `Base URL:`, so the recorded journey replays. Before, its relative URLs failed with "needs a baseUrl". When the project's `baseUrl` already points at the recorded site, nothing is written and environments can still be switched.
 - Studio's left bar is wider and its labels wrap, so names such as "Workbench" and "Performance" are no longer cut off (seen with Windows fonts).

@@ -71,7 +71,7 @@ export function featureIdBase(file: string, cwd: string): string {
   return slugify(rel.replace(/\//g, '-')) || 'feature';
 }
 
-const META_TAG = /^@(id|req|requirement|risk|role):(.+)$/i;
+const META_TAG = /^@(id|req|requirement|risk|role|platform|app|browser|capability):(.+)$/i;
 
 function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: string[], ids: Map<string, number>, rowNo: number | undefined): Journey {
   // `@id:` only sets the journey id; the other meta tags (@req:, @risk:, @role:) stay tags as well.
@@ -107,6 +107,16 @@ function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: s
   });
   const risk = Number(metaOf('risk').at(-1));
   const role = metaOf('role').at(-1);
+  // Native apps and browsers: @platform:android|ios, @app:<package or bundle id>, @browser:firefox (several: the browsers the scenario runs on), @capability:key=value.
+  const platform = metaOf('platform').at(-1)?.toLowerCase();
+  if (platform && !['web', 'android', 'ios'].includes(platform)) throw new EzTestError(`@platform:${platform}: expected web, android or ios`, 'BAD_TAG');
+  const app = metaOf('app').at(-1);
+  const browsers = [...new Set(metaOf('browser'))];
+  const capabilities = Object.fromEntries(metaOf('capability').map((c) => {
+    const i = c.indexOf('=');
+    const v = i < 0 ? 'true' : c.slice(i + 1);
+    return [i < 0 ? c : c.slice(0, i), v === 'true' ? true : v === 'false' ? false : /^-?\d+(?:\.\d+)?$/.test(v) ? Number(v) : v];
+  }));
   const input: JourneyInput = {
     id,
     name: named,
@@ -115,6 +125,10 @@ function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: s
     requirements: [...metaOf('req'), ...metaOf('requirement')],
     ...(Number.isInteger(risk) && risk >= 1 && risk <= 5 ? { risk } : {}),
     ...(role ? { role } : {}),
+    ...(platform ? { platform: platform as JourneyInput['platform'] } : {}),
+    ...(app ? { app } : {}),
+    ...(browsers.length ? { browsers } : {}),
+    ...(Object.keys(capabilities).length ? { capabilities } : {}),
     variables: values ?? {},
     ...(p.examples?.source ? { examplesFrom: p.examples.source } : {}),
     code: { file, name: p.name, line: p.examples?.row?.line ?? p.scenario.line },

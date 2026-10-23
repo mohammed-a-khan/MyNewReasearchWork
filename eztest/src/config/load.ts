@@ -43,8 +43,14 @@ export interface LoadConfigOptions {
 
 export interface LoadedConfig {
   config: EzTestConfig;
-  /** Unknown keys and other non-fatal findings. */
+  /** Unknown keys and other non-fatal findings of the configuration files. */
   warnings: string[];
+  /**
+   * EZTEST_* environment variables (and .env entries) that name no configuration key: ignored.
+   * Kept apart from `warnings` because the environment is not the project's configuration
+   * (a CI agent may set variables for other tools); commands print them on stderr only.
+   */
+  envWarnings?: string[];
   /** Files and layers that contributed, in precedence order. */
   sources: string[];
   env?: string;
@@ -192,15 +198,15 @@ function parseJsonEnv(v: string, name: string): unknown {
 /** Values under keys like these are registered with the masker even when they were not encrypted. */
 const SENSITIVE_KEY = /(password|passwd|secret|token|apikey|api_key|pat|credential|connectionstring)$/i;
 
-const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG', 'EZTEST_PROJECT', 'EZTEST_CODE_LOADER']);
+const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG', 'EZTEST_PROJECT', 'EZTEST_CODE_LOADER', 'EZTEST_ADO_PAT', 'EZTEST_ADO_PLAN']);
 /**
  * Live-database test switches (docs/databases.md), results-server and shard variables, and the
  * browser driver's own variables (docs/browser-driver.md): not config keys.
  */
 const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT)_|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
 
-/** Turn EZTEST_* variables into a config object (EZTEST_AI__MODEL -> ai.model). */
-export function envToConfig(vars: Record<string, string | undefined>): Obj {
+/** Turn EZTEST_* variables into a config object (EZTEST_AI__MODEL -> ai.model). `origin` records key path -> variable name. */
+export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
   let out: Obj = {};
   for (const [name, value] of Object.entries(vars)) {
     if (!name.startsWith('EZTEST_') || value === undefined || RESERVED_ENV.has(name) || RESERVED_ENV_PREFIX.test(name)) continue;
@@ -209,6 +215,7 @@ export function envToConfig(vars: Record<string, string | undefined>): Obj {
     const { schema, keys } = schemaAt(EzTestConfigSchema, parts);
     let node: unknown = coerceEnv(value, schema, name);
     for (let i = keys.length - 1; i >= 0; i--) node = { [keys[i]]: node };
+    origin?.set(keys.join('.'), name);
     out = deepMerge(out, node as Obj);
   }
   return out;
@@ -387,10 +394,11 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
       throw new ConfigError(`.env file not found: ${p}`);
     }
   }
-  raw = deepMerge(raw, envToConfig(dotenvVars));
+  const envOrigin = new Map<string, string>();
+  raw = deepMerge(raw, envToConfig(dotenvVars, envOrigin));
 
   // 6. real EZTEST_* variables
-  const fromEnv = envToConfig(processEnv);
+  const fromEnv = envToConfig(processEnv, envOrigin);
   if (Object.keys(fromEnv).length) {
     raw = deepMerge(raw, fromEnv);
     sources.push('environment');
@@ -457,6 +465,15 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
   (processed as Obj).vars = finalVars;
   if (rawProjects !== undefined) (processed as Obj).projects = rawProjects;
 
-  const { config, warnings } = validateConfig(processed);
-  return { config, warnings, sources, env, project, masker, variables };
+  const { config, warnings: all } = validateConfig(processed);
+  // Unknown keys that only an environment variable introduced are the environment's, not the config's.
+  const warnings: string[] = [];
+  const envWarnings: string[] = [];
+  for (const w of all) {
+    const m = /^Unknown configuration key "([^"]+)" \(ignored\)$/.exec(w);
+    const name = m ? envOrigin.get(m[1]) ?? [...envOrigin].find(([p]) => p.startsWith(`${m[1]}.`))?.[1] : undefined;
+    if (name) envWarnings.push(`environment variable ${name} is not an EZTest setting (ignored; nested settings use "__", e.g. EZTEST_ADO__ORG_URL for ado.orgUrl)`);
+    else warnings.push(w);
+  }
+  return { config, warnings, envWarnings, sources, env, project, masker, variables };
 }

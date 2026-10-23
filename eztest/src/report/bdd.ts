@@ -103,7 +103,7 @@ function scenarioEntry(j: JourneyResult): BddScenarioEntry {
     attempt: j.attempt, ...(j.browser ? { browser: j.browser } : {}), tags: j.tags, ...(b.examples ? { examples: b.examples } : {}),
     // Results that never ran (cancelled, no rows) have the journey's steps without Gherkin records.
     steps: steps.length ? steps.map(stepEntry) : j.steps.map((s) => ({ keyword: '', text: s.intent, line: 0, status: s.status, durationMs: s.durationMs })),
-    hookFailures: j.steps.filter((s) => (s.gherkin?.kind === 'before' || s.gherkin?.kind === 'after') && s.status === 'failed').map((s) => `${s.intent}: ${s.error?.message ?? 'failed'}`),
+    hookFailures: j.steps.filter((s) => (s.gherkin && s.gherkin.kind !== 'step') && s.status === 'failed').map((s) => `${s.intent}: ${s.error?.message ?? 'failed'}`),
   };
 }
 

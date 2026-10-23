@@ -164,6 +164,7 @@ describe('Studio: Gherkin features', { timeout: 180_000 }, () => {
       if (!run) await new Promise((x) => setTimeout(x, 300));
     }
     expect(run.journeys.map((j: any) => [j.journeyId, j.status]).sort()).toEqual([
+      ['bdd-after-all--report-shared-values', 'passed'], ['bdd-before-all--price-list', 'passed'],
       ['problems--an-undefined-step', 'failed'], ['quotes--quote-for-a-gadget', 'passed'], ['quotes--quote-from-a-json-request', 'passed'],
     ]);
     await page.goto(`${studio.origin}/#/runs/${r.json.id}`);

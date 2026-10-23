@@ -38,6 +38,8 @@ import { describeTarget } from '../intent/target.js';
 import { locatorKey } from './decisions.js';
 
 export type HealRewriteMethod = 'ez-phrase' | 'ez-sidecar' | 'yaml-phrase' | 'yaml-target' | 'json-phrase' | 'json-target'
+  /** A Gherkin step that ran as an EZTest phrasing: the locator goes to the feature's sidecar (the .feature text is unchanged). */
+  | 'feature-sidecar'
   /** The step used a shared repository element: the element's entry in elements/*.yaml is rewritten (src/elements/heal.ts). */
   | 'element-yaml' | 'element-json' | 'element-override';
 
@@ -308,7 +310,48 @@ export async function planHealRewrite(i: PlanInput): Promise<HealRewritePlan> {
   if (lower.endsWith('.ez')) return planEz(i, now);
   if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return planStructured(i, 'yaml', now);
   if (lower.endsWith('.json')) return planStructured(i, 'json', now);
+  if (lower.endsWith('.feature')) return planFeature(i, now);
+  if (/\.(?:m?ts|m?js)$/.test(lower)) throw new Error(codeHealMessage(i.stepId, basename(i.file)));
   throw new Error(`Cannot rewrite ${basename(i.file)}: not a journey file`);
+}
+
+/** Why a heal inside code (a code journey, or a step definition of a feature) is not rewritten here. */
+function codeHealMessage(stepId: string, file: string): string {
+  const m = /^(?:(.+)-)?L(\d+)(?:-\d+)?$/.exec(stepId);
+  const where = m ? `${m[1] ? `the code at ${m[1]} line ${m[2]}` : `${file} line ${m[2]}`}` : 'the code';
+  return `This heal is of a locator written in TypeScript (${where}): change it there. Until then the verified heal is replayed from the cache.`;
+}
+
+/**
+ * A Gherkin step that ran as an EZTest phrasing (`L<line>`, or `L<line>-<n>` for the n-th step of a
+ * form table or a step wrapped by step hooks): the healed locator goes to `<file>.feature.locators.json`,
+ * which the scenario runner applies to that step. Heals inside step definitions live in code.
+ */
+async function planFeature(i: PlanInput, now: string): Promise<HealRewritePlan> {
+  const m = /^L(\d+)(?:-(\d+))?$/.exec(i.stepId);
+  if (!m) throw new Error(codeHealMessage(i.stepId, basename(i.file)));
+  const { featureJourneys } = await import('../bdd/load.js');
+  const { ezFallback } = await import('../bdd/fallback.js');
+  const journey = featureJourneys(i.text, i.file).find((j) => j.id === i.journeyId || i.journeyId.startsWith(`${j.id}-`) || j.id.startsWith(i.journeyId));
+  if (!journey) throw new Error(`${i.displayPath} holds no scenario "${i.journeyId}"`);
+  const gs = journey.steps.find((s) => s.id === `L${m[1]}` || s.source?.line === Number(m[1]));
+  if (!gs) throw new Error(`Line ${m[1]} of ${i.displayPath} is not a step of "${journey.name}"`);
+  const a = (gs.args ?? {}) as { type?: 'context' | 'action' | 'outcome'; docString?: { content: string }; dataTable?: string[][] };
+  const fb = ezFallback({ text: gs.value ?? '', type: a.type ?? 'action', ...(a.docString ? { docString: a.docString } : {}), ...(a.dataTable ? { dataTable: a.dataTable } : {}) });
+  const inner = fb?.steps[m[2] ? Number(m[2]) - 1 : 0];
+  if (!fb || !inner) throw new Error(`${i.stepId} of ${i.displayPath} runs a step definition: its locators live in the step definition code`);
+  const description = typeof inner.target === 'object' && inner.target ? (inner.target as { description?: string }).description : undefined;
+  const sp = sidecarPath(i.file);
+  const side = await readSidecar(sp);
+  const step = { id: i.stepId, target: description ? { description, locators: [] } : undefined } as unknown as Step;
+  return {
+    journeyId: i.journeyId,
+    stepId: i.stepId,
+    method: 'feature-sidecar',
+    summary: `Add the healed locator to ${basename(sp)} for line ${m[1]} ("${gs.intent}"); the feature text is unchanged`,
+    changes: [sidecarChange(sidecarPath(i.displayPath), side, step, i.healed, now)],
+    notes: ['every scenario and Examples row that runs this line uses the accepted locator first'],
+  };
 }
 
 async function planEz(i: PlanInput, now: string): Promise<HealRewritePlan> {
