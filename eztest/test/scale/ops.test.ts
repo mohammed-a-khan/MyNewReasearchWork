@@ -123,6 +123,22 @@ describe('doctor --json', () => {
     expect(report).toMatchObject({ ok: true, configVersion: 1, pluginApiVersion: 1, checks: [{ name: 'node', status: 'ok' }, { name: 'config', status: 'ok' }] });
     expect(r.code).toBe(0);
   });
+
+  it('keeps warnings out of the JSON: unrelated EZTEST_* variables go to stderr and leave the config check ok', async () => {
+    const dir = await tempDir('doctor-env');
+    await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\n');
+    const r = await cli(dir, ['doctor', '--json', '--no-browser'], { EZTEST_ADO_ORG_URL: 'https://dev.azure.com/acme', EZTEST_ADO_PROJECT: undefined, EZTEST_ADO_PAT: 'pat' });
+    const report = JSON.parse(r.out.join('\n'));
+    expect(report.checks.find((c: { name: string }) => c.name === 'config')).toMatchObject({ status: 'ok' });
+    expect(JSON.stringify(report)).not.toMatch(/warning|EZTEST_ADO/);
+    expect(r.err).toEqual([expect.stringMatching(/^warning: environment variable EZTEST_ADO_ORG_URL is not an EZTest setting .*EZTEST_ADO__ORG_URL/)]);
+    // A config file's own unknown key still makes the check "warn" (text on stderr, a count in the JSON).
+    await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\nmystery: 1\n');
+    const w = await cli(dir, ['doctor', '--json', '--no-browser']);
+    const report2 = JSON.parse(w.out.join('\n'));
+    expect(report2.checks.find((c: { name: string }) => c.name === 'config')).toMatchObject({ status: 'warn', warnings: 1 });
+    expect(w.err.join('\n')).toMatch(/Unknown configuration key "mystery"/);
+  });
 });
 
 describe('CLI at scale (real Chromium, demo app)', () => {

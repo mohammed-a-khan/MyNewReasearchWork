@@ -203,7 +203,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const log = json ? createJsonLogger({ level: 'info', mask: (t) => loaded.masker.mask(t), base: { service: 'eztest' }, out: io.out }) : undefined;
       const out = (s: string) => (log ? log.info(s.trim()) : io.out(s));
       const warn = (s: string) => (log ? log.warn(s) : io.err(`warning: ${s}`));
-      for (const w of loaded.warnings) warn(w);
+      for (const w of [...loaded.warnings, ...(loaded.envWarnings ?? [])]) warn(w);
       const cfg = loaded.config;
       if (cfg.webServer && !web) web = await startWebServer(cfg.webServer, { cwd: io.cwd, log: out });
       const addons = await enableAddons(loaded, { cwd: io.cwd });
