@@ -4,6 +4,7 @@
  * Studio. Journeys that are not Gherkin scenarios are not part of it.
  */
 import type { JourneyResult, JourneyStatus, RunResult, StepResult, StepStatus } from '../core/index.js';
+import { escapeHtml as e } from './escape.js';
 
 export interface BddStepEntry {
   keyword: string;
@@ -144,4 +145,17 @@ export function bddHierarchy(run: RunResult): BddReport | undefined {
     features: out,
     totals: { features: out.length, rules: out.reduce((n, f) => n + f.rules.length, 0), scenarios: scenarios.length, steps: scenarios.reduce((n, s) => n + s.steps.length, 0), ...count(scenarios) },
   };
+}
+
+/** A compact feature / rule table (counts only), for reports too large to list every step. */
+export function bddSummaryHtml(run: RunResult): string {
+  const h = bddHierarchy(run);
+  if (!h) return '';
+  const row = (name: string, file: string, status: JourneyStatus, c: BddCounts, depth: number) =>
+    `<tr><td${depth ? ' style="padding-left:1.5rem"' : ''}>${e(name)}</td><td><code>${e(file)}</code></td><td>${e(status)}</td><td>${e(c.passed + c.passedHealed)}</td><td>${e(c.failed + c.errors)}</td><td>${e(c.skipped)}</td></tr>`;
+  const rows = h.features.flatMap((f) => [
+    row(f.name || f.file, f.file, f.status, f.counts, 0),
+    ...f.rules.map((r) => row(`Rule: ${r.name}`, `${f.file}:${r.line}`, r.status, count(r.scenarios), 1)),
+  ]);
+  return `<section aria-labelledby="bdd-h"><h2 id="bdd-h">Features</h2><table class="static"><caption>${e(h.totals.features)} feature(s), ${e(h.totals.scenarios)} scenario(s); every scenario is in the list below and in report.json (bdd)</caption><thead><tr><th scope="col">Feature / rule</th><th scope="col">File</th><th scope="col">Status</th><th scope="col">Passed</th><th scope="col">Failed</th><th scope="col">Skipped</th></tr></thead><tbody>${rows.join('')}</tbody></table></section>`;
 }

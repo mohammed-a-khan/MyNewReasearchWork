@@ -18,6 +18,7 @@
 import { relative, sep } from 'node:path';
 import { nowIso, type GherkinStepRecord, type Journey, type JourneyBddRecord, type Step, type StepResult } from '../core/index.js';
 import { DataTable } from '../bdd/datatable.js';
+import { ParameterTypeRegistry } from '../bdd/expressions.js';
 import { ezFallback } from '../bdd/fallback.js';
 import { loadGlue } from '../bdd/load.js';
 import { hooksFor, matchStep, type BddContext, type Glue, type HookDefinition, type HookResult, type ScenarioInfo, type StepInfo } from '../bdd/registry.js';
@@ -93,7 +94,7 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
   try {
     glue = await loadGlue(b.glue, { cwd: baseDir });
   } catch (e) {
-    glue = { steps: [], hooks: [], params: undefined as unknown as Glue['params'], errors: [(e as Error).message] };
+    glue = { steps: [], hooks: [], params: new ParameterTypeRegistry(), errors: [(e as Error).message] };
   }
   if (glue.errors.length) {
     const message = `Step definitions could not be loaded: ${glue.errors.join('; ')}`;

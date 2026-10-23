@@ -17,6 +17,7 @@
 import type { EvidenceRef, JourneyResult, RunResult, StepResult } from '../core/index.js';
 import type { ReportInsights } from '../report/model.js';
 import { escapeHtml as e, safeRelativeUrl } from '../report/escape.js';
+import { bddSummaryHtml } from '../report/bdd.js';
 
 /** Runs with more journeys than this get the large-run report (EZTEST_REPORT_LARGE_THRESHOLD overrides). */
 export const LARGE_REPORT_THRESHOLD = 1000;
@@ -110,6 +111,7 @@ export function renderLargeHtmlReport(run: RunResult, opts: ReportInsights & { t
 <main>${readiness}
 <section aria-labelledby="tr-h"><h2 id="tr-h">Triage</h2>${byCategory.size ? `<ul class="cats">${[...byCategory].sort((a, b) => b[1] - a[1]).map(([c, n]) => `<li><strong>${e(n)}</strong> ${e(c)}</li>`).join('')}</ul>` : '<p>No failures to triage.</p>'}
 ${failTable}</section>
+${bddSummaryHtml(run)}
 <section aria-labelledby="ov-h"><h2 id="ov-h">Heals and evidence</h2><p>${e(heals)} healed step(s) (see heal-proposals.json). ${e((opts.evidence ?? []).length)} evidence artifacts${run.evidenceHead ? `, manifest head <code>${e(run.evidenceHead.slice(0, 16))}</code>` : ''}: ${[...evidenceKinds].map(([k, n]) => `${e(n)} ${e(k)}`).join(', ')}.</p></section>
 <section aria-labelledby="list-h" class="interactive"><h2 id="list-h">Journeys</h2>
 <noscript><p>The journey list needs JavaScript; the failures above and report.json have the details.</p></noscript>
