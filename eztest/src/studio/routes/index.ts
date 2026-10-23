@@ -21,6 +21,7 @@ import { qualityTraceabilityRoutes } from './quality-traceability.js';
 import { qualityTriageRoutes } from './quality-triage.js';
 import { qualityTrendRoutes } from './quality-trends.js';
 import { qualityCoverageRoutes } from './quality-coverage.js';
+import { qualityDeploymentRoutes } from './quality-deployments.js';
 import { manualRoutes } from './manual.js';
 import { scmRoutes } from './scm.js';
 import { pluginRoutes } from './plugins.js';
@@ -50,6 +51,7 @@ export function coreRoutes(token: string): StudioRoute[] {
     ...qualityTrendRoutes,
     // Coverage analytics (UI coverage map, combined coverage, trends) and test management (manual / hybrid).
     ...qualityCoverageRoutes,
+    ...qualityDeploymentRoutes,
     ...manualRoutes,
     ...assuranceRoutes(),
     // Source Control (git status, diffs, commits, branches, blame, conflicts, PR proposals).

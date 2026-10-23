@@ -20,6 +20,7 @@ import { registerTraceabilityPage } from './traceability.js';
 import { registerTriageBoard } from './triage.js';
 import { registerTrendsPage } from './trends.js';
 import { registerCoveragePage } from './coverage.js';
+import { registerDeploymentsPage } from './deployments.js';
 
 const go = (...seg: string[]) => () => navigate(link('quality', ...seg));
 
@@ -32,6 +33,7 @@ export function registerQualityCenter(): void {
   registerComparePage();
   registerTrendsPage();
   registerCoveragePage();
+  registerDeploymentsPage();
 
   const cmd = (id: string, title: string, run: () => void, keywords: string[] = [], ic: Parameters<typeof icon>[0] = 'shield') => registerCommand({ id: `quality.${id}`, title, group: 'Quality', icon: ic, keywords, run });
   cmd('heals', 'Review heals', go('heals'), ['heal', 'inbox', 'locator', 'accept', 'reject'], 'heal');
@@ -42,6 +44,7 @@ export function registerQualityCenter(): void {
   cmd('compare', 'Compare two runs', go('compare'), ['diff', 'regression'], 'convert');
   cmd('trends', 'Quality trends and analytics', go('trends'), ['pass rate', 'heal rate', 'duration'], 'insights');
   cmd('coverage', 'Coverage: UI map, requirements, API, risk, change', go('coverage'), ['ui coverage', 'untested', 'heat map', 'accessibility trend'], 'target');
+  cmd('deployments', 'Deployments: what was tested where, per version', go('deployments'), ['environment', 'release', 'pipeline', 'version'], 'target');
 
   // Run detail: a "Quality" tab linking the run into every Quality Center view.
   registerRunDetailTab({
