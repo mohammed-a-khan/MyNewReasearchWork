@@ -204,6 +204,7 @@ variables:
 
 stages:
   - stage: Smoke
+    dependsOn: []
     condition: eq(variables['Build.Reason'], 'PullRequest')
     jobs:
       - job: smoke
@@ -235,6 +236,7 @@ stages:
             env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
 
   - stage: Regression
+    dependsOn: []
     condition: eq(variables['Build.Reason'], 'Schedule')
     jobs:
       - job: plan
@@ -285,6 +287,7 @@ stages:
             condition: succeededOrFailed()
 
   - stage: DeploySIT
+    dependsOn: []
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'Schedule'))
     jobs:
       - deployment: deploy
