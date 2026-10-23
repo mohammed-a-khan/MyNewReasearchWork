@@ -4,6 +4,11 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Recording in Studio or with `eztest record` in a project without a `baseUrl` now writes the recorded site as the journey's `Base URL:`, so the recorded journey replays. Before, its relative URLs failed with "needs a baseUrl". When the project's `baseUrl` already points at the recorded site, nothing is written and environments can still be switched.
+- Studio's left bar is wider and its labels wrap, so names such as "Workbench" and "Performance" are no longer cut off (seen with Windows fonts).
+
 ### EZTest's own test runner replaces Vitest
 
 - **EZTest's own tests now run on EZTest's testkit** (`tools/testkit`, development-only and not shipped): `describe` / `it` with `.skip`, `.only`, `.todo`, `.each`, `.skipIf` / `.runIf`, hooks with timeouts (and teardown functions returned from `beforeAll` / `beforeEach`), `ctx.skip()`, retries, `expect` with every matcher the suite uses, `.not` / `.resolves` / `.rejects`, `expect.poll`, `expect.soft`, asymmetric matchers, readable object and string diffs, and `vi.fn` / `vi.spyOn`. Its runner compiles TypeScript with esbuild through a Node module hook, runs each test file in its own worker process (fresh module graph; `--workers`, default CPUs - 1), applies per-test, per-hook and per-describe timeouts, kills stuck workers, reports open handles, and prints the same summary (Test Files / Tests, FAIL list with file > suite > test, error, diff and source frame). Reporters: default, verbose, dot and JUnit (for Azure DevOps).

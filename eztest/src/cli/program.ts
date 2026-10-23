@@ -616,9 +616,11 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--var <k=v...>', 'values for recorded variables (e.g. password=...) used by --verify')
     .action(async (url: string, o) => {
       io.out('Recording... use the app; Alt+Click an element to assert its text. Close the browser to finish.');
+      const project = await load(o).then((c) => ({ baseUrl: c.config.baseUrl })).catch(() => ({}));
       const result = await recordJourney({
         url,
         baseUrl: o.baseUrl,
+        project,
         browser: o.browser,
         headless: !!o.headless,
         name: o.name,

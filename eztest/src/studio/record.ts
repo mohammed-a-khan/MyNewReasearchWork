@@ -32,7 +32,7 @@ export class RecordManager {
   private counter = 0;
 
   constructor(
-    private readonly defaults: { headless?: boolean } = {},
+    private readonly defaults: { headless?: boolean; project?: () => Promise<{ baseUrl?: string }> } = {},
     private readonly hub?: EventHub,
   ) {}
 
@@ -79,6 +79,7 @@ export class RecordManager {
       this.recorder = await startRecording({
         url: u.toString(),
         headless: req.headless ?? this.defaults.headless ?? false,
+        project: await this.defaults.project?.().catch(() => ({})),
         browser: req.browser,
         name: req.name ? String(req.name) : undefined,
         tags,

@@ -17,8 +17,14 @@ export interface RecorderOptions {
   browser?: 'chromium' | 'firefox' | 'webkit';
   /** Default false: recording is normally interactive. */
   headless?: boolean;
-  /** Origin recorded URLs are made relative to; also written to the journey. Default: the origin of `url` (not written). */
+  /** Origin recorded URLs are made relative to; also written to the journey. Default: the origin of `url`. */
   baseUrl?: string;
+  /**
+   * The project the journey is recorded for (Studio, `eztest record`). Without `baseUrl`, the recording's
+   * origin is written to the journey (`Base URL:`) unless the project's baseUrl already points there, so a
+   * journey with relative URLs replays in a project that has no baseUrl. Not given: nothing is written.
+   */
+  project?: { baseUrl?: string };
   /** Record on an existing page (the caller owns its browser; it is not closed on stop). */
   page?: Page;
   /** Journey name (default "Recorded journey on <path>") and id (default: slug of the name). */
@@ -222,6 +228,16 @@ export class Recorder {
  * Start recording at `opts.url`. Without `opts.page` a browser is launched
  * (headed by default) and closed again by `stop()`.
  */
+/** The Base URL to write into a recorded journey: its origin, unless the project already points there. */
+export function journeyBaseUrl(origin: string, projectBaseUrl?: string): string | undefined {
+  if (!projectBaseUrl) return origin;
+  try {
+    return new URL(projectBaseUrl).origin === origin ? undefined : origin;
+  } catch {
+    return origin;
+  }
+}
+
 export async function startRecording(opts: RecorderOptions): Promise<Recorder> {
   let browser: Browser | undefined;
   let page: Page;
@@ -235,9 +251,10 @@ export async function startRecording(opts: RecorderOptions): Promise<Recorder> {
   const context = page.context();
   const base = opts.baseUrl ?? new URL(opts.url).origin;
   const startUrl = new URL(opts.url, base).toString();
+  const written = opts.baseUrl ?? (opts.project ? journeyBaseUrl(new URL(startUrl).origin, opts.project.baseUrl) : undefined);
   const composer = new JourneyComposer({
     startUrl,
-    ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+    ...(written ? { baseUrl: written } : {}),
     ...(opts.name ? { name: opts.name } : {}),
     ...(opts.id ? { id: opts.id } : {}),
     ...(opts.tags ? { tags: opts.tags } : {}),

@@ -52,7 +52,7 @@ export class StudioApp {
     this.ctx = { cwd: opts.cwd, env: opts.env, addons };
     this.manual = new ManualHub(this.hub);
     this.runs = new RunManager(this.ctx, this.hub, this.manual);
-    this.recorder = new RecordManager({ headless: opts.recordHeadless }, this.hub);
+    this.recorder = new RecordManager({ headless: opts.recordHeadless, project: async () => ({ baseUrl: (await this.config()).config.baseUrl }) }, this.hub);
   }
 
   /** True when the request carries the session token (the cookie counts only for reads). */

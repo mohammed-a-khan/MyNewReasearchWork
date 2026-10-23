@@ -137,3 +137,25 @@ describe('recording inside frames and stopping on close', () => {
     await page.close();
   });
 });
+
+describe('recording for a project', () => {
+  async function record(project: { baseUrl?: string }): Promise<RecordingResult> {
+    const page = await browser.newPage();
+    const rec = await startRecording({ url: `${base}/saved`, page, name: 'Saved page', project });
+    const result = await rec.stop();
+    await page.close();
+    return result;
+  }
+
+  it('writes the recorded site as the Base URL when the project has none, so the journey replays', async () => {
+    const result = await record({});
+    expect(result.ez.split('\n')).toContain(`Base URL: ${base}`);
+    const replay = await verifyRecording(result, { headless: true });
+    expect(replay.passed).toBe(true);
+  });
+
+  it('leaves it out when the project baseUrl is the recorded site, so environments can still switch', async () => {
+    const result = await record({ baseUrl: `${base}/` });
+    expect(result.ez).not.toMatch(/^Base URL:/m);
+  });
+});
