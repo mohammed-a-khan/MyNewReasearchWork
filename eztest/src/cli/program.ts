@@ -217,7 +217,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const client = await serverClientFor(loaded, io.cwd);
       await pullSharedState(loaded, io.cwd, client, warn, out);
 
-      const { journeys: all, errors } = await loadJourneys(paths.length ? paths : [cfg.journeysDir], io.cwd);
+      const { journeys: all, errors } = await loadJourneys(paths.length ? paths : pipe?.resolution.entry.journeys?.length ? pipe.resolution.entry.journeys : [cfg.journeysDir], io.cwd);
       for (const e of errors) io.err(`error: ${e.file}: ${e.message}`);
       if (errors.length) {
         plugins.off();

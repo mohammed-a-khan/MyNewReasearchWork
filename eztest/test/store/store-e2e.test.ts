@@ -8,7 +8,7 @@
  * projects on disk) with RBAC and the audit log.
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as toYaml } from 'yaml';
@@ -16,6 +16,7 @@ import { loadConfig } from '../../src/config/index.js';
 import { flattenStepResults, type JourneyResult, type RunResult } from '../../src/core/index.js';
 import { createEngine } from '../../src/engine/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
+import { loadCodeJourneys } from '../../src/runner/code-journeys.js';
 import { ResultsClient } from '../../src/server/index.js';
 import { FileStoreBackend, ServerStoreBackend, SharedStore } from '../../src/store/index.js';
 import { startTestServer, type TestServer } from '../server/helpers.js';
@@ -110,6 +111,40 @@ describe('shared store through the engine (file backend)', () => {
     expect(await readFile(join(dir, '.eztest', 'store', 'sit', 'values.json'), 'utf8')).not.toContain('tok-E2E-secret-77');
     expect(out).toEqual(['##vso[task.setvariable variable=api_token;isOutput=true;issecret=true]tok-E2E-secret-77']);
     expect(await readFile(join(runDir, 'store-export.json'), 'utf8')).not.toContain('tok-E2E-secret-77');
+  }, 120_000);
+});
+
+describe('shared store from code journeys (SDK)', () => {
+  it('store.save, store.load, store.claim and store.add run as steps', async () => {
+    const dir = await project();
+    await mkdir(join(dir, 'journeys'), { recursive: true });
+    const sdkUrl = new URL('../../src/sdk/index.ts', import.meta.url).href;
+    await writeFile(join(dir, 'journeys', 'store.journey.mjs'), `import { journey, store, expect } from ${JSON.stringify(sdkUrl)};
+journey('Uses the store from code', async () => {
+  await store.add('accounts', { user: 'a1' }, { user: 'a2' });
+  const acc = await store.claim('accounts');
+  await store.save('claimed-account', acc, { ttl: '1 day', namespace: 'sit' });
+  const again = await store.load('claimed-account');
+  expect(again).toEqual(acc);
+  expect(await store.load('nope', { default: 'dflt' })).toBe('dflt');
+  expect(await store.available('accounts')).toBe(1);
+  await store.delete('claimed-account');
+});
+`);
+    const journeys = await loadCodeJourneys(join(dir, 'journeys', 'store.journey.mjs'), { cwd: dir });
+    const engine = await createEngine(await loadConfig({ cwd: dir, environment: {} }), { cwd: dir, runOptions: { screenshots: 'off' } });
+    let r: RunResult;
+    try {
+      r = await engine.run(journeys);
+    } finally {
+      await engine.close();
+    }
+    expect(steps(r.journeys[0])).not.toMatch(/failed/);
+    expect(r.journeys[0].status).toBe('passed');
+    expect(flattenStepResults(r.journeys[0].steps).map(({ result: x }) => x.intent)).toEqual(expect.arrayContaining(['Take one item from pool "accounts"', 'Load "claimed-account" from the shared store']));
+    const s = new SharedStore({ backend: new FileStoreBackend(join(dir, '.eztest', 'store')), namespace: 'sit', env: {} });
+    // The journey passed: its claimed account is consumed, the other stays.
+    expect((await s.backend.poolItems('sit', 'accounts')).map((i) => i.value)).toHaveLength(1);
   }, 120_000);
 });
 
