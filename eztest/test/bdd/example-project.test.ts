@@ -53,7 +53,7 @@ describe('examples/bdd-project', () => {
     for (const j of run.journeys) expect(j.status, `${j.journeyId}\n${tree(j.steps)}`).toBe('passed');
     expect(r.exitCode).toBe(0);
     const form = run.journeys.find((j) => j.journeyId === 'sign-in--sign-in-with-the-form')!;
-    expect(form.steps.map((s) => s.gherkin?.match)).toEqual(['ez', 'ez', 'ez', 'ez', 'ez', 'hook']);
+    expect(form.steps.map((s) => s.gherkin?.match)).toEqual(['ez', 'ez', 'ez', 'ez', 'ez']); // the After hook attaches only on failure: an empty one is not listed
     expect(form.steps[1].children!.map((c) => c.intent)).toEqual(['Type "bob" into the "Username" field', 'Type "Builder#2" into the "Password" field']);
 
     const smoke = await cli(project, ['run', '--tags', '@smoke and @orders']);

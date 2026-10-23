@@ -9,7 +9,7 @@
  * which is how Azure DevOps and other CI test tabs group them.
  */
 import type { JourneyResult, RunResult } from '../core/index.js';
-import { EzTestError, summarize } from '../core/index.js';
+import { EzTestError, flattenStepResults, summarize } from '../core/index.js';
 import { escapeXml as x } from './escape.js';
 import { formatLocator, type ReportInsights } from './model.js';
 
@@ -32,7 +32,7 @@ function testcase(j: JourneyResult, insights: ReportInsights): string {
   ];
   for (const t of j.tags) props.push(prop('eztest.tag', t));
   for (const r of j.requirements) props.push(prop('eztest.requirement', r));
-  const heals = j.steps.filter((s) => s.heal);
+  const heals = flattenStepResults(j.steps).map((x) => x.result).filter((s) => s.heal);
   if (heals.length) props.push(prop('eztest.healed', 'true'));
   for (const s of heals) {
     const h = s.heal!;

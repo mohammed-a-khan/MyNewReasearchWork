@@ -64,6 +64,7 @@ interface Preview {
 const METHOD_LABEL: Record<string, string> = {
   'ez-phrase': 'Rewrite the .ez target phrase',
   'ez-sidecar': 'Add a locator hint to the .ez sidecar file',
+  'feature-sidecar': 'Add a locator hint to the sidecar of the feature file (its text is unchanged)',
   'yaml-phrase': 'Rewrite the YAML step phrase',
   'yaml-target': 'Update the YAML step target',
   'json-phrase': 'Rewrite the JSON step phrase',

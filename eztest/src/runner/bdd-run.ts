@@ -16,7 +16,8 @@
  * failed step are skipped. Each scenario attempt gets a fresh World.
  */
 import { relative, sep } from 'node:path';
-import { nowIso, type GherkinStepRecord, type Journey, type JourneyBddRecord, type Step, type StepResult } from '../core/index.js';
+import { nowIso, type GherkinStepRecord, type Journey, type JourneyBddRecord, type LocatorCandidate, type Step, type StepInput, type StepResult } from '../core/index.js';
+import { loadLocatorSidecar } from '../heal/apply.js';
 import { DataTable } from '../bdd/datatable.js';
 import { ParameterTypeRegistry } from '../bdd/expressions.js';
 import { ezFallback } from '../bdd/fallback.js';
@@ -105,13 +106,34 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
     return { steps: res, status: 'failed', error: { message, name: 'StepDefinitionError' } };
   }
 
+  // Heals accepted in the Studio for EZTest phrasings of this feature (`<file>.locators.json`).
+  const sidecar = await loadLocatorSidecar(file).catch(() => undefined);
+  const withSidecar = (input: StepInput, id: string): StepInput => {
+    const hint = sidecar?.steps[id];
+    const t = input.target as { locators?: LocatorCandidate[] } | undefined;
+    if (!hint?.locators?.length || !t) return input;
+    const key = (l: LocatorCandidate) => `${l.strategy}\u0000${l.value}\u0000${l.name ?? ''}`;
+    return { ...input, target: { ...t, locators: [...hint.locators, ...(t.locators ?? []).filter((l) => !hint.locators.some((x) => key(x) === key(l)))] } as StepInput['target'] };
+  };
   const tags = journey.tags;
   const scenario: ScenarioInfo = {
     name: journey.name, tags: tags.map((t) => `@${t}`), feature: b.feature.name, ...(b.rule ? { rule: b.rule.name } : {}),
     uri: file, line: b.scenario.line, ...(Object.keys(journey.variables).length && b.examples ? { example: { ...journey.variables } } : {}),
   };
   const world: Record<string, unknown> = glue.world ? (new glue.world({ parameters: b.worldParameters ?? {} }) as Record<string, unknown>) : {};
-  const attach = (name: string, content: string | Uint8Array, description?: string) => h.host.evidence('data', name, content, description ?? `attachment ${name}`);
+  // attach() evidence belongs to the step or hook that made it.
+  let attachments: string[] = [];
+  const attach = async (name: string, content: string | Uint8Array, description?: string) => {
+    const id = await h.host.evidence('data', name, content, description ?? `attachment ${name}`);
+    attachments.push(id);
+    return id;
+  };
+  const takeAttachments = (r: StepResult | undefined): number => {
+    const n = attachments.length;
+    if (r && n) r.evidence = [...r.evidence, ...attachments];
+    attachments = [];
+    return n;
+  };
   const ctxFor = (extra: Partial<BddContext> = {}): BddContext => ({ ...sdk, world, scenario, attach, ...extra });
   const label = (hk: HookDefinition, kind: string) => `${kind} hook${hk.name ? `: ${hk.name}` : ''} (${rel(hk.file, baseDir)}:${hk.line})`;
   const scenarioResult = (): HookResult => {
@@ -121,6 +143,7 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
 
   const runHook = async (hk: HookDefinition, kind: 'before' | 'after'): Promise<StepResult | undefined> => {
     const before = h.results.length;
+    attachments = [];
     try {
       await h.group(label(hk, kind === 'before' ? 'Before' : 'After'), async () => {
         await hk.fn.call(world, { ...ctxFor(), ...(kind === 'after' ? { result: scenarioResult() } : {}) });
@@ -128,7 +151,14 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
     } catch {
       // recorded as the hook's failure
     }
-    return annotate(h, before, { kind, line: hk.line, match: 'hook', location: `${rel(hk.file, baseDir)}:${hk.line}` });
+    const r = annotate(h, before, { kind, line: hk.line, match: 'hook', location: `${rel(hk.file, baseDir)}:${hk.line}` });
+    const attached = takeAttachments(r);
+    // An After hook that passed without SDK calls, attachments or warnings did nothing to report: it is not listed.
+    if (kind === 'after' && r && r.status === 'passed' && !r.children?.length && !attached && !r.warnings?.length && h.results[h.results.length - 1] === r) {
+      h.results.pop();
+      return undefined;
+    }
+    return r;
   };
 
   const stepHooks = (kind: 'beforeStep' | 'afterStep') => hooksFor(glue, kind, tags);
@@ -196,13 +226,13 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
       const mark = { ...g, match: 'ez' as const, location: fb.rule };
       try {
         if (fb.steps.length === 1 && !beforeStep.length && !afterStep.length) {
-          await h.exec({ ...fb.steps[0], id: s.id, intent: s.intent }, source ? { source } : {});
+          await h.exec({ ...withSidecar(fb.steps[0], s.id), id: s.id, intent: s.intent }, source ? { source } : {});
         } else {
           await h.group(s.intent, async () => {
             await runStepHooks(beforeStep, ctx);
             let err: unknown;
             try {
-              for (let i = 0; i < fb.steps.length; i++) await h.exec({ ...fb.steps[i], id: `${s.id}-${i + 1}`, intent: fb.lines[i] }, source ? { source } : {});
+              for (let i = 0; i < fb.steps.length; i++) await h.exec({ ...withSidecar(fb.steps[i], `${s.id}-${i + 1}`), id: `${s.id}-${i + 1}`, intent: fb.lines[i] }, source ? { source } : {});
             } catch (e) {
               err = e;
             }
@@ -243,7 +273,9 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
         h.results.push({ ...skippedStep(s, blocked), gherkin: info(s) });
         continue;
       }
+      attachments = [];
       const r = await runStep(s);
+      takeAttachments(r);
       if (failedHard(r)) blocked = `not run: step "${s.intent}" ${r!.status}`;
     }
     // After hooks run even when a step failed (not when the run was cancelled).

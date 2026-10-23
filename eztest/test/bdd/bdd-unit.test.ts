@@ -52,10 +52,27 @@ describe('step expressions', () => {
     expect(() => r.define({ name: 'int', regexp: /\d/ })).toThrow(/built-in/);
   });
 
-  it('regular expressions pass their groups as strings', () => {
-    expect(args(/^I have (\d+) (\w+)s?$/, 'I have 4 apples')).toEqual(['4', 'apples']);
+  it('regular expressions: groups matching a parameter type are converted, the others stay strings', () => {
+    expect(args(/^I have (\d+) (\w+)s?$/, 'I have 4 apples')).toEqual([4, 'apples']);
+    expect(args(/^I owe (-?\d+)$/, 'I owe -3')).toEqual([-3]);
+    expect(args(/^it costs ([-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?)$/, 'it costs 2.5')).toEqual([2.5]);
     expect(args(/^optional( group)?$/, 'optional')).toEqual([undefined]);
-    expect(stepExpression(/^x (\d+)$/, reg()).parameters).toEqual(['']);
+    expect(args(/^(\d+\.\d+) and (\d{3})$/, '1.25 and 007')).toEqual(['1.25', '007']);
+    // Only top-level groups are arguments; nested and non-capturing groups are part of them.
+    expect(args(/^pay ((\d+) EUR)(?: now)?$/, 'pay 30 EUR now')).toEqual(['30 EUR']);
+    expect(stepExpression(/^x (\d+) (y)$/, reg()).parameters).toEqual(['int', '']);
+  });
+
+  it('regular expressions: named groups pick a parameter type, custom ones too', () => {
+    const r = reg();
+    r.define({ name: 'money', regexp: /(\d+)\.(\d\d)/, transformer: (a, b) => Number(a) * 100 + Number(b) });
+    r.define({ name: 'color', regexp: /red|blue/, transformer: (s) => s.toUpperCase() });
+    expect(args(/^pay (?<money>\S+) for (?<int>\d+) (?<color>\w+) items$/, 'pay 12.50 for 3 red items', r)).toEqual([1250, 3, 'RED']);
+    expect(args(/^a (?<float>[\d.]+) and (?<word>\S+) and "(?<string>[^"]*)"$/, 'a 1.5 and x-y and "q"', r)).toEqual([1.5, 'x-y', 'q']);
+    expect(args(/^a (?<name>\w+)$/, 'a bob', r)).toEqual(['bob']);
+    // A custom type's own regexp converts an unnamed group as well.
+    expect(args(/^the (red|blue) car$/, 'the blue car', r)).toEqual(['BLUE']);
+    expect(stepExpression(/^(?<money>\S+) (?<other>\w+)$/, r).parameters).toEqual(['money', '']);
   });
 
   it('reports bad expressions with a column', () => {
@@ -160,7 +177,7 @@ describe('the step definition registry', () => {
     Then('something else', () => undefined);
     const glue = glueOf([]);
     expect(glue.errors).toEqual([]);
-    expect(matchStep(glue, 'the customer "A" has 2 orders').map((m) => m.args)).toEqual([['A', 2], ['A', '2']]);
+    expect(matchStep(glue, 'the customer "A" has 2 orders').map((m) => m.args)).toEqual([['A', 2], ['A', 2]]);
     expect(matchStep(glue, 'something else').length).toBe(1);
     expect(matchStep(glue, 'nothing').length).toBe(0);
   });
