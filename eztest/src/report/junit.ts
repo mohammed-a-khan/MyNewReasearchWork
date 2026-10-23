@@ -2,9 +2,14 @@
  * JUnit XML. Healed steps stay visible through <properties> on the testcase
  * (eztest.status=passed-healed, eztest.heal.<stepId>=...), so CI dashboards
  * that only know pass/fail still carry the signal.
+ *
+ * Gherkin scenarios (`.feature` files) are grouped one <testsuite> per
+ * feature, with one <testcase> per scenario (and Examples row): the suite is
+ * named after the feature and the classname is the feature (plus ".<rule>"),
+ * which is how Azure DevOps and other CI test tabs group them.
  */
 import type { JourneyResult, RunResult } from '../core/index.js';
-import { EzTestError } from '../core/index.js';
+import { EzTestError, summarize } from '../core/index.js';
 import { escapeXml as x } from './escape.js';
 import { formatLocator, type ReportInsights } from './model.js';
 
@@ -16,6 +21,10 @@ function prop(name: string, value: unknown): string {
 
 function testcase(j: JourneyResult, insights: ReportInsights): string {
   const props: string[] = [
+    ...(j.bdd ? [
+      prop('eztest.feature', j.bdd.feature.name), prop('eztest.feature.file', j.bdd.file), prop('eztest.scenario.line', j.bdd.examples?.row?.line ?? j.bdd.scenario.line),
+      ...(j.bdd.rule ? [prop('eztest.rule', j.bdd.rule.name)] : []),
+    ] : []),
     prop('eztest.journeyId', j.journeyId),
     prop('eztest.status', j.status),
     prop('eztest.attempt', j.attempt),
@@ -58,20 +67,43 @@ function testcase(j: JourneyResult, insights: ReportInsights): string {
   const log = j.steps
     .map((s) => `[${s.status}] ${s.stepId} ${s.intent} (${s.durationMs} ms)${s.heal ? ` healed:${s.heal.tier}${s.heal.verified ? '' : ' UNVERIFIED'}` : ''}`)
     .join('\n');
-  return `<testcase name="${x(j.name)}" classname="${x(`eztest.${j.journeyId}`)}" time="${secs(j.durationMs)}"><properties>${props.join('')}</properties>${outcome}<system-out>${x(log)}</system-out></testcase>`;
+  const classname = j.bdd ? `${j.bdd.feature.name || j.bdd.file}${j.bdd.rule ? `.${j.bdd.rule.name}` : ''}` : `eztest.${j.journeyId}`;
+  return `<testcase name="${x(j.name)}" classname="${x(classname)}" time="${secs(j.durationMs)}"><properties>${props.join('')}</properties>${outcome}<system-out>${x(log)}</system-out></testcase>`;
 }
 
 export function renderJUnit(run: RunResult, insights: ReportInsights = {}): string {
   if (run.journeys.length === 0) throw new EzTestError('renderJUnit: run has no journeys', 'INVALID_INPUT');
   const s = run.summary;
   const attrs = `tests="${s.total}" failures="${s.failed}" errors="${s.errors}" skipped="${s.skipped}" time="${secs(run.durationMs)}" timestamp="${x(run.startedAt)}"`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="${x(`eztest ${run.runId}`)}" ${attrs}>
-<testsuite name="${x(run.runId)}" ${attrs}><properties>${prop('eztest.runId', run.runId)}${prop('eztest.passedHealed', s.passedHealed)}${Object.entries(run.environment)
+  const runProps = (passedHealed: number) => `${prop('eztest.runId', run.runId)}${prop('eztest.passedHealed', passedHealed)}${Object.entries(run.environment)
     .map(([k, v]) => prop(`env.${k}`, v))
-    .join('')}${run.evidenceHead ? prop('eztest.evidenceHead', run.evidenceHead) : ''}</properties>
+    .join('')}${run.evidenceHead ? prop('eztest.evidenceHead', run.evidenceHead) : ''}`;
+  const features = new Map<string, JourneyResult[]>();
+  for (const j of run.journeys) if (j.bdd) features.set(j.bdd.file, [...(features.get(j.bdd.file) ?? []), j]);
+  if (!features.size) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="${x(`eztest ${run.runId}`)}" ${attrs}>
+<testsuite name="${x(run.runId)}" ${attrs}><properties>${runProps(s.passedHealed)}</properties>
 ${run.journeys.map((j) => testcase(j, insights)).join('\n')}
 </testsuite>
+</testsuites>
+`;
+  }
+  const suite = (name: string, js: JourneyResult[], extra = '') => {
+    const c = summarize(js);
+    const time = js.reduce((n, j) => n + j.durationMs, 0);
+    return `<testsuite name="${x(name)}" tests="${c.total}" failures="${c.failed}" errors="${c.errors}" skipped="${c.skipped}" time="${secs(time)}" timestamp="${x(run.startedAt)}"><properties>${runProps(c.passedHealed)}${extra}</properties>
+${js.map((j) => testcase(j, insights)).join('\n')}
+</testsuite>`;
+  };
+  const others = run.journeys.filter((j) => !j.bdd);
+  const suites = [
+    ...(others.length ? [suite(run.runId, others)] : []),
+    ...[...features.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([file, js]) => suite(js[0].bdd!.feature.name || file, js, prop('eztest.feature.file', file))),
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="${x(`eztest ${run.runId}`)}" ${attrs}>
+${suites.join('\n')}
 </testsuites>
 `;
 }

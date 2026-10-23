@@ -607,6 +607,22 @@ export const LintConfigSchema = z.object({
   maxWarnings: z.number().int().min(0).optional(),
 });
 
+export const BddSchema = z.object({
+  /** Folders (or files) of `.feature` files; `eztest run` with no paths runs them after journeysDir. Default ["features"] when that folder exists. */
+  features: z.array(z.string().min(1)).optional(),
+  /**
+   * Step definition files (globs relative to the project). Default: `**\/*.steps.{ts,mts,js,mjs}` and every
+   * file under `step_definitions/` or `step-definitions/` folders.
+   */
+  steps: z.array(z.string().min(1)).optional(),
+  /** Steps without a definition run as EZTest plain-English steps when they are EZTest phrasings (default true). */
+  fallback: z.boolean().default(true),
+  /** Language of feature files without a `# language:` header (default en). */
+  language: z.string().min(2).default('en'),
+  /** Passed to every World as `parameters`. */
+  worldParameters: z.record(z.string(), z.unknown()).default({}),
+});
+
 export const EzTestConfigSchema = z.object({
   /** Configuration schema version. Absent means 1; older versions are migrated by `eztest upgrade-config`. */
   configVersion: z.number().int().min(1).max(CONFIG_VERSION).default(CONFIG_VERSION),
@@ -640,6 +656,10 @@ export const EzTestConfigSchema = z.object({
   timeouts: TimeoutsSchema.prefault({}),
   outputDir: z.string().min(1).default('eztest-results'),
   journeysDir: z.string().min(1).default('journeys'),
+  /** Folder of Gherkin `.feature` files run by `eztest run` next to journeysDir (shorthand for bdd.features; see docs/bdd.md). */
+  bddDir: z.string().min(1).optional(),
+  /** Native BDD: `.feature` files with TypeScript step definitions (eztest/bdd), see docs/bdd.md. */
+  bdd: BddSchema.prefault({}),
   /** Shared element repository (docs/elements.md): elements/*.yaml, optionally TypeScript screens read statically. */
   elements: z.object({
     dir: z.string().min(1).default('elements'),

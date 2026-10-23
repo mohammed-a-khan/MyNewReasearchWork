@@ -96,6 +96,42 @@ export interface StepResult {
   actor?: string;
   /** Set for `Manual:` steps: the tester's verdict, notes and attachments (see docs/manual-testing.md). */
   manual?: ManualStepRecord;
+  /** Gherkin scenarios (docs/bdd.md): the feature-file step or hook this result belongs to, and what it was bound to. */
+  gherkin?: GherkinStepRecord;
+}
+
+/** How a Gherkin step (or hook) of a `.feature` scenario ran. */
+export interface GherkinStepRecord {
+  kind: 'step' | 'before' | 'after';
+  /** Steps: the keyword as written ("Given", "And", "*"). */
+  keyword?: string;
+  /** Steps: the step text (with the Examples row's values). */
+  text?: string;
+  /** Line in the feature file (steps), or of the hook in its file. */
+  line: number;
+  /** Comes from a Background. */
+  background?: boolean;
+  /**
+   * definition: a step definition ran; ez: the EZTest phrasing fallback ran; undefined / ambiguous: nothing ran.
+   * hook: a Before / After hook.
+   */
+  match?: 'definition' | 'ez' | 'undefined' | 'ambiguous' | 'hook';
+  /** `file:line` of the step definition or hook, or the grammar rule of the EZTest phrasing. */
+  location?: string;
+  /** The definition's pattern. */
+  pattern?: string;
+  /** Undefined steps: a step definition to paste. */
+  snippet?: string;
+}
+
+/** Where a Gherkin scenario's result belongs: feature, rule, scenario and Examples row (docs/bdd.md). */
+export interface JourneyBddRecord {
+  /** Feature file, relative to the project (forward slashes). */
+  file: string;
+  feature: { name: string; line: number };
+  rule?: { name: string; line: number };
+  scenario: { name: string; line: number; keyword: string };
+  examples?: { name: string; line: number; row?: { line: number; index: number } };
 }
 
 /** A tester's verdict on a manual step. Notes are masked; attachments are evidence ids. */
@@ -157,6 +193,8 @@ export interface JourneyResult {
   reliability?: JourneyReliability;
   /** Present for manual and hybrid journeys. */
   manual?: JourneyManualSummary;
+  /** Present for Gherkin scenarios (`.feature` files): feature, rule, scenario and Examples row. */
+  bdd?: JourneyBddRecord;
 }
 
 export interface RunSummary {

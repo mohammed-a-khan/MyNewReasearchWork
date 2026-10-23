@@ -35,6 +35,7 @@ import { installAppIdle } from './reliability/idle.js';
 import { safeName } from './evidence.js';
 import type { HealthCheckResult, RunHealth } from '../core/index.js';
 import { driverFor, noDriverJourney, platformOf, type PlatformDriver } from './platform.js';
+import { bddRecord } from './bdd-run.js';
 import { describeBrowser, expandBrowserMatrix, openBrowser, runBrowsers, type ResolvedBrowser } from './browsers.js';
 
 /** Stand-in when every journey runs on a platform driver: using it is a bug, so it fails loudly. */
@@ -235,7 +236,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   const notRun = (j: Journey, reason: string, name: string): JourneyResult => ({
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, reason)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt: 1, browser: envOf(j).browserName, ledger: {}, evidence: [],
-    status: 'skipped', error: { message: reason, name },
+    status: 'skipped', error: { message: reason, name }, ...(j.bdd ? { bdd: bddRecord(j, options.baseDir) } : {}),
   });
   const passed = (r: JourneyResult) => r.status === 'passed' || r.status === 'passed-healed';
   /** The final result of a journey: dependency handoff summary, and why it was flaky when a retry passed. */
@@ -401,7 +402,7 @@ function browserDown(j: Journey, attempt: number, browser: string, e: Error): Jo
   return {
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, `not run: ${message}`)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt, browser, ledger: {}, evidence: [],
-    status: 'error', error: { message, name: 'BrowserLaunchError' },
+    status: 'error', error: { message, name: 'BrowserLaunchError' }, ...(j.bdd ? { bdd: bddRecord(j) } : {}),
   };
 }
 
@@ -425,6 +426,7 @@ async function environmentDown(journeys: Journey[], checks: HealthCheckResult[],
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, reason)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt: 1, browser: c.options.browser ?? 'chromium', ledger: {}, evidence: [ref.id],
     status: 'skipped', error: { message: reason, name: 'EnvironmentUnavailable' }, reliability: { environment: { reason: bad, evidence: [ref.id] } },
+    ...(j.bdd ? { bdd: bddRecord(j, c.options.baseDir) } : {}),
   }));
   const evidenceHead = await c.evidence.flush();
   const run: RunResult = {

@@ -77,6 +77,7 @@ export * as apps from './apps/index.js';
 export * as importers from './importers/index.js';
 export * as queries from './queries/index.js';
 export * as studio from './studio/index.js';
+export * as bdd from './bdd/index.js';
 export * as lint from './lint/index.js';
 export * as components from './runner/components/index.js';
 export * as desktop from './desktop/index.js';

@@ -23,8 +23,10 @@ import { analyzeImpact, loadImpactMapping, changedFilesFromGit, exitCodeWithQuar
 import { registerLoadCommands } from '../load/cli.js';
 import { registerAdoCommands } from './ado.js';
 import { registerGitCommands } from './git.js';
-import { findJourneyFiles, loadJourneys, filterJourneys } from './journeys.js';
+import { findJourneyFiles, loadJourneys, filterJourneys, bddOptionsFrom, defaultJourneyPaths } from './journeys.js';
 import { isCodeJourneyFile, loadCodeJourneys } from '../runner/code-journeys.js';
+import { isFeatureFile } from '../bdd/load.js';
+import { validateFeature } from '../bdd/validate.js';
 import { initProject } from './init.js';
 import { registerOpsCommands } from './ops.js';
 import { registerAppCommands } from '../apps/cli.js';
@@ -128,10 +130,10 @@ export function buildProgram(io: CliIO = defaultIO): Command {
   withConfigOpts(
     program
       .command('run')
-      .description('run journeys (.ez, .yaml, .json) and write reports')
-      .argument('[paths...]', 'journey files or directories (default: journeysDir from config)'),
+      .description('run journeys (.ez, .yaml, .json, code journeys) and Gherkin features (.feature), and write reports')
+      .argument('[paths...]', 'journey or feature files or directories (default: journeysDir and the feature folders from config)'),
   )
-    .option('-t, --tags <tags>', 'only journeys with any of these tags (comma separated)', list)
+    .option('-t, --tags <tags>', 'only journeys with any of these tags (comma separated), or a tag expression: "@smoke and not @wip"', list)
     .option('-x, --exclude-tags <tags>', 'skip journeys with any of these tags', list)
     .option('-g, --grep <pattern>', 'only journeys whose id or name matches')
     .addOption(new Option('-b, --browser <name>').choices(['chromium', 'firefox', 'webkit']))
@@ -211,7 +213,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const client = await serverClientFor(loaded, io.cwd);
       await pullSharedState(loaded, io.cwd, client, warn, out);
 
-      const { journeys: all, errors } = await loadJourneys(paths.length ? paths : [cfg.journeysDir], io.cwd);
+      const { journeys: all, errors } = await loadJourneys(paths.length ? paths : defaultJourneyPaths(cfg, io.cwd), io.cwd, { bdd: bddOptionsFrom(cfg) });
       for (const e of errors) io.err(`error: ${e.file}: ${e.message}`);
       if (errors.length) {
         plugins.off();
@@ -392,7 +394,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
   // ------------------------------------------------------------------ validate / convert
   program
     .command('validate')
-    .description('parse journeys and report errors without running them')
+    .description('parse journeys and features and report errors without running them (features: undefined and ambiguous steps too)')
     .argument('[paths...]', 'journey files or directories', ['journeys'])
     .option('-c, --config <file>')
     .option('-e, --env <name>')
@@ -408,6 +410,23 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       let bad = 0;
       const parsed: Array<{ file: string; journey: Awaited<ReturnType<typeof loadJourneyFile>> }> = [];
       for (const f of files) {
+        // Gherkin features: syntax, then every step bound to a step definition or an EZTest phrasing.
+        if (isFeatureFile(f)) {
+          try {
+            const v = await validateFeature(f, { ...(loaded ? bddOptionsFrom(loaded.config) : {}), cwd: io.cwd });
+            for (const j of v.journeys) parsed.push({ file: f, journey: j });
+            const errs = v.problems.filter((p) => p.severity === 'error');
+            bad += errs.length;
+            if (!errs.length) io.out(`ok     ${f} (${v.journeys.length} scenario${v.journeys.length === 1 ? '' : 's'}; ${v.bound.definition} step${v.bound.definition === 1 ? '' : 's'} with definitions, ${v.bound.ez} EZTest phrasing${v.bound.ez === 1 ? '' : 's'})`);
+            for (const p of v.problems) {
+              (p.severity === 'error' ? io.err : io.out)(`${p.severity === 'error' ? 'error ' : 'warn  '} ${f}${p.line ? `:${p.line}` : ''}: ${p.message}${p.snippet ? `\n${p.snippet.split('\n').map((l) => `         ${l}`).join('\n')}` : ''}`);
+            }
+          } catch (e) {
+            bad++;
+            io.err(`error  ${f}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+          continue;
+        }
         // Code journeys (eztest/sdk): loading the module checks it compiles and declares journeys.
         if (isCodeJourneyFile(f)) {
           try {

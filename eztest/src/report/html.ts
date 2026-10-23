@@ -9,6 +9,7 @@ import { EzTestError, flattenStepResults } from '../core/index.js';
 import type { FlakyScore, TriageVerdict } from '../insights/index.js';
 import { escapeHtml as e, safeRelativeUrl } from './escape.js';
 import { healProposals, formatLocator, type ReportInsights } from './model.js';
+import { bddHierarchy, type BddScenarioEntry } from './bdd.js';
 
 const STATUS_LABEL: Record<string, string> = {
   passed: 'Passed',
@@ -123,6 +124,30 @@ ${videoPlayer(j, evMap)}
 </details></section>`;
 }
 
+const MATCH_LABEL: Record<string, string> = { definition: 'step definition', ez: 'EZTest phrasing', undefined: 'undefined', ambiguous: 'ambiguous' };
+
+function bddScenario(sc: BddScenarioEntry): string {
+  const steps = sc.steps.map((st) => `<li class="g-step s-${e(st.status)}">${badge(st.status)} <span class="g-kw">${e(st.keyword)}</span> ${e(st.text)}${st.match ? ` <small class="muted" title="${e(st.location ?? '')}">${e(MATCH_LABEL[st.match] ?? st.match)}${st.location ? ` &middot; ${e(st.location)}` : ''}</small>` : ''}${st.error ? `<div class="g-err">${e(st.error)}</div>` : ''}</li>`).join('');
+  const hooks = sc.hookFailures.map((h) => `<li class="g-step s-failed">${badge('failed')} ${e(h)}</li>`).join('');
+  return `<li class="g-scenario"><details${sc.status === 'failed' || sc.status === 'error' ? ' open' : ''}><summary>${badge(sc.status)} <span class="g-kw">${e(sc.keyword)}:</span> <a href="#${domId('j', sc.journeyId)}">${e(sc.name)}</a> <small class="muted">line ${e(sc.line)}${sc.examples ? ` &middot; ${e(sc.examples.name || 'Examples')} row ${e((sc.examples.row?.index ?? 0) + 1)}` : ''} &middot; ${e((sc.durationMs / 1000).toFixed(2))} s</small></summary><ol class="g-steps">${steps}${hooks}</ol></details></li>`;
+}
+
+/** Feature / rule / scenario hierarchy of the run's Gherkin scenarios (docs/bdd.md). */
+function featuresSection(run: RunResult): string {
+  const h = bddHierarchy(run);
+  if (!h) return '';
+  const t = h.totals;
+  const features = h.features.map((f) => {
+    const c = f.counts;
+    const rules = f.rules.map((r) => `<li class="g-rule"><details open><summary>${badge(r.status)} <span class="g-kw">Rule:</span> ${e(r.name)} <small class="muted">line ${e(r.line)}</small></summary><ul class="g-scenarios">${r.scenarios.map(bddScenario).join('')}</ul></details></li>`).join('');
+    return `<li class="g-feature"><details${f.status === 'failed' || f.status === 'error' ? ' open' : ''}><summary>${badge(f.status)} <strong>${e(f.name || f.file)}</strong> <small class="muted">${e(f.file)} &middot; ${e(c.passed + c.passedHealed)} passed, ${e(c.failed + c.errors)} failed, ${e(c.skipped)} skipped</small></summary>
+<ul class="g-scenarios">${f.scenarios.map(bddScenario).join('')}${rules}</ul></details></li>`;
+  }).join('');
+  return `<section aria-labelledby="features-h"><h2 id="features-h">Features</h2>
+<p class="meta">${e(t.features)} feature(s), ${e(t.rules)} rule(s), ${e(t.scenarios)} scenario(s), ${e(t.steps)} step(s): ${e(t.passed + t.passedHealed)} passed, ${e(t.failed + t.errors)} failed, ${e(t.skipped)} skipped</p>
+<ul class="g-features">${features}</ul></section>`;
+}
+
 const CSS = `
 :root{--bg:#fff;--fg:#1f2328;--muted:#656d76;--card:#f6f8fa;--border:#d0d7de;--field:#6e7781;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--heal:#8250df;--link:#0969da;--focus:#0969da}
 @media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1;--card:#161b22;--border:#30363d;--field:#6e7681;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--heal:#a371f7;--link:#4493f8;--focus:#4493f8}}
@@ -161,6 +186,7 @@ caption{text-align:left;font-weight:600}.card{border:1px solid var(--border);bor
 .chapters{list-style:none;margin:0;padding:0;max-height:20rem;overflow:auto}
 .chapters button{width:100%;text-align:left;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:.3rem .5rem;margin:.15rem 0;cursor:pointer}
 .chapters button[aria-current=true]{border-color:var(--link);font-weight:600}
+.g-features,.g-scenarios,.g-steps{list-style:none;padding-left:1.1rem;margin:.2rem 0}.g-features{padding-left:0}.g-kw{font-weight:600}.g-step{margin:.15rem 0}.g-err{color:var(--bad);margin-left:2rem;white-space:pre-wrap}.g-feature>details>summary,.g-rule>details>summary,.g-scenario>details>summary{cursor:pointer;padding:.15rem 0}
 `;
 
 /** The journey of a cross-browser unit ("checkout@firefox" -> "checkout"). */
@@ -297,6 +323,7 @@ ${r.exceptionsApplied.length ? `<p>Exceptions: ${r.exceptionsApplied.map((x) => 
 <li class="s-passed-healed"><strong>${e(s.passedHealed)}</strong>Passed (healed)</li><li class="s-failed"><strong>${e(s.failed + s.errors)}</strong>Failed</li>
 <li class="s-skipped"><strong>${e(s.skipped)}</strong>Skipped</li></ul></header>
 <main id="main">${readiness}${browsersSection(run, r)}${triageSection}
+${featuresSection(run)}
 <section aria-labelledby="journeys-h"><h2 id="journeys-h">Journeys</h2>
 <div class="filters" role="group" aria-label="Filter journeys">${filterBtn('all', 'All', s.total)}${filterBtn('passed', 'Passed', s.passed)}${filterBtn('passed-healed', 'Healed', s.passedHealed)}${filterBtn('failed', 'Failed', s.failed)}${filterBtn('error', 'Error', s.errors)}${filterBtn('skipped', 'Skipped', s.skipped)}
 <label>Search <input type="search" id="search" aria-label="Search journeys by name, id or tag"></label> <span id="shown" aria-live="polite"></span></div>

@@ -1,0 +1,27 @@
+# Synthetic project for the native BDD tests: .feature files with TypeScript step definitions
+# against the EZ Shop demo app (examples/demo-app).
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+browser: chromium
+headless: true
+journeysDir: journeys
+bddDir: features
+outputDir: eztest-results
+reporters: [json, junit, html]
+timeouts:
+  step: 5000
+
+bdd:
+  worldParameters:
+    shop: EZ Shop
+
+healing:
+  enabled: true
+  maxTier: T2-semantic
+
+db:
+  connections:
+    shop:
+      driver: sqlite
+      file: ${SHOP_DB:-./shop.db}
+  queries:
+    dir: queries
