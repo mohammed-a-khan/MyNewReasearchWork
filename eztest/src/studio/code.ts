@@ -13,7 +13,9 @@ import type { ValidationResult } from './authoring.js';
 /** Code files the Studio may open and save. */
 export function isCodePath(p: string): boolean {
   const posix = p.replace(/\\/g, '/');
-  return CODE_JOURNEY_RE.test(posix) || CODE_STEPS_RE.test(posix) || /(?:^|\/)screens\/[^/]+\.(?:ts|mts)$/i.test(posix);
+  return CODE_JOURNEY_RE.test(posix) || CODE_STEPS_RE.test(posix) || /(?:^|\/)screens\/[^/]+\.(?:ts|mts)$/i.test(posix)
+    // Gherkin step definition folders (docs/bdd.md).
+    || /(?:^|\/)step[_-]definitions\/(?:[^/]+\/)*[^/]+\.(?:ts|mts|js|mjs)$/i.test(posix);
 }
 
 export interface CodeJourneyInfo {

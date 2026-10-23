@@ -25,6 +25,7 @@ import type { Format } from './assist.js';
 import { createEditorState, createEditorView, forceLinting, goToLine, redo, replaceDoc, undo } from './editor.js';
 import { ezOutline, structuredOutline, type OutlineItem } from './ezlang.js';
 import { codeOutline } from './sdk.js';
+import { featureOutline } from './gherkin.js';
 import { createVisualView, type VisualHandle } from './visual.js';
 
 interface Tab {
@@ -251,7 +252,7 @@ function renderOutline(): void {
   clear(ui.outlineList);
   if (!active) return;
   const text = textOf(active);
-  const items: OutlineItem[] = active.format === 'ez' ? ezOutline(text) : active.format === 'ts' ? codeOutline(text) : structuredOutline(text);
+  const items: OutlineItem[] = active.format === 'ez' ? ezOutline(text) : active.format === 'ts' ? codeOutline(text) : active.format === 'feature' ? featureOutline(text) : structuredOutline(text);
   let stepNo = 0;
   const steps = items.filter((x) => x.kind === 'step');
   const cur = [...steps].reverse().find((x) => x.line <= active!.cursorLine);
@@ -304,6 +305,10 @@ function setMode(mode: 'code' | 'steps'): void {
   if (!active || !ui) return;
   if (mode === 'steps' && active.format === 'ts') {
     toast('Code journeys (TypeScript) have no visual steps view: their steps are the SDK calls in the code', { timeout: 3500 });
+    return;
+  }
+  if (mode === 'steps' && active.format === 'feature') {
+    toast('Feature files have no visual steps view: the outline lists their scenarios and steps', { timeout: 3500 });
     return;
   }
   active.mode = mode;
@@ -492,6 +497,10 @@ async function convert(): Promise<void> {
     toastError('Code journeys cannot be converted to .ez, YAML or JSON');
     return;
   }
+  if (t.format === 'feature') {
+    toastError('Feature files run as they are; to turn one into .ez journeys use Import (Gherkin)');
+    return;
+  }
   const target = h('select', { class: 'input', id: uid('conv') }, (['ez', 'yaml', 'json'] as const).filter((f) => f !== t.format).map((f) => h('option', { value: f, text: f === 'ez' ? '.ez (plain English)' : f.toUpperCase() })));
   const preview = h('pre', { class: 'code-preview', tabindex: '0', 'aria-label': 'Conversion preview' });
   const err = h('p', { class: 'field-error', role: 'alert' });
@@ -595,7 +604,22 @@ async function onDiskChange(type: string, path: string): Promise<void> {
 }
 
 function journeyIdFor(path: string): string | undefined {
-  return journeys.get().find((j) => j.path === path)?.id;
+  return journeyIdsFor(path)[0];
+}
+
+/** The journeys "Run" starts: a feature's scenario at the cursor (every Examples row of an outline), else the file's journeys. */
+function journeyIdsFor(path: string): string[] {
+  const j = journeys.get().find((x) => x.path === path);
+  if (!j) return [];
+  if (j.format === 'feature' && j.code?.length) {
+    const at = active?.path === path ? active.cursorLine : 0;
+    const row = j.code.find((c) => c.row === at);
+    if (row) return [row.id];
+    const lines = [...new Set(j.code.map((c) => c.line))].filter((l) => l <= at);
+    const sc = lines.length ? Math.max(...lines) : undefined;
+    return sc !== undefined ? j.code.filter((c) => c.line === sc).map((c) => c.id) : j.code.map((c) => c.id);
+  }
+  return j.id ? [j.id] : [];
 }
 
 async function runActive(): Promise<void> {
@@ -607,7 +631,7 @@ async function runActive(): Promise<void> {
     return;
   }
   try {
-    const r = await api.post<{ id: string }>('/api/runs', { journeys: [journeyIdFor(active.path)] });
+    const r = await api.post<{ id: string }>('/api/runs', { journeys: journeyIdsFor(active.path) });
     navigate(link('run', r.id));
   } catch (e) {
     toastError(`Could not start the run: ${(e as Error).message}`);
@@ -804,7 +828,7 @@ export function registerJourneysPage(): void {
     items: () => {
       if (!active) return [];
       const t = active;
-      const items = t.format === 'ez' ? ezOutline(textOf(t)) : t.format === 'ts' ? codeOutline(textOf(t)) : structuredOutline(textOf(t));
+      const items = t.format === 'ez' ? ezOutline(textOf(t)) : t.format === 'ts' ? codeOutline(textOf(t)) : t.format === 'feature' ? featureOutline(textOf(t)) : structuredOutline(textOf(t));
       let n = 0;
       return items
         .filter((x) => x.kind === 'step')

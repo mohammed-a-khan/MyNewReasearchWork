@@ -137,6 +137,14 @@ export interface RunDetail {
       error?: { message: string; name?: string };
       /** Cross-browser runs: the browser of this journey x browser unit. */
       browser?: string;
+      /** Gherkin scenarios: feature, rule, scenario and Examples row. */
+      bdd?: {
+        file: string;
+        feature: { name: string; line: number };
+        rule?: { name: string; line: number };
+        scenario: { name: string; line: number; keyword: string };
+        examples?: { name: string; line: number; row?: { line: number; index: number } };
+      };
       steps: Array<{
         stepId: string;
         intent: string;
@@ -148,6 +156,8 @@ export interface RunDetail {
         heal?: { tier: string; verified: boolean; healed: { strategy: string; value: string; name?: string } };
         evidence: string[];
         conditions?: Array<{ passed: boolean; description?: string; message?: string }>;
+        /** Gherkin scenarios: the feature step or hook, and what it was bound to. */
+        gherkin?: { kind: 'step' | 'before' | 'after'; keyword?: string; text?: string; line: number; match?: string; location?: string; snippet?: string; background?: boolean };
       }>;
       evidence: string[];
     }>;

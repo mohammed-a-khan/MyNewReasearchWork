@@ -7,7 +7,7 @@
  * hierarchy; undefined, ambiguous and failing steps.
  */
 import { afterEach, describe, expect, it } from '../support/testkit.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { verifyEvidence, type StepResult } from '../../src/core/index.js';
 import { bddProject, byId, cli, flat, latestRun, tree } from './helpers.js';
@@ -173,5 +173,10 @@ describe('native BDD through eztest run (real browser, demo app)', () => {
     expect(err).toMatch(/problems\.feature:6: undefined step "I do something nobody defined with "x" and 3"/);
     expect(err).toMatch(/When\('I do something nobody defined with \{string\} and \{int\}'/);
     expect(err).toMatch(/problems\.feature:10: ambiguous step "a duplicated step"/);
+    // External Examples are checked too.
+    await writeFile(join(p.project, 'features', 'missing.feature'), 'Feature: M\n  Scenario Outline: O\n    Given I am on "/<page>"\n    Examples: from data "data/nope.csv"\n');
+    const missing = await cli(p.project, ['validate', 'features/missing.feature']);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.err.join('\n')).toMatch(/missing\.feature:4: Examples: Examples data file not found: data\/nope\.csv/);
   });
 });

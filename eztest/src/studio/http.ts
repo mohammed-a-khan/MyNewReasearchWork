@@ -118,6 +118,6 @@ export function strList(v: unknown): string[] | undefined {
 }
 
 export function fmt(v: unknown, name: string): JourneyFormat {
-  if (v === 'ez' || v === 'yaml' || v === 'json' || v === 'ts') return v;
-  throw new HttpError(400, `"${name}" must be ez, yaml, json or ts`);
+  if (v === 'ez' || v === 'yaml' || v === 'json' || v === 'ts' || v === 'feature') return v;
+  throw new HttpError(400, `"${name}" must be ez, yaml, json, ts or feature`);
 }

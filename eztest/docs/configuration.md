@@ -32,6 +32,12 @@ retries: 0
 logLevel: info
 timeouts: { step: 15000 }
 journeysDir: journeys
+bddDir: features               # Gherkin .feature files (docs/bdd.md); default features/ when it exists
+bdd:
+  steps: ["**/*.steps.ts"]     # step definition globs (default: *.steps.* and step_definitions/ folders)
+  fallback: true               # steps without a definition may run as EZTest phrasings
+  language: en                 # for files without "# language:"
+  worldParameters: {}          # passed to every World
 outputDir: eztest-results
 elements:                      # shared element repository (docs/elements.md)
   dir: elements                # elements/*.yaml

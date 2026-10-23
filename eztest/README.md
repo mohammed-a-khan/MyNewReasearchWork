@@ -171,11 +171,38 @@ What you get with code journeys:
 
 Importer plugins can write logic that `.ez` cannot express as SDK code. See [docs/sdk.md](docs/sdk.md).
 
+### Gherkin features, run natively (`eztest/bdd`)
+
+BDD teams keep their `.feature` files and run them as they are, with step definitions in TypeScript:
+
+```ts
+// steps/orders.steps.ts
+import { Given, Then } from 'eztest/bdd';
+
+Given('the customer {string} has {int} orders', async ({ db, world }, name, n) => { /* ... */ });
+Then('the order total is {float}', async ({ expect }, total) => expect.ui.text('testid=order-total').toBe(total.toFixed(2)));
+```
+
+```bash
+eztest run features/ --tags "@smoke and not @wip"
+```
+
+What you get:
+
+- **EZTest's own Gherkin.** The parser, step expressions (`{int}`, `{float}`, `{string}`, `{word}`, `{}`, custom parameter types, regular expressions) and tag expressions are EZTest's own code. They cover Rules, Backgrounds, outlines with tagged Examples, doc strings, data tables and ten languages.
+- **No glue code needed for EZTest phrasings.** A step without a definition runs as an EZTest step when it is one (`When I click the "Save" button`, `Then the page contains "Saved"`). Definitions and phrasings mix freely.
+- **Journeys.** Each scenario and each Examples row is a journey result, with verified healing, evidence, traces, readiness, flaky detection, sharding, retries and Azure DevOps publishing. Examples can come from CSV, XLSX, JSON or a named query (`Examples: from data "rows.xlsx" sheet "Gold"`).
+- **The World and hooks.** Before, After, BeforeStep and AfterStep hooks, tag-filtered. Undefined steps print a snippet to paste; ambiguous steps list the matching definitions.
+- **Reports and Studio.** Reports group results by feature, rule and scenario; JUnit has one suite per feature. The Studio edits features with Gherkin highlighting and step diagnostics, and runs and debugs a scenario.
+
+See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](examples/bdd-project).
+
 ## What's inside
 
 | Area | Capabilities |
 |---|---|
 | Authoring | `.ez` plain-English grammar, YAML/JSON journeys, round-trip conversion |
+| BDD | Gherkin `.feature` files run natively with TypeScript step definitions (`eztest/bdd`): EZTest's own Gherkin parser (Rule, Background, outlines with tagged Examples, doc strings, data tables, ten languages), step and tag expressions, the World, hooks, snippets for undefined steps, the plain-English fallback, external Examples, feature/rule/scenario reports and Studio support ([docs/bdd.md](docs/bdd.md)) |
 | Runner | Chrome, Edge, Chromium and Electron (CDP) and Firefox (WebDriver BiDi) on EZTest's own browser driver, `eztest/browser` ([docs/browser-driver.md](docs/browser-driver.md)); Safari/WebKit is not supported; strict locators, all actions and post-conditions, retries, parallel journeys, traces, downloads, run ledger |
 | Native mobile | `Platform: android\|ios` journeys on EZTest's own drivers: an ADB client (smart-socket protocol) plus the EZTest Android agent (androidx.test.uiautomator), and the EZTest iOS XCTest agent over usbmuxd; taps, typing, gestures (swipe-until, long press, pinch, drag), app lifecycle, deep links, permissions, connectivity, files, hybrid web views over the DevTools socket, verified healing over the page source, screenshots and page-source evidence, native time-travel traces and a Studio Device tab ([docs/mobile.md](docs/mobile.md)) |
 | Pages and frames | Tabs, windows and popups (open, follow, switch by number/title/URL, close, count), nested iframes by name/id/title/URL/selector with frame blocks; evidence, conditions and healing follow the current tab and frame |

@@ -11,6 +11,7 @@ import type { EvidenceRef, RunResult } from '../../core/index.js';
 import { loadJourneyFile } from '../../intent/index.js';
 import { HistoryStore, readEvidenceManifest, scoreHistory, type FlakyScore } from '../../insights/index.js';
 import { listJourneys } from '../authoring.js';
+import { bddOptionsOf, extraFeatureDirs } from '../bdd.js';
 import type { StudioApp } from '../app.js';
 import { HttpError } from '../http.js';
 import { assertRunId, listRuns, type RunListItem } from '../runs.js';
@@ -131,7 +132,7 @@ export interface JourneyFileInfo {
   id: string;
   name: string;
   path: string;
-  format: 'ez' | 'yaml' | 'json' | 'ts';
+  format: 'ez' | 'yaml' | 'json' | 'ts' | 'feature';
   tags: string[];
   requirements: string[];
   risk: number;
@@ -140,7 +141,7 @@ export interface JourneyFileInfo {
 
 /** Journeys on disk (parsing ones only), with their project-relative paths. */
 export async function journeyFiles(app: StudioApp): Promise<JourneyFileInfo[]> {
-  const list = await listJourneys(app.cwd, await app.journeysDir());
+  const list = await listJourneys(app.cwd, await app.journeysDir(), await extraFeatureDirs(app));
   return list
     .filter((j) => j.id && !j.error)
     .flatMap((j) =>
@@ -154,6 +155,11 @@ export async function journeyFiles(app: StudioApp): Promise<JourneyFileInfo[]> {
 export async function journeyById(app: StudioApp, id: string) {
   const f = (await journeyFiles(app)).find((j) => j.id === id);
   if (!f) return undefined;
+  if (f.format === 'feature') {
+    const { loadFeatureJourneys } = await import('../../bdd/load.js');
+    const journey = (await loadFeatureJourneys(resolve(app.cwd, f.path), { ...(await bddOptionsOf(app)), cwd: app.cwd })).find((j) => j.id === id);
+    return journey ? { file: f, journey } : undefined;
+  }
   if (f.format === 'ts') {
     const { loadCodeJourneys } = await import('../../runner/code-journeys.js');
     const journey = (await loadCodeJourneys(resolve(app.cwd, f.path), { cwd: app.cwd })).find((j) => j.id === id);

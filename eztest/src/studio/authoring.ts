@@ -19,14 +19,16 @@ import {
 } from '../intent/index.js';
 import { findJourneyFiles } from '../cli/journeys.js';
 import { codeJourneyTemplate, isCodePath, scanCodeJourneys } from './code.js';
+import { featureEntry, featureTemplate, validateFeatureSyntax } from './bdd.js';
 import { relPosix } from './security.js';
 import { journeyKind } from '../runner/manual.js';
 import { lintJourney, scoreTarget, type LintFinding } from '../lint/index.js';
 
-/** "ts": code journeys, code steps and screens (eztest/sdk). */
-export type JourneyFormat = 'ez' | 'yaml' | 'json' | 'ts';
+/** "ts": code journeys, code steps and screens (eztest/sdk). "feature": Gherkin feature files (docs/bdd.md). */
+export type JourneyFormat = 'ez' | 'yaml' | 'json' | 'ts' | 'feature';
 
 export function formatOf(path: string): JourneyFormat {
+  if (/\.feature$/i.test(path)) return 'feature';
   if (isCodePath(path)) return 'ts';
   const p = path.toLowerCase();
   if (p.endsWith('.ez')) return 'ez';
@@ -47,18 +49,33 @@ export interface JourneyEntry {
   kind?: 'automated' | 'manual' | 'hybrid';
   assignee?: string;
   error?: string;
-  /** Code journey files: every journey() in the file, with its line. */
-  code?: Array<{ id: string; name: string; line: number; tags?: string[]; requirements?: string[]; risk?: number }>;
+  /**
+   * Code journey files: every journey() in the file, with its line. Feature files: every scenario and
+   * Examples row (`line` of the scenario, `row` of the Examples row).
+   */
+  code?: Array<{ id: string; name: string; line: number; row?: number; tags?: string[]; requirements?: string[]; risk?: number }>;
 }
 
-/** Journey files under `dir` with their metadata (files that fail to parse are listed with an error). */
-export async function listJourneys(cwd: string, dir: string): Promise<JourneyEntry[]> {
-  const root = resolve(cwd, dir);
-  if (!existsSync(root) || !(await stat(root)).isDirectory()) return [];
-  const files = await findJourneyFiles([root], cwd, { code: true });
+/**
+ * Journey files under `dir` (and `extraDirs`, e.g. feature folders outside it) with their metadata
+ * (files that fail to parse are listed with an error).
+ */
+export async function listJourneys(cwd: string, dir: string, extraDirs: string[] = []): Promise<JourneyEntry[]> {
+  const roots: string[] = [];
+  for (const d of [dir, ...extraDirs]) {
+    const root = resolve(cwd, d);
+    if (existsSync(root) && (await stat(root)).isDirectory()) roots.push(root);
+  }
+  if (!roots.length) return [];
+  const files = await findJourneyFiles(roots, cwd, { code: true });
   const out: JourneyEntry[] = [];
   for (const f of files) {
     const path = relPosix(cwd, f);
+    if (/\.feature$/i.test(f)) {
+      // Read, not executed: step definitions load only when a scenario runs or is debugged.
+      out.push(featureEntry(cwd, f, await readFile(f, 'utf8')));
+      continue;
+    }
     if (isCodePath(f)) {
       // Read, not executed: the module is loaded only when a run or debug session starts.
       const js = scanCodeJourneys(await readFile(f, 'utf8'));
@@ -149,12 +166,15 @@ export function validateEz(text: string, source = 'journey.ez'): ValidationResul
 /** Parse journey text in any format into a Journey (throws on errors). */
 export function parseJourneyText(text: string, format: JourneyFormat, fallbackId = 'journey'): Journey {
   if (format === 'ts') throw new Error('Code journeys are TypeScript: they are loaded when they run, not parsed as steps');
+  if (format === 'feature') throw new Error('Feature files are Gherkin: each scenario becomes a journey when it runs (docs/bdd.md)');
   if (format === 'ez') return parseEzScript(text, { source: `${fallbackId}.ez` });
   const raw = format === 'json' ? JSON.parse(text) : YAML.parse(text);
   return normalizeJourneyInput(raw, fallbackId);
 }
 
 export function validateText(text: string, format: JourneyFormat): ValidationResult {
+  // Syntax here; the editor's validation also binds every step (validateFeatureText, async).
+  if (format === 'feature') return validateFeatureSyntax(text);
   if (format === 'ez') {
     const r = validateEz(text);
     if (!r.ok) return r;
@@ -188,6 +208,7 @@ export function validateText(text: string, format: JourneyFormat): ValidationRes
 
 export function convertText(text: string, from: JourneyFormat, to: JourneyFormat): string {
   if (from === 'ts' || to === 'ts') throw new Error('Code journeys (TypeScript) cannot be converted to or from .ez, YAML or JSON');
+  if (from === 'feature' || to === 'feature') throw new Error('Feature files run as they are; to turn one into .ez journeys use the Gherkin importer (eztest import)');
   const j = parseJourneyText(text, from);
   if (to === 'ez') return journeyToEzScript(j);
   if (to === 'yaml') return YAML.stringify(j);
@@ -271,6 +292,7 @@ export function grammar(): GrammarGroup[] {
 
 export function journeyTemplate(name: string, format: JourneyFormat): string {
   if (format === 'ts') return codeJourneyTemplate(name);
+  if (format === 'feature') return featureTemplate(name);
   const clean = name.replace(/[\r\n]+/g, ' ').trim() || 'New journey';
   const ez = [
     `Journey: ${clean}`,
@@ -282,7 +304,7 @@ export function journeyTemplate(name: string, format: JourneyFormat): string {
     'Expect the page to contain "Welcome"',
     '',
   ].join('\n');
-  return format === 'ez' ? ez : convertText(ez, 'ez', format as Exclude<JourneyFormat, 'ts'>);
+  return format === 'ez' ? ez : convertText(ez, 'ez', format as Exclude<JourneyFormat, 'ts' | 'feature'>);
 }
 
 export async function readText(abs: string): Promise<string> {

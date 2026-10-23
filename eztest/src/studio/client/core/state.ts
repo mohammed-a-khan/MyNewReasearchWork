@@ -22,7 +22,7 @@ export interface Session {
 export interface JourneyEntry {
   path: string;
   /** 'ts': code journeys (eztest/sdk). */
-  format: 'ez' | 'yaml' | 'json' | 'ts';
+  format: 'ez' | 'yaml' | 'json' | 'ts' | 'feature';
   id?: string;
   name?: string;
   tags: string[];
@@ -30,8 +30,8 @@ export interface JourneyEntry {
   requirements: string[];
   steps?: number;
   error?: string;
-  /** Code journey files: every journey() in the file, with its line. */
-  code?: Array<{ id: string; name: string; line: number }>;
+  /** Code journey files: each journey() call; feature files: each scenario and Examples row (row: the row's line). */
+  code?: Array<{ id: string; name: string; line: number; row?: number }>;
 }
 
 export interface Issue {

@@ -31,4 +31,6 @@ export { parseGherkin, parseGherkinLenient, splitTableRow, GherkinParseError, ty
 export { compilePickles, type Pickle, type PickleStep, type PickleExamples, type CompileResult } from './gherkin/compile.js';
 export { DIALECTS, dialectFor, languages, stepKeywords, type GherkinDialect, type KeywordType } from './gherkin/languages.js';
 export type * from './gherkin/ast.js';
+export { formatFeature } from './format.js';
+export { validateFeature, type FeatureProblem, type FeatureValidation } from './validate.js';
 export { analyzeFeature, scanStepDefinitions, type FeatureDiagnostic, type StaticDefinition } from './diagnostics.js';

@@ -15,8 +15,8 @@ import { h } from '../../core/dom.js';
 import { grammar, vocabulary, type Issue } from '../../core/state.js';
 import { HEADER_RE, localVariables } from './ezlang.js';
 
-/** 'ts': code journeys, code steps and screens (eztest/sdk). */
-export type Format = 'ez' | 'yaml' | 'json' | 'ts';
+/** 'ts': code journeys, code steps and screens (eztest/sdk). 'feature': Gherkin feature files (docs/bdd.md). */
+export type Format = 'ez' | 'yaml' | 'json' | 'ts' | 'feature';
 
 /** Select the inside of the first quoted placeholder after inserting a phrasing. */
 function insertWithPlaceholder(view: EditorView, text: string, from: number, to: number): void {
@@ -116,16 +116,18 @@ export function yamlCompletions(ctx: CompletionContext): CompletionResult | null
 }
 
 /** Validate through the server and turn issues into diagnostics with quick fixes. */
-export function lintSource(format: () => Format, onResult: (r: { ok: boolean; errors: Issue[]; journey?: { name: string; steps: number } }) => void) {
+export function lintSource(format: () => Format, onResult: (r: { ok: boolean; errors: Issue[]; journey?: { name: string; steps: number } }) => void, path?: string) {
   return async (view: EditorView): Promise<Diagnostic[]> => {
     const doc = view.state.doc;
     let r: { ok: boolean; errors: Issue[]; journey?: { name: string; steps: number } };
     try {
-      r = await api.post('/api/validate', { content: doc.toString(), format: format() });
+      r = await api.post('/api/validate', { content: doc.toString(), format: format(), ...(path ? { path } : {}) });
     } catch {
       return [];
     }
     onResult(r);
+    // Feature files: how every step binds (step definition, EZTest phrasing, undefined, ambiguous).
+    const steps = ((r as { bdd?: { diagnostics?: StepDiagnostic[] } }).bdd?.diagnostics ?? []).map((d) => stepDiagnostic(doc, d));
     // eztest lint findings (hard waits, fragile XPath, unchecked state changes, secrets, weak locators) as warnings.
     const lint = ((r as { lint?: Array<{ rule: string; severity: string; line?: number; message: string; suggestion: string; score?: number }> }).lint ?? []).map((f) => {
       const ln = f.line && f.line >= 1 && f.line <= doc.lines ? doc.line(f.line) : doc.line(1);
@@ -136,7 +138,7 @@ export function lintSource(format: () => Format, onResult: (r: { ok: boolean; er
         message: `${f.message}\nFix: ${f.suggestion}`,
       } satisfies Diagnostic;
     });
-    return [...lint, ...r.errors.map((e) => {
+    return [...steps, ...lint, ...r.errors.map((e) => {
       const ln = e.line && e.line >= 1 && e.line <= doc.lines ? doc.line(e.line) : doc.line(1);
       const indent = /^\s*/.exec(ln.text)?.[0].length ?? 0;
       const from = Math.min(ln.to, ln.from + Math.max(0, (e.column ?? indent + 1) - 1));
@@ -159,6 +161,34 @@ export function lintSource(format: () => Format, onResult: (r: { ok: boolean; er
           : [],
       } satisfies Diagnostic;
     })];
+  };
+}
+
+interface StepDiagnostic {
+  line: number;
+  column: number;
+  endColumn?: number;
+  severity: 'error' | 'warning' | 'info';
+  kind: string;
+  message: string;
+  snippet?: string;
+  location?: string;
+}
+
+const STEP_SOURCE: Record<string, string> = {
+  definition: 'step definition', ez: 'EZTest phrasing', undefined: 'undefined step', ambiguous: 'ambiguous step', outline: 'outline', definitions: 'step definitions', syntax: 'Gherkin',
+};
+
+/** A feature-file step diagnostic: the step's text range, with "Copy snippet" for an undefined step. */
+function stepDiagnostic(doc: Text, d: StepDiagnostic): Diagnostic {
+  const ln = d.line >= 1 && d.line <= doc.lines ? doc.line(d.line) : doc.line(1);
+  const from = Math.min(ln.to, ln.from + Math.max(0, d.column - 1));
+  const to = d.endColumn ? Math.min(ln.to, ln.from + d.endColumn - 1) : ln.to;
+  return {
+    from, to: Math.max(from, to), severity: d.severity, source: `eztest bdd: ${STEP_SOURCE[d.kind] ?? d.kind}`, message: d.message,
+    actions: d.snippet
+      ? [{ name: 'Copy snippet', apply() { void navigator.clipboard?.writeText(d.snippet!).catch(() => undefined); } }]
+      : [],
   };
 }
 

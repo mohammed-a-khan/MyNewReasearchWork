@@ -140,3 +140,13 @@
 .videowrap .chapters { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
 .videowrap .chapters button { width: 100%; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; margin: 3px 0; cursor: pointer; }
 .videowrap .chapters button:hover { border-color: var(--accent); }
+
+/* Results: Gherkin features, rules and scenarios (docs/bdd.md) */
+.bdd-feature { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; margin: 0 0 10px; }
+.bdd-feature > summary, .bdd-rule > summary, .bdd-scenario > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 24px; }
+.bdd-list { list-style: none; margin: 4px 0 0; padding: 0 0 0 18px; }
+.bdd-steps { list-style: none; margin: 4px 0 6px; padding: 0 0 0 18px; border-left: 2px solid var(--border-subtle); }
+.bdd-step { padding: 3px 0 3px 8px; }
+.bdd-hook .tl-intent { color: var(--text-muted); }
+.bdd-kw { font-weight: 600; }
+.bdd-snippet { margin: 4px 0 0; white-space: pre; overflow-x: auto; }

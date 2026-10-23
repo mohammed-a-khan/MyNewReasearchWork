@@ -9,6 +9,7 @@ import { relative, resolve } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import type { LoadedConfig } from '../config/index.js';
 import { formatOf, listJourneys, validateText, type ValidationIssue } from './authoring.js';
+import { extraFeatureDirs } from './bdd.js';
 import type { DebugSessionManager } from './debug-session.js';
 import { EventHub } from './events.js';
 import { RecordManager } from './record.js';
@@ -37,6 +38,8 @@ export class StudioApp {
   /** Manual steps waiting for a tester's verdict (the guided runner answers them). */
   readonly manual: ManualHub;
   watcher?: JourneyWatcher;
+  /** Watchers of feature folders outside the journeys folder. */
+  private featureWatchers: JourneyWatcher[] = [];
   /** The live debugger's session manager (set by the server). */
   debug?: DebugSessionManager;
   private readonly problemsIndex = new Map<string, ValidationIssue[]>();
@@ -107,6 +110,9 @@ export class StudioApp {
       onChange: (changes) => void this.filesChanged(changes),
       ...extra,
     }).start();
+    for (const d of await extraFeatureDirs(this)) {
+      this.featureWatchers.push(await new JourneyWatcher({ cwd: this.cwd, dir: resolve(this.cwd, d), ignore: [await this.outputDir()], onChange: (changes) => void this.filesChanged(changes), ...extra }).start());
+    }
   }
 
   private async filesChanged(changes: FileChange[]): Promise<void> {
@@ -133,7 +139,7 @@ export class StudioApp {
   async problems(): Promise<Array<{ path: string; errors: ValidationIssue[] }>> {
     this.problemsReady ??= (async () => {
       const dir = await this.journeysDir();
-      for (const j of await listJourneys(this.cwd, dir)) {
+      for (const j of await listJourneys(this.cwd, dir, await extraFeatureDirs(this))) {
         const errors = await this.validateFile(j.path);
         if (errors.length) this.problemsIndex.set(j.path, errors);
       }
@@ -144,6 +150,7 @@ export class StudioApp {
 
   async close(): Promise<void> {
     this.watcher?.close();
+    for (const w of this.featureWatchers) w.close();
     const cur = this.runs.current;
     if (cur?.state === 'running') this.runs.cancel(cur.id);
     this.manual.close();

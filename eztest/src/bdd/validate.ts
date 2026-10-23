@@ -10,6 +10,7 @@ import { ezFallback } from './fallback.js';
 import { loadFeatureJourneys, loadGlue, type BddOptions } from './load.js';
 import { matchStep } from './registry.js';
 import { snippet } from './snippets.js';
+import { validateExamplesSource } from '../runner/examples-source.js';
 
 export interface FeatureProblem {
   severity: 'error' | 'warning';
@@ -34,6 +35,18 @@ export async function validateFeature(file: string, o: BddOptions & { cwd?: stri
   const glue = await loadGlue(journeys[0].bdd?.glue ?? [], { cwd });
   for (const e of glue.errors) problems.push({ severity: 'error', message: e });
   const seen = new Set<string>();
+  // External Examples: the file exists and parses, the filter is valid, refers to known columns and matches rows.
+  const sources = new Set<string>();
+  for (const j of journeys) {
+    if (!j.examplesFrom) continue;
+    const key = JSON.stringify(j.examplesFrom);
+    if (sources.has(key)) continue;
+    sources.add(key);
+    for (const i of await validateExamplesSource(j.examplesFrom, { baseDir: cwd })) {
+      if (i.severity === 'info') continue;
+      problems.push({ severity: i.severity, line: j.bdd?.examples?.line, message: `Examples: ${i.message}` });
+    }
+  }
   const show = (f: string) => relative(cwd, f).split(sep).join('/');
   for (const j of journeys) {
     for (const s of j.steps) {

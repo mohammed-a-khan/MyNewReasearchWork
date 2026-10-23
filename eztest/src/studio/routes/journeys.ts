@@ -11,6 +11,8 @@ import { HttpError, fmt, sendError, sendJson, str } from '../http.js';
 import { explainLine, formatText, vocabulary } from '../language.js';
 import { applySteps, journeyModel, type StepEdit } from '../model.js';
 import { validateCode } from '../code.js';
+import { definitionsIndex, extraFeatureDirs, validateFeatureText } from '../bdd.js';
+import { formatFeature } from '../../bdd/format.js';
 import type { StudioRoute } from './route.js';
 
 function formatParam(body: Record<string, unknown>): ReturnType<typeof fmt> {
@@ -24,7 +26,8 @@ export const journeyRoutes: StudioRoute[] = [
     summary: 'Journey files with metadata',
     async handler({ res, app }) {
       const journeysDir = await app.journeysDir();
-      sendJson(res, 200, { journeysDir, journeys: await listJourneys(app.cwd, journeysDir) });
+      const featureDirs = await extraFeatureDirs(app);
+      sendJson(res, 200, { journeysDir, featureDirs, journeys: await listJourneys(app.cwd, journeysDir, featureDirs) });
     },
   },
   {
@@ -48,7 +51,8 @@ export const journeyRoutes: StudioRoute[] = [
       await mkdir(dirname(abs), { recursive: true });
       app.confine(relative(app.cwd, abs)); // re-check after creating directories
       await writeFile(abs, content);
-      const v = formatOf(abs) === 'ts' ? await validateCode(content, abs) : validateText(content, formatOf(abs));
+      const f = formatOf(abs);
+      const v = f === 'ts' ? await validateCode(content, abs) : f === 'feature' ? await validateFeatureText(app, content, app.rel(abs)) : validateText(content, f);
       sendJson(res, 200, { saved: app.rel(abs), validation: v });
     },
   },
@@ -94,10 +98,11 @@ export const journeyRoutes: StudioRoute[] = [
   {
     method: 'POST',
     path: '/api/validate',
-    summary: 'Validate journey text (every bad line, with suggestions)',
-    async handler({ res, body }) {
+    summary: 'Validate journey text (every bad line, with suggestions); features: syntax and the binding of every step',
+    async handler({ res, app, body }) {
       const format = formatParam(body);
       const content = str(body.content, 'content');
+      if (format === 'feature') return sendJson(res, 200, await validateFeatureText(app, content, typeof body.path === 'string' ? body.path : 'feature.feature'));
       sendJson(res, 200, format === 'ts' ? await validateCode(content, typeof body.path === 'string' ? body.path : 'file.ts') : validateText(content, format));
     },
   },
@@ -122,7 +127,9 @@ export const journeyRoutes: StudioRoute[] = [
     summary: 'Tidy journey text (comments are kept)',
     handler({ res, body }) {
       try {
-        sendJson(res, 200, { content: formatText(str(body.content, 'content'), formatParam(body)) });
+        const format = formatParam(body);
+        const content = str(body.content, 'content');
+        sendJson(res, 200, { content: format === 'feature' ? formatFeature(content) : formatText(content, format) });
       } catch (e) {
         if (e instanceof HttpError) throw e;
         sendError(res, 422, `Cannot format: ${(e as Error).message}`);
@@ -174,6 +181,19 @@ export const journeyRoutes: StudioRoute[] = [
     handler({ res, body }) {
       const steps = body.steps as StepEdit[];
       sendJson(res, 200, applySteps(str(body.content, 'content'), formatParam(body), steps));
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/bdd/definitions',
+    summary: 'Step definitions and parameter types of the project (read from the step files, not executed)',
+    async handler({ res, app }) {
+      const idx = await definitionsIndex(app);
+      sendJson(res, 200, {
+        files: idx.files,
+        definitions: idx.definitions.map((d) => ({ keyword: d.keyword, pattern: d.pattern, file: app.rel(d.file), line: d.line })),
+        parameterTypes: idx.parameterTypes.map((p) => ({ name: p.name, file: app.rel(p.file), line: p.line })),
+      });
     },
   },
   {

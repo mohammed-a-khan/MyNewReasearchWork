@@ -1,0 +1,47 @@
+# EZTest native BDD example (docs/bdd.md): Gherkin features with TypeScript step definitions,
+# run against the EZ Shop demo app (examples/demo-app).
+#
+#   npx tsx examples/demo-app/server.ts                        # the app, on http://127.0.0.1:4600
+#   export SHOP_BOB_PASSWORD='Builder#2'
+#   npx eztest run                                             # every feature
+#   npx eztest run --tags "@smoke and not @wip"
+#   npx eztest validate features/                              # bind every step; snippets for undefined ones
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+browser: chromium
+headless: true
+journeysDir: journeys
+bddDir: features
+outputDir: eztest-results
+reporters: [console, html, json, junit]
+
+bdd:
+  # Step definitions: the default is every *.steps.ts file and every step_definitions/ folder.
+  steps: ["steps/**/*.steps.ts"]
+  # Steps without a definition run as EZTest plain-English steps when they are EZTest phrasings.
+  fallback: true
+  worldParameters:
+    shopName: EZ Shop
+
+healing:
+  enabled: true
+  maxTier: T2-semantic
+
+identity:
+  sessionDir: .eztest/sessions
+  secretStores:
+    - type: env
+      prefix: SHOP_
+  roles:
+    manager:
+      loginUrl: /login
+      username: bob
+      password: secret://env/BOB_PASSWORD
+      successUrl: /dashboard
+
+db:
+  connections:
+    shop:
+      driver: sqlite
+      file: ${SHOP_DB:-./shop.db}
+  queries:
+    dir: queries

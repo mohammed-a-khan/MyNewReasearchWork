@@ -4,6 +4,30 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Native BDD: Gherkin features with TypeScript step definitions
+
+- **`.feature` files run as they are** ([docs/bdd.md](docs/bdd.md)). `eztest run features/` (or `bddDir` / `bdd.features` in the config, `features/` by default) turns each scenario, and each Examples row of an outline, into one journey result. So each one gets verified healing, evidence, traces, the reports, readiness, flaky detection, history, sharding, retries, quarantine, Azure DevOps publishing and Studio results. Journey ids are `<feature path>--<scenario>`; `@id:`, `@req:`, `@risk:` and `@role:` tags fill journey fields.
+- **EZTest's own Gherkin parser**, written from the Gherkin reference. It covers Feature, Rule (with its own Background), Background, Scenario / Example, Scenario Outline / Template with several tagged Examples blocks, tags at every level, Given / When / Then / And / But / `*`, doc strings (`"""` and three backticks, with a media type), data tables with escapes, comments and descriptions. `# language:` selects one of ten languages: English, German, French, Spanish, Italian, Portuguese, Dutch, Polish, Swedish and Russian. Errors carry the line and column, and the parser reports every problem in a file.
+- **Step definitions in TypeScript (`eztest/bdd`).**
+  - `Given` / `When` / `Then` / `Step` take a context with the whole SDK (`ui`, `api`, `db`, `vars`, `data`, `expect`, ...) plus the `world`, then the parameters, then the data table or doc string.
+  - Expressions are EZTest's own: `{int}`, `{float}`, `{string}`, `{word}`, `{}` and the other numeric types, optional text, alternatives, escapes, custom parameter types (`defineParameterType`, async transformers), and regular expressions.
+  - Each scenario attempt gets a new World (`setWorldConstructor`, `bdd.worldParameters`).
+  - `Before` / `After` / `BeforeStep` / `AfterStep` hooks take tag expressions and an order. After hooks run when a step failed too.
+  - Undefined steps fail with a snippet to paste; ambiguous steps list every matching definition with its `file:line`.
+- **The plain-English fallback.** A step that no definition matches runs as the EZTest step its text describes, so features can have no glue code at all. `When I click the "Save" button`, `Then the page contains "Saved"`, `Given I am on "/login"`, `Given I am logged in as "manager"` and a two-column "fill in the form" table all work. Domain steps are never guessed.
+- **Tag expressions** (`--tags "@smoke and not @wip"`, `(@a or @b) and not @c`), EZTest's own parser. They work for every journey type; comma lists still mean "any of".
+- **External Examples** (EZTest extension): `Examples: from data "x.xlsx" sheet "S" where ...`, CSV, JSON with a path, or `from query "NAME" on conn`, through the existing Examples data sources.
+- **Reports.** The HTML report has a Features section (feature, rule, scenario and Examples row, each step with its binding). `report.json` has a `bdd` hierarchy. `run.json` records `journeys[].bdd` and `steps[].gherkin`. The JUnit report has one `<testsuite>` per feature and one `<testcase>` per scenario, with the feature (and rule) as classname, which Azure DevOps reads.
+- **`eztest validate`** binds every step of a feature (loading the step definitions), prints snippets for undefined steps and checks external Examples sources.
+- **Studio.**
+  - The journeys editor lists, opens, edits, formats and highlights `.feature` files, from the journeys folder and the feature folders.
+  - Diagnostics as you type: syntax errors with column, and per step the definition or EZTest phrasing it binds to, or undefined (with "Copy snippet") or ambiguous. Definitions are read statically, never executed.
+  - After a step keyword, autocomplete offers step definitions and EZTest phrasings.
+  - "Run" runs the scenario at the cursor. The debugger stops on feature-file step lines.
+  - Results has a Features tab grouping a run by feature and rule.
+  - New route: `GET /api/bdd/definitions`.
+- **Example project:** [examples/bdd-project](examples/bdd-project).
+
 ### Fixed
 
 - Recording in Studio or with `eztest record` in a project without a `baseUrl` now writes the recorded site as the journey's `Base URL:`, so the recorded journey replays. Before, its relative URLs failed with "needs a baseUrl". When the project's `baseUrl` already points at the recorded site, nothing is written and environments can still be switched.
