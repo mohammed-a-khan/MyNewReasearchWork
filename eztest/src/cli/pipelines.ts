@@ -111,7 +111,7 @@ export async function finishPipelineRun(p: PipelineRun, runDir: string, readines
     selection: { ...(entry.tags ? { tags: entry.tags } : {}), ...(entry.shards ? { shards: entry.shards === 'auto' ? undefined : entry.shards } : {}), ...(entry.browsers ? { browsers: entry.browsers } : {}) },
     evidence: { ...(ctx.runUrl ? { runUrl: ctx.runUrl } : {}), ...(reportUrl ? { reportUrl } : {}) },
   });
-  if (entry.testPlan && cfg.ado && hasAdoCredentials(cfg, ctx.io.env) && !adoSettings(cfg, ctx.io.env).missing.length) {
+  if (entry.testPlan && entry.ado.publishTestPlan && hasAdoCredentials(cfg, ctx.io.env) && !adoSettings(cfg, ctx.io.env).missing.length) {
     try {
       const ado = await adoClientFor(ctx.loaded, ctx.io.cwd, ctx.io.env);
       const attachments = ['report.html', 'junit.xml'].map((f) => join(runDir, f)).filter((f) => existsSync(f)).map((path) => ({ path }));

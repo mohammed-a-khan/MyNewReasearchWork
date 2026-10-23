@@ -9,7 +9,8 @@ multi-stage templates). Everything goes through EZTest's own REST client
 - [Test Plans](#test-plans): import, sync, suites, configurations, publish
 - [Boards](#boards): bugs, requirements, comments, area and iteration
 - [Repos and pull requests](#repos-and-pull-requests)
-- [Pipelines](#pipelines): the EZTest task, the results tab, YAML templates
+- [Pipelines](#pipelines): the EZTest task, the results tab, YAML templates, schedules, tests after deployment
+- [Deployments and release gates](#deployments-and-release-gates): deployment test records, build summary and tags, work items, gates on environments
 - [Limits](#limits)
 
 ## Connect
@@ -290,13 +291,70 @@ the CLI (`useTask: false`).
 
 | File | Use |
 |---|---|
-| `eztest-steps.yml` | The steps (task or CLI), parameters: environment, journeys, tags, Test Plans ids, configuration, gate actions |
-| `eztest-stage.yml` | One stage per environment with parallel shard jobs; NO_GO fails the stage so promotion stops |
-| `azure-pipelines.multistage.yml` | Example: PR validation (smoke, PR status), then deploy and test SIT and UAT, each with its own plan and suite |
+| `eztest-steps.yml` | The steps (task or CLI), parameters: environment, journeys, tags, `pipeline`, Test Plans ids, configuration, gate actions |
+| `eztest-stage.yml` | One stage per environment: parallel shard jobs, or (with `deploymentEnvironment`) a deployment job in that environment; NO_GO fails the stage so promotion stops |
+| `azure-pipelines.multistage.yml` | Example: PR validation, nightly and weekly schedules, then deploy and test SIT and UAT as deployment jobs, each with its own plan and suite |
 
-`eztest init --ci azure` writes a single-stage pipeline that points here.
+`pipeline` names a `pipelines:` entry of `eztest.config.yaml` ([pipelines.md](pipelines.md)): its tags, environment, test plan, gate, `requires:` and deployment record. The templates pass it as `EZTEST_PIPELINE`, which both the EZTest task and the CLI steps read. The CLI run step is named `eztest`, so values saved "for the pipeline" are output variables `eztest.<name>` ([shared-data.md](shared-data.md#pipeline-stages)).
+
+`eztest init --ci azure` writes a complete `azure-pipelines.yml` without the extension: a PR smoke stage, a scheduled regression stage with duration-balanced shards merged into one run, and deployment stages for SIT and UAT with their tests as deployment jobs ([pipelines.md](pipelines.md#eztest-init---ci-system)).
+
+### Schedules
+
+```yaml
+schedules:
+  - cron: '0 2 * * 1-5'
+    displayName: Nightly regression (02:00 UTC, weekdays)
+    branches: { include: [main] }
+    always: true
+  - cron: '0 4 * * 6'
+    displayName: Weekly full regression (04:00 UTC, Saturday)
+    branches: { include: [main] }
+    always: true
+```
+
+Azure Pipelines schedules are cron in **UTC**. `always: true` runs even without new commits (the environment may have changed). A scheduled run has `Build.Reason` `Schedule`, which the templates use to pick the regression stage, and `eztest run --pipeline auto` uses to pick the `trigger: schedule` entry.
+
+### Tests after deployment
+
+Run the tests as a **deployment job in the environment** that was just deployed:
+
+```yaml
+- template: eztest-stage.yml
+  parameters: { environment: sit, pipeline: deploy-sit, deploymentEnvironment: sit, dependsOn: [deploy_sit] }
+```
+
+The job then appears on the environment's deployment history, the environment's approvals and checks apply to it, and `ENVIRONMENT_NAME` lets `--pipeline auto` pick the `deploy-sit` entry. A deployment job is a single job; shard a long after-deployment suite with a regular job (`shards: n`, no `deploymentEnvironment`) in a stage that depends on the deployment.
+
+## Deployments and release gates
+
+`eztest run --pipeline deploy-sit` (an entry with an `environment`) keeps a **deployment test record**: what was tested in which environment for which version (the build number, or `EZTEST_APP_VERSION`), with the selection, results, readiness and evidence links; see [pipelines.md](pipelines.md#deployment-test-records). In Azure Pipelines it also:
+
+| What | How |
+|---|---|
+| Summary on the build | `eztest-deployment.md`, attached with `##vso[task.uploadsummary]` (`ado.summary`, default on) |
+| Build tags | `eztest-<env>` and `eztest-<env>-<GO\|GO_WITH_RISKS\|NO_GO>` (`PUT _apis/build/builds/<id>/tags/<tag>`; `ado.tags`, default on) |
+| Work items of the build | With `ado.commentWorkItems`: a comment with the verdict on each work item linked to the build, updated in place per environment. With `ado.linkWorkItems`: a hyperlink to the evidence (the published run, or the build) |
+| Test plan | With `testPlan` / `testSuite`: the results published to that plan (as `eztest ado publish`), the test run linked to the build and release |
+| Results server | The record, kept per project: `eztest deployments list`, Studio › Quality › Deployments |
+
+The build service needs "Edit build quality" (tags), "Edit work items" and "View/Create test runs" as before; with `System.AccessToken` nothing else is stored.
+
+### Release gates
+
+- **In the pipeline:** `requires: [deploy-sit]` in the `deploy-uat` entry stops the UAT tests (exit 1) unless SIT has a passing record for the same version, and `gate: readiness` fails the stage on NO_GO, so later stages do not run.
+- **On the environment:** add a check to the `uat` environment (Pipelines › Environments › uat › Approvals and checks):
+  - **Invoke REST API** against the EZTest results server (a generic service connection with a viewer token):
+    `GET /api/projects/<project>/deployments?environment=sit&version=$(Build.BuildNumber)`, success criteria `eq(jsonpath('$[0].readiness.decision')[0], 'GO')`. The deployment to UAT then waits until SIT was tested GO for this build.
+  - **Required template** (`eztest-stage.yml`), so every pipeline that deploys to the environment runs the tests.
+  - **Approvals** for GO_WITH_RISKS, with the build summary and tags as the reviewer's evidence.
+- **Classic releases:** run `eztest run --pipeline auto` in the release environment's job; `RELEASE_ENVIRONMENTNAME` picks the entry, and the test run is linked to the release (`Release.ReleaseUri`, `Release.EnvironmentUri`). Use a "Query work items" or REST API gate the same way.
+
+`eztest gate <runDir>` (or `eztest ado gate`) fails a step on NO_GO for runs without `--pipeline`, e.g. after `eztest merge`.
 
 ## Limits
+
+- Deployment reporting comments on the work items linked to the build and tags the build; it does not post to the environment's deployment record itself, which has no comment API (the deployment job's logs and the build summary carry the verdict there).
 
 - Not verified against a live Azure DevOps organisation or server in this
   repository's test suite: everything is tested against

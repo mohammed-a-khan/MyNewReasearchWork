@@ -12,7 +12,7 @@
  *   Take one item from pool "approvable-policies" as policy
  *   Expect pool "approvable-policies" has at least 3 items
  */
-import { literal, quoteText } from '../intent/quotes.js';
+import { literal, protectQuotes, quoteText } from '../intent/quotes.js';
 import type { IntentRule, StepBody } from '../intent/rules.js';
 import type { Step } from '../core/index.js';
 import { parseTtl, ttlText } from './types.js';
@@ -141,6 +141,12 @@ export const STORE_RULES: IntentRule[] = [
     },
   },
 ];
+
+/** "Expect pool "x" has at least 3 items" is a step of its own, not a post-condition of the step before it. */
+export function isStoreExpectation(line: string): boolean {
+  const { text } = protectQuotes(line.trim().replace(/[.;]+$/, '').replace(/^(?:and|then|but|also)\s+/i, ''));
+  return STORE_RULES.find((r) => r.name === 'pool-count')!.re.test(text);
+}
 
 /** YAML/JSON sugar: `- store: { save: orderId, as: pending-order, ttl: 2 days }` and `- pool: { take: x, as: policy }`. */
 export function storeSugarIntent(s: Record<string, unknown>): string | undefined {

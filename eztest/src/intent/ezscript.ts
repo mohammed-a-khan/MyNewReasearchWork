@@ -27,6 +27,7 @@ import { examplesSourceToText, isExamplesFromLine, parseExamplesSource } from '.
 import { isNamedQueryExpectation, queryStepToText } from './rules-queries.js';
 import { isDesktopExpectation } from './rules-desktop.js';
 import { isIntegrationExpectation } from '../integration/rules.js';
+import { isStoreExpectation } from '../store/rules.js';
 import { isSpecialistExpectation } from './rules-specialist.js';
 import { dependsOnToText, parseDependsOn, parseRequires, requiresToText } from './requires.js';
 import { mobileStepToText } from './rules-mobile.js';
@@ -254,7 +255,7 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
     const e = SOFT.test(line) ? null : EXPECT.exec(line);
     const prev = list[list.length - 1];
     // Add-on phrasings such as "Expect D365 field ..." are steps of their own, not post-conditions.
-    if (e && prev && !matchesPluginRule(line) && !isStepExpectation(line) && !isNamedQueryExpectation(line) && !isVisualExpectation(line) && !isA11yExpectation(line) && !isComponentExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isKeyboardExpectation(line)) {
+    if (e && prev && !matchesPluginRule(line) && !isStepExpectation(line) && !isNamedQueryExpectation(line) && !isVisualExpectation(line) && !isA11yExpectation(line) && !isComponentExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isKeyboardExpectation(line) && !isStoreExpectation(line)) {
       try {
         (prev.postconditions ??= []).push(parseCondition(e[1].replace(/[.;]+$/, '')));
       } catch (err) {

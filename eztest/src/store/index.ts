@@ -9,6 +9,6 @@ export { FileStoreBackend, withFileLock, itemIdFor, safeFileName } from './file.
 export { ServerStoreBackend } from './server.js';
 export { SharedStore, resolveStoreValue, type SharedStoreOptions, type SaveOptions, type LoadResult, type PoolSettings } from './runtime.js';
 export { formatOutputs, githubOutputLine, outputSystems, vsoEscapeData, vsoEscapeProperty, vsoSetVariable, type OutputEntry } from './pipeline.js';
-export { STORE_RULES, storeStepToText, storeSugarIntent } from './rules.js';
+export { STORE_RULES, storeStepToText, storeSugarIntent, isStoreExpectation } from './rules.js';
 export { storeAction } from './action.js';
 export { storeBackendFor, storeFromConfig, type StoreFromConfigOptions } from './config.js';

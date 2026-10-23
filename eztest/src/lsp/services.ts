@@ -66,7 +66,7 @@ export function formatOfUri(uri: string): JourneyFormat | undefined {
 
 // ------------------------------------------------------------------ line structure
 
-const HEADER = /^(journey|name|id|tags|role|requirements?|risk|base\s*url|variables|vars|description|lenses|data|params|parameters|returns|device|viewport|locale|time\s*zone|colou?r\s*scheme|reduced\s*motion|geolocation|permissions|user\s*agent|touch|offline|http\s*credentials|extra\s*headers|headers|loaders)\s*:\s*(.*)$/i;
+const HEADER = /^(journey|setup|teardown|name|id|tags|role|requirements?|risk|base\s*url|variables|vars|description|lenses|data|params|parameters|returns|device|viewport|locale|time\s*zone|colou?r\s*scheme|reduced\s*motion|geolocation|permissions|user\s*agent|touch|offline|http\s*credentials|extra\s*headers|headers|loaders)\s*:\s*(.*)$/i;
 const EXPECT = /^(?:(?:then|and|also)\s+)?(?:expect|verify)\s+(?:softly\s+)?(?:that\s+)?(.+)$/i;
 const OPENER = /^(?:if|unless|repeat|for\s+each|while|retry|try|group|in\s+(?:the\s+)?(?:frame|.*\bframe)|until|repeat\s+until)\b/i;
 const END = /^(?:end(?:\s+\w+)*|done|next|endif)\s*[.;]?$/i;

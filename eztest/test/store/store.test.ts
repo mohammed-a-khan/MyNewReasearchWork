@@ -117,17 +117,19 @@ describe('file backend', () => {
       import { FileStoreBackend, SharedStore } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/store/index.ts')).href)};
       const s = new SharedStore({ backend: new FileStoreBackend(${JSON.stringify(dir)}), env: {} });
       const got: string[] = [];
-      // Both workers start claiming at the same moment.
-      while (Date.now() < Number(process.argv[3])) await new Promise((r) => setTimeout(r, 5));
+      // Both workers start claiming at the same moment: each says it is ready, then waits for the other.
+      const { existsSync, writeFileSync } = await import('node:fs');
+      writeFileSync(${JSON.stringify(dir)} + '/ready-' + process.argv[2], '');
+      while (!existsSync(${JSON.stringify(dir)} + '/ready-1') || !existsSync(${JSON.stringify(dir)} + '/ready-2')) await new Promise((r) => setTimeout(r, 5));
       for (let i = 0; ; i++) {
         try { got.push(String((await s.take('approvable-policies', 'w' + process.argv[2] + '#' + i)).value)); } catch { break; }
+        await new Promise((r) => setTimeout(r, 1));
       }
       process.stdout.write(JSON.stringify(got));
     `);
     const tsx = pathToFileURL(join(ROOT, 'node_modules/tsx/dist/loader.mjs')).href;
-    const startAt = String(Date.now() + 4000);
     const run = (id: string) => new Promise<string[]>((res, rej) => {
-      const p = spawn(process.execPath, ['--import', tsx, worker, id, startAt], { env: { ...process.env, NODE_NO_WARNINGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const p = spawn(process.execPath, ['--import', tsx, worker, id], { env: { ...process.env, NODE_NO_WARNINGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
       p.stdout.on('data', (d) => (out += d));

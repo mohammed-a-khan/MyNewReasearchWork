@@ -5,8 +5,8 @@
  * - Azure Pipelines: `##vso[task.setvariable variable=<name>;isOutput=true]<value>`
  *   (with `issecret=true` for secrets). Name the step that runs EZTest
  *   (`name: eztest`) and map the value in a later stage with
- *   `$[ stageDependencies.<stage>.<job>.outputs['eztest.<name>'] ]` (a
- *   deployment job: `<job>.<job>`), for example into EZTEST_STORE_<NAME>.
+ *   `$[ stageDependencies.<stage>.<job>.outputs['eztest.<name>'] ]` (a runOnce
+ *   deployment job: `outputs['<job>.eztest.<name>']`), for example into EZTEST_STORE_<NAME>.
  * - GitHub Actions: `<name>=<value>` lines appended to $GITHUB_OUTPUT (job
  *   outputs: `needs.<job>.outputs.<name>`). GitHub drops outputs that contain
  *   a masked secret, so a secret is passed sealed (decrypted again by the next
