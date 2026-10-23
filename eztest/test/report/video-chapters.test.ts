@@ -8,11 +8,13 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { chromium } from '../../src/browser/index.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { videoChaptersVtt } from '../../src/browser/index.js';
-import { renderHtmlReport } from '../../src/report/index.js';
+import { writeReports } from '../../src/report/index.js';
 import { readEvidenceManifest } from '../../src/insights/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
 import { runJourneys } from '../../src/runner/index.js';
@@ -83,14 +85,26 @@ Click the "Save" button
       const buf = await readFile(join(runDir, png));
       expect(buf.length).toBeGreaterThan(0);
     }
-    // The HTML report embeds the player with the chapters track and the chapter-building script.
-    const report = renderHtmlReport(run, { evidence: manifest });
-    expect(report).toContain('<video controls');
-    expect(report).toContain('kind="chapters"');
+    // The HTML report plays the video in the test's detail, with a chapter (step) list that seeks.
+    const paths = await writeReports(runDir, run, { formats: ['html'], evidence: manifest });
+    const report = await readFile(paths.html!, 'utf8');
     expect(report).toContain(webm.split('/').pop()!);
-    expect(report).toContain('ol class="chapters"');
     expect(report).toMatch(/media-src 'self' file: blob:/);
-    // the chapter-building script wires clicks to seek the video
-    expect(report).toContain('video.currentTime=cue.startTime');
+    const file = paths.html!;
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${pathToFileURL(file).href}#test/${encodeURIComponent(j.journeyId)}`);
+      const video = page.locator('#detail video');
+      expect(await video.getAttribute('src')).toContain('.webm');
+      expect(await page.locator('#detail video track[kind="chapters"]').count()).toBe(1);
+      const chapters = page.locator('#detail ol[aria-label="Video chapters (steps)"] button');
+      await expect.poll(() => chapters.count(), { timeout: 15_000 }).toBe(3);
+      expect(await chapters.nth(1).textContent()).toContain('Type "Ada" into the "Name" field');
+      await chapters.nth(2).click();
+      await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+    }
   }, 120_000);
 });

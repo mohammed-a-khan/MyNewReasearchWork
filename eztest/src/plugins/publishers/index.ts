@@ -7,6 +7,15 @@ import type { RunResult } from '../../core/index.js';
 import { definePlugin, PLUGIN_API_VERSION, type EzPlugin } from '../api.js';
 import type { PublishContext, PublishResult } from '../registry.js';
 import { almPlugins } from './alm.js';
+import { readReportModel } from '../../report/write.js';
+import { buildSlackMessage, buildTeamsCard, cardLinks, teamsMessage } from '../../report/notify.js';
+
+/** The run's report model and the card links (report URL option, results server, ADO run, build, PR). */
+async function modelFor(ctx: PublishContext) {
+  const m = await readReportModel(ctx.runDir).catch(() => undefined);
+  if (!m) return undefined;
+  return { m, links: cardLinks(m, { reportUrl: typeof ctx.options.reportUrl === 'string' ? ctx.options.reportUrl : undefined, runUrl: ctx.runUrl }) };
+}
 
 function headline(run: RunResult, ctx: PublishContext): { title: string; ok: boolean; facts: Array<[string, string]>; failed: string[] } {
   const s = run.summary;
@@ -41,9 +50,10 @@ export const slackPlugin: EzPlugin = definePlugin({
     api.registerPublisher({
       name: 'slack',
       async publish(ctx): Promise<PublishResult> {
+        const rich = await modelFor(ctx);
         const h = headline(ctx.run, ctx);
         const lines = h.failed.slice(0, 10).map((n) => `• ${n}`);
-        const body = {
+        const body = rich ? buildSlackMessage(typeof ctx.options.title === 'string' ? { ...rich.m, brand: { ...rich.m.brand, name: ctx.options.title } } : rich.m, rich.links) : {
           text: h.title,
           blocks: [
             { type: 'header', text: { type: 'plain_text', text: h.title.slice(0, 150) } },
@@ -67,8 +77,9 @@ export const teamsPlugin: EzPlugin = definePlugin({
     api.registerPublisher({
       name: 'teams',
       async publish(ctx): Promise<PublishResult> {
+        const rich = await modelFor(ctx);
         const h = headline(ctx.run, ctx);
-        const card = {
+        const card = rich ? buildTeamsCard(typeof ctx.options.title === 'string' ? { ...rich.m, brand: { ...rich.m.brand, name: ctx.options.title } } : rich.m, rich.links) : {
           $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
           type: 'AdaptiveCard',
           version: '1.4',
@@ -79,7 +90,7 @@ export const teamsPlugin: EzPlugin = definePlugin({
           ],
           actions: ctx.runUrl ? [{ type: 'Action.OpenUrl', title: 'Open run', url: ctx.runUrl }] : [],
         };
-        const body = { type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', contentUrl: null, content: card }] };
+        const body = teamsMessage(card);
         if (ctx.options.dryRun) return { ok: true, message: 'dry run: would post to Teams', details: body };
         const r = await postJson(ctx, await webhookOf(ctx), body);
         return r.ok || r.status === 202 ? { ok: true, message: 'posted to Teams' } : { ok: false, message: `Teams webhook returned HTTP ${r.status}` };

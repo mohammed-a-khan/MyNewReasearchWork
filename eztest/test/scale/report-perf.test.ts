@@ -1,19 +1,20 @@
 /**
- * Reporting at scale: a synthetic 5,000-journey run (8 steps each, 40,000
- * evidence entries). The large-run report must stay small, build quickly, open
- * quickly in a real browser, and still let a reader find and open any journey.
+ * Reporting at scale: a synthetic 10,000-test run (8 steps each, 80,000
+ * evidence entries). The report must stay within its size and build-time
+ * budget, open quickly in a real browser, keep only a window of rows in the
+ * DOM, and still let a reader search, filter and open any test.
  */
 import { describe, it, expect, beforeAll, afterAll } from '../support/testkit.js';
-import { mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Browser } from '../../src/browser/index.js';
-import { renderHtmlReport, writeReports } from '../../src/report/index.js';
-import { renderLargeHtmlReport, scriptJson } from '../../src/scale/report.js';
+import { buildReportModel, renderReportModelHtml, writeReports } from '../../src/report/index.js';
+import { scriptJson } from '../../src/scale/report.js';
 import { syntheticRun } from './synthetic.js';
 
-const N = 5000;
+const N = 10_000;
 let dir: string;
 let browser: Browser | undefined;
 const { run, evidence } = syntheticRun(N, { failEvery: 25, healEvery: 40 });
@@ -27,53 +28,59 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe('large-run report', () => {
-  it('is an order of magnitude smaller than the full report and builds in well under a few seconds', () => {
-    let t = performance.now();
-    const full = renderHtmlReport(run, { evidence });
-    const fullMs = performance.now() - t;
-    t = performance.now();
-    const large = renderLargeHtmlReport(run, { evidence });
-    const largeMs = performance.now() - t;
-    console.log(`[report-perf] ${N} journeys: full ${(full.length / 1e6).toFixed(1)} MB in ${Math.round(fullMs)} ms; large ${(large.length / 1e6).toFixed(1)} MB in ${Math.round(largeMs)} ms`);
-    expect(large.length).toBeLessThan(full.length / 5);
-    expect(large.length).toBeLessThan(8_000_000);
-    expect(largeMs).toBeLessThan(5_000);
+describe('report of a 10,000-test run', () => {
+  it('builds within its time and size budget', () => {
+    const t = performance.now();
+    const model = buildReportModel(run, { evidence });
+    const html = renderReportModelHtml(model);
+    const ms = performance.now() - t;
+    console.log(`[report-perf] ${N} tests: ${(html.length / 1e6).toFixed(1)} MB in ${Math.round(ms)} ms`);
+    expect(html.length).toBeLessThan(24_000_000);
+    expect(html.length / N).toBeLessThan(2400);
+    expect(ms).toBeLessThan(8_000);
   });
 
-  it('writeReports picks the large-run report above the threshold', async () => {
-    const out = await writeReports(dir, run, { formats: ['html'], evidence });
-    const size = (await stat(out.html!)).size;
-    expect(size).toBeLessThan(8_000_000);
+  it('writeReports writes it (with the JSON, CSV and summary) in a few seconds', async () => {
+    const t = performance.now();
+    const out = await writeReports(dir, run, { formats: ['html', 'json'], evidence, context: { browsers: [], devices: [], eztestVersion: 'x', node: 'v22', machine: { os: 'linux' }, startedAt: run.startedAt, finishedAt: run.finishedAt, timeZone: 'UTC', extra: {} } });
+    console.log(`[report-perf] writeReports: ${Math.round(performance.now() - t)} ms, html ${((await stat(out.html!)).size / 1e6).toFixed(1)} MB, json ${((await stat(out.json!)).size / 1e6).toFixed(1)} MB`);
+    expect(performance.now() - t).toBeLessThan(20_000);
   }, 60_000);
 
   it('embedded data cannot break out of its script element', () => {
     expect(scriptJson({ x: '</script><img src=x onerror=alert(1)>' })).not.toContain('</script>');
   });
 
-  it('opens fast in a browser, virtualises the list and opens any journey', async ({ skip }) => {
+  it('opens fast in a browser, virtualises the list, searches, filters and opens any test', async ({ skip }) => {
     if (!browser) skip();
-    const file = join(dir, 'large.html');
-    await writeFile(file, renderLargeHtmlReport(run, { evidence }));
     const page = await browser!.newPage();
     const t = Date.now();
-    await page.goto(pathToFileURL(file).href);
+    await page.goto(pathToFileURL(join(dir, 'report.html')).href);
     await page.waitForSelector('#vlist .row');
     const ms = Date.now() - t;
-    console.log(`[report-perf] browser: ${N}-journey report interactive in ${ms} ms`);
+    console.log(`[report-perf] browser: ${N}-test report interactive in ${ms} ms`);
     expect(ms).toBeLessThan(15_000);
-    // Only a window of rows is in the DOM.
-    expect(await page.locator('#vlist .row').count()).toBeLessThan(200);
-    expect(await page.locator('#f-count').textContent()).toBe(`${N} of ${N} journeys`);
-    await page.fill('#f-q', 'journey-4975');
-    await expect.poll(() => page.locator('#f-count').textContent()).toBe(`1 of ${N} journeys`);
+    await page.selectOption('#group', 'none');
+    expect(await page.locator('#vlist .row').count()).toBeLessThan(100);
+    expect(await page.locator('#count').textContent()).toBe(`${N} of ${N} tests`);
+    const s = Date.now();
+    await page.fill('#q', 'journey-9975');
+    await expect.poll(() => page.locator('#count').textContent()).toBe(`1 of ${N} tests matching "journey-9975"`);
+    console.log(`[report-perf] search over ${N} tests: ${Date.now() - s} ms`);
     await page.locator('#vlist .row').first().click();
-    const detail = await page.locator('#detail').textContent();
-    expect(detail).toContain('Journey 4975');
-    expect(detail).toContain('Error 500'); // 4975 % 25 === 0: a failed journey shows its step error
-    await page.fill('#f-q', '');
-    await page.selectOption('#f-status', 'failed');
-    expect(await page.locator('#f-count').textContent()).toBe(`${N / 25} of ${N} journeys`);
+    await expect.poll(() => page.locator('#d-title').textContent()).toBe('Journey 9975: order flow variant 22');
+    expect(await page.locator('#detail').textContent()).toContain('Error 500'); // 9975 % 25 === 0: a failed test shows its step error
+    await page.fill('#q', '');
+    await page.locator('.fchip[data-state="failed"]').click();
+    await expect.poll(() => page.locator('#count').textContent()).toBe(`${N / 25} of ${N} tests`);
+    // scrolling far down renders the rows there
+    await page.locator('.fchip[data-state="all"]').click();
+    await page.locator('#vlist').evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+    await expect.poll(() => page.locator('#vlist .row').last().textContent()).toContain('Journey 9999');
+    expect(await page.locator('#vlist .row').count()).toBeLessThan(100);
+    // a permalink deep in the run
+    await page.goto(pathToFileURL(join(dir, 'report.html')).href + '#test/journey-7777');
+    await expect.poll(() => page.locator('#d-title').textContent()).toBe('Journey 7777: order flow variant 7');
     await page.close();
   }, 120_000);
 });

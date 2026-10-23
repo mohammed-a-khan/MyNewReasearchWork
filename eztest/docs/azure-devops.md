@@ -150,6 +150,12 @@ then the run's browser).
 npx eztest ado publish eztest-results/<run> --trace --create-bugs --flaky --comment-requirements
 ```
 
+With `ado.publishResults: true`, `eztest run` publishes every run this way after its analysis.
+Either way the publish result (success, partial or failed, and why), the test run, each
+result, test case, plan and suite, the bugs, and the build and release are recorded in the run's
+`integrations.json`; the HTML report is rendered again with those links and attached (with the
+one-page `summary.html`) to the test run ([docs/reports.md](reports.md#what-the-report-shows)).
+
 | What | How it appears in Azure Test Plans |
 |---|---|
 | Journeys | One result per test case and point, on the run's configuration |

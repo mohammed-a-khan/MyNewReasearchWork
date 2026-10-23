@@ -152,6 +152,7 @@ ado:                                     # docs/azure-devops.md
   testPlanId: 417                          # per environment in config/<env>.yaml
   testSuiteId: 418
   createBugs: false
+  publishResults: false                  # true: eztest run publishes to Test Plans and links the report (docs/reports.md)
   configurations: { chromium: "Windows + Chrome" }
   paths: [{ tag: payments, areaPath: Shop\Payments }]
 
@@ -162,6 +163,12 @@ vcs:                                     # docs/git.md
 
 readiness:
   policyPath: readiness-policy.yaml
+
+report:                                  # docs/reports.md
+  name: Contoso Shop                     # header; title: and logo: (svg/png, embedded) too
+  trendRuns: 20
+  baseline: previous                     # previous | none | <run directory>
+  studioUrl: http://localhost:4400
 
 security:
   allowPageScripts: false          # "Run script" / "Run JavaScript" steps (they run in the page, never in Node)

@@ -12,6 +12,7 @@ import { loadConfig, listProjects, encryptValue, createMaskedLogger, type Loaded
 import { effectiveSummary } from './effective.js';
 import { journeyToEzScript, loadJourneyFile } from '../intent/index.js';
 import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions } from '../engine/index.js';
+import { reportOptionsFromConfig } from '../engine/analyze.js';
 import { terminalManualProvider } from '../manual/terminal.js';
 import { registerCoverageCommands } from './coverage.js';
 import { registerManualCommands } from './manual.js';
@@ -22,6 +23,7 @@ import { generateTotp } from '../identity/index.js';
 import { analyzeImpact, loadImpactMapping, changedFilesFromGit, exitCodeWithQuarantine, loadQuarantine, quarantineStatus } from '../insights/index.js';
 import { registerLoadCommands } from '../load/cli.js';
 import { registerAdoCommands } from './ado.js';
+import { registerReportCommands } from './report.js';
 import { registerGitCommands } from './git.js';
 import { findJourneyFiles, loadJourneys, filterJourneys } from './journeys.js';
 import { isCodeJourneyFile, loadCodeJourneys } from '../runner/code-journeys.js';
@@ -146,7 +148,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--lens <names>', 'lenses after every step: a11y, security, visual (":warn" to not fail)', list)
     .option('--update-baselines', 'write visual baselines instead of comparing')
     .option('--update-snapshots', 'write aria snapshot baselines instead of comparing')
-    .option('--reporter <formats>', 'report formats: html,json,junit', list)
+    .option('--reporter <formats>', 'report formats: html,json,junit,csv,summary (html also writes tests.csv and summary.html)', list)
     .option('--policy <file>', 'readiness policy (default readiness.policyPath from config)')
     .option('--no-analyze', 'skip history/flaky/triage/readiness analysis')
     .option('--fast', 'fast mode: screenshots on failure only, no lenses, fingerprints only when missing, logs kept only for failures')
@@ -278,8 +280,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
 
       const locks = o.locks === false ? undefined : runLocksFor(journeys, loaded, io.cwd, client);
       const reporterNames: string[] = o.reporter ?? cfg.reporters;
-      const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit'].includes(r)) as ReportFormat[];
-      const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'console'].includes(r));
+      const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit', 'csv', 'summary'].includes(r)) as ReportFormat[];
+      const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'csv', 'summary', 'console'].includes(r));
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         addons,
@@ -328,6 +330,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
           formats: builtinFormats.length ? builtinFormats : ['html', 'json'],
           ...(cfg.vcs.branchScope.history && run.environment?.gitBranch ? { historyBranch: run.environment.gitBranch } : {}),
           journeys: all, uiCoverage: cfg.coverage.ui, a11yScopes: cfg.accessibility.scopes,
+          ...reportOptionsFromConfig(cfg, io.cwd, io.env),
         });
         if (a.uiCoverage) out(`UI coverage: ${a.uiCoverage.totals.tested}/${a.uiCoverage.totals.elements} elements (${(a.uiCoverage.totals.percent * 100).toFixed(1)}%) on ${a.uiCoverage.totals.pages} page(s); eztest coverage ui ${runDir}`);
         for (const t of a.failureTags.filter((x) => x.tags.length)) out(`tags: ${t.journeyId}: ${t.tags.join(', ')}`);
@@ -388,6 +391,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
 
   // ------------------------------------------------------------------ lint
   registerLintCommand(program, io, (o) => load(o));
+  registerReportCommands(program, io, (o) => load(o));
 
   // ------------------------------------------------------------------ validate / convert
   program
@@ -468,10 +472,13 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--policy <file>', 'readiness policy YAML')
     .option('--no-history', 'do not record this run into history')
     .action(async (runDir: string, o: { policy?: string; history: boolean }) => {
+      const hasConfig = ['eztest.config.yaml', 'eztest.config.yml', 'eztest.config.json'].some((f) => existsSync(join(io.cwd, f)));
+      const loaded = hasConfig ? await load({}).catch(() => undefined) : undefined;
       const a = await analyzeRun(resolve(io.cwd, runDir), {
         historyPath: resolve(io.cwd, '.eztest', 'history.json'),
         recordHistory: o.history,
         readinessPolicyPath: o.policy ? resolve(io.cwd, o.policy) : undefined,
+        ...(loaded ? reportOptionsFromConfig(loaded.config, io.cwd, io.env) : { cwd: io.cwd }),
       });
       io.out(JSON.stringify({ triage: a.triage.counts, needsHuman: a.triage.needsHuman, readiness: a.readiness?.decision, reports: a.reports }, null, 2));
     });

@@ -17,6 +17,8 @@ import { analyzeImpact, changedFilesFromGit, HistoryStore, loadImpactMapping, ty
 import { loadJourneyFile } from '../intent/index.js';
 import { analyzeRun } from '../engine/index.js';
 import type { ReportFormat } from '../report/index.js';
+import { recordIntegration, rerenderReports } from '../report/index.js';
+import { reportOptionsFromConfig } from '../engine/analyze.js';
 import {
   ciMatrix, durationsFromHistory, durationsFromRuns, expandRunDirs, FileLockBackend, fmtMs, JourneyLocker, mergeRuns, parseBudget, parseRisk,
   parseShard, selectJourneys, selectShard, verifyMergedRun, type DurationTable, type Selection, type ShardPlan,
@@ -321,15 +323,42 @@ export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRu
         const r = await client.publishRun(runDir, { analysis: analysis as Record<string, unknown>, meta: ciMeta() });
         runUrl = `${client.base}/ui/p/${encodeURIComponent(client.project)}/runs/${encodeURIComponent(r.runId)}`;
         ctx.out(`published ${r.uploaded} files (${Math.round(r.bytes / 1024)} KiB) to ${runUrl}${r.verified ? ' (evidence verified by the server)' : ` - server could NOT verify the evidence: ${r.problems.slice(0, 2).join('; ')}`}`);
+        await recordIntegration(runDir, { resultsServer: { url: runUrl, verified: r.verified, at: new Date().toISOString() } }).catch(() => undefined);
       } catch (e) {
         ctx.io.err(`warning: publishing to the results server failed: ${(e as Error).message}`);
       }
     }
   }
+  // Azure Test Plans (ado.publishResults): results, bugs, links written into the report, the report attached to the test run.
+  if (ctx.loaded.config.ado.publishResults) {
+    try {
+      const { publishRunToAdo } = await import('./ado.js');
+      const r = await publishRunToAdo(ctx.loaded, { cwd: ctx.cwd, env: ctx.io.env, runDir });
+      ctx.out(`azure devops: test run ${r.summary.runId} (${r.summary.results.length} result(s)${r.summary.bugs.length ? `, ${r.summary.bugs.length} bug(s)` : ''}${r.attached.length ? `, report attached` : ''})`);
+      for (const w of r.summary.warnings) ctx.io.err(`warning: azure devops: ${w}`);
+    } catch (e) {
+      ctx.io.err(`warning: publishing to Azure DevOps failed: ${(e as Error).message}`);
+    }
+  }
   if (ctx.loaded.config.publishers.length) {
     const results = await runPublishers(ctx.loaded.config.publishers as never, { run, runDir, analysis, resolveSecret: secretResolver(ctx.loaded, ctx.cwd), runUrl });
     for (const r of results) (r.ok ? ctx.out : ctx.io.err)(`publish ${r.publisher}: ${r.message}`);
+    await recordPublisherResults(runDir, results).catch(() => undefined);
   }
+  await rerenderReports(runDir).catch((e: Error) => ctx.io.err(`warning: report not updated with the integration links: ${e.message}`));
+}
+
+/** Publisher outcomes into integrations.json: Slack/Teams notifications, Jira bugs, other publishers. */
+export async function recordPublisherResults(runDir: string, results: Array<{ publisher: string; ok: boolean; message: string; skipped?: boolean; details?: unknown }>): Promise<void> {
+  const at = new Date().toISOString();
+  const notifications = results.filter((r) => (r.publisher === 'slack' || r.publisher === 'teams') && !r.skipped).map((r) => ({ channel: r.publisher, ok: r.ok, message: r.message, at }));
+  const jira = results.find((r) => r.publisher === 'jira' && !r.skipped);
+  const bugs = Array.isArray(jira?.details) ? (jira!.details as Array<{ journeyId?: string; key?: string; action?: string }>).filter((b) => b.journeyId && b.key && b.action !== 'dry-run').map((b) => ({ journeyId: b.journeyId!, key: b.key!, action: b.action ?? 'created' })) : [];
+  await recordIntegration(runDir, {
+    ...(notifications.length ? { notifications } : {}),
+    ...(jira ? { jira: { status: jira.ok ? 'success' : 'failed', ...(jira.ok ? {} : { reason: jira.message }), bugs } } : {}),
+    publishers: results.filter((r) => !['slack', 'teams', 'jira'].includes(r.publisher)).map((r) => ({ name: r.publisher, ok: r.ok, message: r.message, ...(r.skipped ? { skipped: true } : {}) })),
+  });
 }
 
 /** Branch and commit from common CI variables (GitHub Actions, Azure Pipelines, GitLab). */
@@ -381,6 +410,7 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
         recordHistory: o.history !== false,
         readinessPolicyPath: policy ? resolve(io.cwd, policy) : undefined,
         formats: (o.reporter ?? ['html', 'json', 'junit']) as ReportFormat[],
+        ...(cfg ? reportOptionsFromConfig(cfg, io.cwd, io.env) : { cwd: io.cwd }),
       });
       for (const w of a.warnings) io.err(`warning: ${w}`);
       if (a.readiness) io.out(`readiness: ${a.readiness.decision} (score ${a.readiness.score})`);
@@ -454,6 +484,11 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
         for (const r of results) {
           (r.ok ? io.out : io.err)(`publish ${r.publisher}: ${r.message}`);
           if (o.dryRun && r.details !== undefined) io.out(JSON.stringify(r.details, null, 2));
+        }
+        if (!o.dryRun) {
+          if (runUrl) await recordIntegration(dir, { resultsServer: { url: runUrl, at: new Date().toISOString() } }).catch(() => undefined);
+          await recordPublisherResults(dir, results).catch(() => undefined);
+          await rerenderReports(dir).catch(() => undefined);
         }
         failed ||= results.some((r) => !r.ok);
         process.exitCode = failed ? 1 : 0;

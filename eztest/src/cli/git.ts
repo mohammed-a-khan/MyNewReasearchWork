@@ -205,6 +205,18 @@ export function registerGitCommands(program: Command, io: CliIO, load: Loader): 
       });
       io.out(`${provider.kind}: ${r.summary.description}${r.status ? `; ${r.status.kind} posted (${r.status.annotations} annotation(s))` : ''}${r.comment ? `; comment ${r.comment.action} on #${r.pr}` : ''}`);
       for (const w of r.warnings) io.err(`warning: ${provider.redact(w)}`);
+      // The run's report shows the pull request, the comment and the status it got.
+      if (r.pr) {
+        const { recordIntegration, rerenderReports } = await import('../report/index.js');
+        const repo = provider.repo;
+        const url = provider.kind === 'azure-devops' && 'webUrl' in provider ? (provider as unknown as { webUrl(n: number): string }).webUrl(r.pr)
+          : repo.provider === 'github' ? `https://${repo.host}/${repo.owner}/${repo.repo}/pull/${r.pr}`
+          : repo.provider === 'gitlab' ? `https://${repo.host}/${repo.project}/-/merge_requests/${r.pr}`
+          : repo.provider === 'bitbucket' ? `https://${repo.host}/${repo.owner}/${repo.repo}/pull-requests/${r.pr}` : undefined;
+        const dir = resolve(io.cwd, runDir);
+        await recordIntegration(dir, { pullRequest: { provider: provider.kind, number: r.pr, ...(url ? { url } : {}), ...(r.comment ? { comment: { action: r.comment.action, id: r.comment.id } } : {}), ...(r.status ? { status: { kind: r.status.kind, state: r.summary.state, annotations: r.status.annotations } } : {}), at: new Date().toISOString() } }).catch(() => undefined);
+        await rerenderReports(dir).catch(() => undefined);
+      }
       if (o.gitlabCodequality) {
         const out = resolve(io.cwd, o.gitlabCodequality);
         await mkdir(dirname(out), { recursive: true });

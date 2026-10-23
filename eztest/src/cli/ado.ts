@@ -25,8 +25,11 @@ import {
   syncSuiteByTag,
   testCaseWiql,
   BROWSER_VALUE,
+  attachRunFiles,
   type AdoClient,
+  type PublishSummary,
 } from '../alm-ado/index.js';
+import { adoWeb, recordIntegration, rerenderReports } from '../report/index.js';
 import type { LoadedConfig } from '../config/index.js';
 import type { RunResult } from '../core/index.js';
 import { identityVaultFromConfig } from '../identity/index.js';
@@ -78,6 +81,137 @@ async function journeyFilesRel(paths: string[], cwd: string): Promise<Array<{ pa
   return (await findJourneyFiles(paths, cwd)).map((p) => ({ path: p, rel: relative(root, p).split(sep).join('/') }));
 }
 
+export interface AdoRunPublishOptions {
+  cwd: string;
+  env: Record<string, string | undefined>;
+  runDir: string;
+  plan?: number;
+  suite?: number;
+  configuration?: string;
+  runName?: string;
+  createBugs?: boolean;
+  trace?: boolean;
+  evidencePack?: string;
+  stepResults?: boolean;
+  flaky?: boolean;
+  commentRequirements?: boolean;
+  /** Record the result in integrations.json, render the reports again with the links and attach them (default true). */
+  report?: boolean;
+  /** An AdoClient to use (tests); default from the configuration. */
+  client?: AdoClient;
+}
+
+/**
+ * Publish a run directory to Azure Test Plans (`eztest ado publish`, and `eztest run` with
+ * ado.publishResults), record what was published in integrations.json, render the HTML report again
+ * with the test run, result, test case and bug links, and attach that report to the test run.
+ */
+export async function publishRunToAdo(loaded: LoadedConfig, o: AdoRunPublishOptions): Promise<{ summary: PublishSummary; requirements: Array<{ requirement: string; action: string }>; reports: Partial<Record<string, string>>; attached: string[] }> {
+  const cfg = loaded.config;
+  const ac = cfg.ado;
+  const dir = o.runDir;
+  const client = o.client ?? (await adoClientFor(loaded, o.cwd, o.env));
+  const run = JSON.parse(await readFile(join(dir, 'run.json'), 'utf8')) as RunResult;
+  const pack = o.evidencePack ?? join(dir, 'evidence-pack.zip');
+  const reportFiles = ['report.html', 'summary.html'];
+  // The report is attached after publishing, rendered again with the run's links.
+  const attachments: Array<{ path: string; comment?: string }> = ['report.html', 'junit.xml', 'report.json'].filter((f) => o.report === false || !reportFiles.includes(f)).map((f) => join(dir, f)).filter((p) => existsSync(p)).map((path) => ({ path }));
+  if (existsSync(pack)) attachments.push({ path: pack, comment: 'EZTest evidence pack (signed, hash-chained)' });
+  let configurationId: number | undefined;
+  const cfgArg = o.configuration;
+  if (cfgArg) configurationId = /^\d+$/.test(cfgArg) ? Number(cfgArg) : (await resolveConfiguration(client, { x: cfgArg }, ['x']))?.id;
+  else configurationId = (await resolveConfiguration(client, ac.configurations, [cfg.environment, run.environment?.browser, BROWSER_VALUE[run.environment?.browser ?? '']]))?.id;
+  let flakyScores;
+  if (o.flaky || ac.markFlaky) {
+    try {
+      const h = await HistoryStore.open(resolve(o.cwd, '.eztest', 'history.json'));
+      const scoped = cfg.vcs.branchScope.history && run.environment?.gitBranch ? h.forBranch(run.environment.gitBranch) : h;
+      flakyScores = scoreHistory(scoped);
+    } catch {
+      flakyScores = [];
+    }
+  }
+  const co = await GitRepo.open(o.cwd).then((r) => loadCodeowners(r.root)).catch(() => undefined);
+  const files = co ? await journeyFilesRel([cfg.journeysDir], o.cwd) : [];
+  const fileOfJourney = new Map<string, string>();
+  for (const f of files) {
+    try {
+      fileOfJourney.set((await loadJourneyFile(f.path)).id, f.rel);
+    } catch {
+      // skip unparsable journeys
+    }
+  }
+  const fileFor = (id: string) => fileOfJourney.get(id) ?? [...fileOfJourney.entries()].find(([k]) => id.startsWith(`${k}-`))?.[1];
+  const links = pipelineLinksFromEnv(o.env);
+  const at = () => new Date().toISOString();
+  let summary: PublishSummary;
+  try {
+    summary = await publishRun(run, {
+      client,
+      planId: o.plan ?? ac.testPlanId,
+      suiteId: o.suite ?? ac.testSuiteId,
+      runName: o.runName,
+      links,
+      configurationId,
+      attachments,
+      resultEvidence: { runDir: dir, kinds: o.trace ? ['screenshot', 'trace'] : ['screenshot'] },
+      stepResults: o.stepResults !== false,
+      flaky: { enabled: !!(o.flaky || ac.markFlaky), scores: flakyScores },
+      bugs: {
+        enabled: !!o.createBugs || ac.createBugs,
+        areaPath: ac.areaPath,
+        iterationPath: ac.iterationPath,
+        pathsFor: (id, tags) => areaFor({ tags, path: fileFor(id) }, ac.paths, { areaPath: ac.areaPath, iterationPath: ac.iterationPath }),
+        assignTo: (id) => {
+          const f = fileFor(id);
+          return co && f ? assigneeFor(ownersOf(co, f), cfg.vcs.owners) : undefined;
+        },
+      },
+    });
+  } catch (e) {
+    if (o.report !== false) {
+      await recordIntegration(dir, { ado: { collectionUrl: client.collectionUrl, project: client.project, publish: { status: 'failed', reason: client.redact((e as Error).message).slice(0, 500), at: at(), results: [], unmapped: [], missingPoints: [], attachments: 0, warnings: [] } } });
+      await rerenderReports(dir).catch(() => undefined);
+    }
+    throw e;
+  }
+  const requirements: Array<{ requirement: string; action: string }> = [];
+  if (o.commentRequirements || ac.commentOnRequirements) {
+    for (const x of await commentOnRequirements(client, run, { published: summary })) requirements.push({ requirement: String(x.requirement), action: String(x.action) });
+  }
+  const reports: Partial<Record<string, string>> = {};
+  const attached: string[] = [];
+  if (o.report !== false) {
+    const problems = [...(summary.missingPoints.length ? [`${summary.missingPoints.length} test case(s) without a test point (${summary.missingPoints.map((m) => `#${m.testCaseId}`).slice(0, 5).join(', ')})`] : []), ...summary.warnings.filter((w) => !/already present|reusing/.test(w)).slice(0, 3)];
+    const base = { collectionUrl: client.collectionUrl, project: client.project };
+    const buildUrl = links.buildId ? adoWeb.build(base, links.buildId) : undefined;
+    await recordIntegration(dir, {
+      ado: {
+        ...base,
+        publish: {
+          status: problems.length ? 'partial' : 'success', ...(problems.length ? { reason: problems.join('; ') } : {}), at: at(),
+          runId: summary.runId, runName: summary.runName, runUrl: adoWeb.testRun(base, summary.runId),
+          ...((o.plan ?? ac.testPlanId) ? { planId: o.plan ?? ac.testPlanId } : {}), ...((o.suite ?? ac.testSuiteId) ? { suiteId: o.suite ?? ac.testSuiteId } : {}),
+          results: summary.results.map((r) => ({ journeyId: r.journeyId, testCaseId: r.testCaseId, ...(r.resultId ? { resultId: r.resultId, url: adoWeb.testResult(base, summary.runId, r.resultId) } : {}), outcome: r.outcome })),
+          unmapped: summary.unmapped, missingPoints: summary.missingPoints, attachments: summary.attachments.length, warnings: summary.warnings,
+        },
+        bugs: summary.bugs.map((b) => ({ journeyId: b.journeyId, id: b.id, action: b.action, signature: b.signature, url: adoWeb.workItem(base, b.id) })),
+        ...(links.buildId || links.buildNumber ? { build: { ...(links.buildId ? { id: String(links.buildId) } : {}), ...(links.buildNumber ? { number: links.buildNumber } : {}), ...(buildUrl ? { url: buildUrl } : {}) } } : {}),
+        ...(o.env.RELEASE_RELEASENAME ? { release: { name: o.env.RELEASE_RELEASENAME, ...(o.env.RELEASE_RELEASEWEBURL ? { url: o.env.RELEASE_RELEASEWEBURL } : {}), ...(o.env.RELEASE_ENVIRONMENTNAME ? { environment: o.env.RELEASE_ENVIRONMENTNAME } : {}) } } : {}),
+        ...(requirements.length ? { requirementsCommented: requirements.map((r) => ({ requirement: r.requirement, action: r.action, ...(/^\d+$/.test(r.requirement) ? { url: adoWeb.workItem(base, r.requirement) } : {}) })) } : {}),
+      },
+    });
+    Object.assign(reports, await rerenderReports(dir));
+    const late = reportFiles.map((f) => join(dir, f)).filter((p) => existsSync(p)).map((path) => ({ path, comment: 'EZTest report with the Azure DevOps links of this run' }));
+    try {
+      for (const a of await attachRunFiles(client, summary.runId, late)) if (a.action === 'uploaded') attached.push(a.fileName);
+    } catch (e) {
+      summary.warnings.push(`report not attached to run ${summary.runId}: ${client.redact((e as Error).message).slice(0, 200)}`);
+    }
+  }
+  return { summary, requirements, reports, attached };
+}
+
 export function registerAdoCommands(program: Command, io: CliIO, load: Loader): void {
   const withConfig = (c: Command) =>
     c
@@ -102,66 +236,11 @@ export function registerAdoCommands(program: Command, io: CliIO, load: Loader): 
     .option('--comment-requirements', 'post a result summary on the requirements the journeys trace to')
     .action(async (runDir: string, o) => {
       const loaded = await load(o);
-      const cfg = loaded.config;
-      const ac = cfg.ado;
-      const client = await adoClientFor(loaded, io.cwd, io.env);
-      const dir = resolve(io.cwd, runDir);
-      const run = JSON.parse(await readFile(join(dir, 'run.json'), 'utf8')) as RunResult;
-      const pack = o.evidencePack ? resolve(io.cwd, o.evidencePack) : join(dir, 'evidence-pack.zip');
-      const attachments = ['report.html', 'junit.xml', 'report.json'].map((f) => join(dir, f)).filter((p) => existsSync(p)).map((path) => ({ path }));
-      if (existsSync(pack)) attachments.push({ path: pack, comment: 'EZTest evidence pack (signed, hash-chained)' } as { path: string; comment?: string });
-      let configurationId: number | undefined;
-      const cfgArg = o.configuration as string | undefined;
-      if (cfgArg) configurationId = /^\d+$/.test(cfgArg) ? Number(cfgArg) : (await resolveConfiguration(client, { x: cfgArg }, ['x']))?.id;
-      else configurationId = (await resolveConfiguration(client, ac.configurations, [o.env, run.environment?.browser, BROWSER_VALUE[run.environment?.browser ?? '']]))?.id;
-      let flakyScores;
-      if (o.flaky || ac.markFlaky) {
-        try {
-          const h = await HistoryStore.open(resolve(io.cwd, '.eztest', 'history.json'));
-          const scoped = cfg.vcs.branchScope.history && run.environment?.gitBranch ? h.forBranch(run.environment.gitBranch) : h;
-          flakyScores = scoreHistory(scoped);
-        } catch {
-          flakyScores = [];
-        }
-      }
-      const co = await GitRepo.open(io.cwd).then((r) => loadCodeowners(r.root)).catch(() => undefined);
-      const files = co ? await journeyFilesRel([cfg.journeysDir], io.cwd) : [];
-      const fileOfJourney = new Map<string, string>();
-      for (const f of files) {
-        try {
-          fileOfJourney.set((await loadJourneyFile(f.path)).id, f.rel);
-        } catch {
-          // skip unparsable journeys
-        }
-      }
-      const fileFor = (id: string) => fileOfJourney.get(id) ?? [...fileOfJourney.entries()].find(([k]) => id.startsWith(`${k}-`))?.[1];
-      const r = await publishRun(run, {
-        client,
-        planId: o.plan ?? ac.testPlanId,
-        suiteId: o.suite ?? ac.testSuiteId,
-        runName: o.runName,
-        links: pipelineLinksFromEnv(io.env),
-        configurationId,
-        attachments,
-        resultEvidence: { runDir: dir, kinds: o.trace ? ['screenshot', 'trace'] : ['screenshot'] },
-        stepResults: o.stepResults !== false,
-        flaky: { enabled: !!(o.flaky || ac.markFlaky), scores: flakyScores },
-        bugs: {
-          enabled: !!o.createBugs || ac.createBugs,
-          areaPath: ac.areaPath,
-          iterationPath: ac.iterationPath,
-          pathsFor: (id, tags) => areaFor({ tags, path: fileFor(id) }, ac.paths, { areaPath: ac.areaPath, iterationPath: ac.iterationPath }),
-          assignTo: (id) => {
-            const f = fileFor(id);
-            return co && f ? assigneeFor(ownersOf(co, f), cfg.vcs.owners) : undefined;
-          },
-        },
-      });
-      io.out(JSON.stringify(r, null, 2));
-      if (o.commentRequirements || ac.commentOnRequirements) {
-        const c = await commentOnRequirements(client, run, { published: r });
-        for (const x of c) io.out(`requirement ${x.requirement}: comment ${x.action}`);
-      }
+      const r = await publishRunToAdo(loaded, { cwd: io.cwd, env: io.env, runDir: resolve(io.cwd, runDir), plan: o.plan, suite: o.suite, configuration: o.configuration, runName: o.runName, createBugs: !!o.createBugs, trace: !!o.trace, evidencePack: o.evidencePack ? resolve(io.cwd, o.evidencePack) : undefined, stepResults: o.stepResults !== false, flaky: !!o.flaky, commentRequirements: !!o.commentRequirements, report: true });
+      io.out(JSON.stringify(r.summary, null, 2));
+      for (const x of r.requirements) io.out(`requirement ${x.requirement}: comment ${x.action}`);
+      // stdout stays the publish summary (JSON); the report note goes to stderr.
+      if (r.reports.html) io.err(`report html: ${r.reports.html} (with the Azure DevOps links${r.attached.length ? `; attached to test run ${r.summary.runId}` : ''})`);
     });
 
   // ------------------------------------------------------------------ import

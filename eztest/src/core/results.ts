@@ -157,6 +157,24 @@ export interface JourneyResult {
   reliability?: JourneyReliability;
   /** Present for manual and hybrid journeys. */
   manual?: JourneyManualSummary;
+  /** Every attempt when the journey was retried (the result itself is the last one); reports diff them. */
+  attempts?: AttemptSummary[];
+  /**
+   * Where the test sits in a suite tree, outermost first (e.g. BDD feature, rule, scenario outline).
+   * Reports group by it; without it they group by the journey file's folders.
+   */
+  suitePath?: Array<{ kind: string; name: string }>;
+}
+
+/** One attempt of a retried journey. */
+export interface AttemptSummary {
+  attempt: number;
+  status: JourneyStatus;
+  startedAt: string;
+  durationMs: number;
+  failedStepId?: string;
+  error?: string;
+  steps: Array<{ stepId: string; intent: string; status: StepStatus; durationMs: number }>;
 }
 
 export interface RunSummary {
