@@ -228,19 +228,40 @@ describe('the results server keeps contracts, verifications and releases', () =>
 });
 
 describe('results-server schema', () => {
-  it('migrates a schema-1 database (before contracts) to schema 2 on open', async () => {
+  it('migrates a schema-1 database (before contracts) to the current schema on open', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'eztest-store-'));
     const file = join(dir, 'eztest.db');
     const fresh = await Store.open({ driver: 'sqlite', file });
     await fresh.run('INSERT INTO ez_projects (project, created_at) VALUES (?, ?)', ['kept', 'x']);
-    for (const t of ['ez_contracts', 'ez_contract_verifications', 'ez_releases']) await fresh.run(`DROP TABLE ${t}`);
+    for (const t of ['ez_contracts', 'ez_contract_verifications', 'ez_releases', 'ez_store', 'ez_pool_items', 'ez_deployments']) await fresh.run(`DROP TABLE ${t}`);
     await fresh.run("UPDATE ez_meta SET v = '1' WHERE k = 'schema'");
     await fresh.close();
     const upgraded = await Store.open({ driver: 'sqlite', file });
     try {
-      expect(await upgraded.one("SELECT v FROM ez_meta WHERE k = 'schema'")).toEqual({ v: '2' });
+      expect(await upgraded.one("SELECT v FROM ez_meta WHERE k = 'schema'")).toEqual({ v: '3' });
+      expect(await upgraded.all('SELECT * FROM ez_store')).toEqual([]);
       expect(await upgraded.all('SELECT * FROM ez_releases')).toEqual([]);
       expect(await upgraded.one('SELECT project FROM ez_projects')).toEqual({ project: 'kept' });
+    } finally {
+      await upgraded.close();
+    }
+  });
+});
+
+describe('results-server schema 3', () => {
+  it('migrates a schema-2 database (before shared data) to schema 3, keeping contracts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eztest-store-'));
+    const file = join(dir, 'eztest.db');
+    const fresh = await Store.open({ driver: 'sqlite', file });
+    await fresh.run('INSERT INTO ez_releases (project, app, environment, version) VALUES (?, ?, ?, ?)', ['p', 'shop', 'prod', '1']);
+    for (const t of ['ez_store', 'ez_pool_items', 'ez_deployments']) await fresh.run(`DROP TABLE ${t}`);
+    await fresh.run("UPDATE ez_meta SET v = '2' WHERE k = 'schema'");
+    await fresh.close();
+    const upgraded = await Store.open({ driver: 'sqlite', file });
+    try {
+      expect(await upgraded.one("SELECT v FROM ez_meta WHERE k = 'schema'")).toEqual({ v: '3' });
+      expect(await upgraded.all('SELECT * FROM ez_pool_items')).toEqual([]);
+      expect(await upgraded.one('SELECT version FROM ez_releases')).toEqual({ version: '1' });
     } finally {
       await upgraded.close();
     }

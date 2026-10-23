@@ -16,3 +16,4 @@ export { ROLES, PERMISSIONS, can, roleFor, createToken, listTokens, revokeToken,
 export { OidcClient, pkceChallenge, safeNext, type OidcConfig } from './oidc.js';
 export { Store, dialectSql } from './store.js';
 export { ContractRegistry, type ContractQuery } from './contracts.js';
+export { SharedDataRegistry } from './datastore.js';

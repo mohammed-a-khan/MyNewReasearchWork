@@ -320,6 +320,9 @@ export const ActionType = z.enum([
   'actor',
   /** "In parallel:": the child steps (usually As blocks of different actors) run at the same time. */
   'parallel',
+  // -------------------------------------------- shared test data (see docs/shared-data.md)
+  /** Shared store and data pools: args.op save | load | delete | poolAdd | poolTake | poolCount | poolSeed (src/store). */
+  'store',
 ]);
 export type ActionType = z.infer<typeof ActionType>;
 

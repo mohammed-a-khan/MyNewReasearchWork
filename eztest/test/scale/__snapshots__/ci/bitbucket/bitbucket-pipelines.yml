@@ -1,0 +1,92 @@
+# EZTest on Bitbucket Pipelines (written by eztest init --ci bitbucket; docs/pipelines.md).
+#
+#   pull requests    -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
+#   custom: nightly  -> 4 parallel shards (EZTest balances them) merged into one verified run.
+#                       Schedule it in Repository settings > Pipelines > Schedules: Daily, 02:00 (Bitbucket asks for
+#                       the time in your local time zone and stores it as UTC).
+#   main             -> deploy and test SIT, then UAT (deployment environments sit and uat)
+#
+# Test reports: junit.xml is copied into test-results/, which Bitbucket shows in the Tests tab; the run directory is an
+# artifact; eztest gate fails the step on NO_GO. Repository variables: EZTEST_MASTER_KEY (secured).
+image: mcr.microsoft.com/devcontainers/javascript-node:22
+
+definitions:
+  caches:
+    eztest-browsers: ~/.cache/eztest
+  steps:
+    - step: &shard
+        name: EZTest shard
+        caches: [node, eztest-browsers]
+        script:
+          - npm ci && npx eztest install-browsers chromium
+          # BITBUCKET_PARALLEL_STEP / _COUNT select this step's shard (pipelines.nightly.shards).
+          - npx eztest run --pipeline nightly --reporter json,junit || true
+          - mkdir -p shards && cp -r eztest-results/run-* shards/
+        artifacts: [shards/**]
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: EZTest smoke
+          caches: [node, eztest-browsers]
+          script:
+            - export EZTEST_BASE_REF="origin/$BITBUCKET_PR_DESTINATION_BRANCH" EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
+            - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+            - npm ci && npx eztest install-browsers chromium
+            # Fails on failed journeys and on a NO_GO readiness decision (pipelines.pr.gate: readiness).
+            - npx eztest run --reporter html,json,junit --pipeline pr; status=$?
+            - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
+            - exit $status
+          artifacts: [eztest-results/**]
+  custom:
+    nightly:
+      - parallel:
+          - step: *shard
+          - step: *shard
+          - step: *shard
+          - step: *shard
+      - step:
+          name: EZTest merge and gate
+          caches: [node]
+          script:
+            - export EZTEST_SCHEDULED=true
+            - npm ci
+            - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+            - npx eztest evidence verify eztest-results/merged
+            - mkdir -p test-results && cp eztest-results/merged/junit.xml test-results/eztest.xml
+            - npx eztest gate eztest-results/merged --on-no-go fail
+          artifacts: [eztest-results/merged/**]
+  branches:
+    main:
+      - step:
+          name: Deploy SIT
+          deployment: sit
+          script:
+            - echo "deploy the app to SIT here"
+      - step:
+          name: EZTest SIT
+          caches: [node, eztest-browsers]
+          script:
+            - export EZTEST_DEPLOY_ENVIRONMENT=sit EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
+            - npm ci && npx eztest install-browsers chromium
+            - npx eztest run --reporter html,json,junit --pipeline deploy-sit; status=$?
+            - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
+            - exit $status
+          artifacts: [eztest-results/**]
+      - step:
+          name: Deploy UAT
+          deployment: uat
+          trigger: manual
+          script:
+            - echo "deploy the app to UAT here"
+      - step:
+          name: EZTest UAT
+          caches: [node, eztest-browsers]
+          script:
+            - export EZTEST_DEPLOY_ENVIRONMENT=uat EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
+            - npm ci && npx eztest install-browsers chromium
+            - npx eztest run --reporter html,json,junit --pipeline deploy-uat; status=$?
+            - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
+            - exit $status
+          artifacts: [eztest-results/**]

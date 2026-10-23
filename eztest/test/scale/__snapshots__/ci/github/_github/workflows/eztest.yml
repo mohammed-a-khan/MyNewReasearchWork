@@ -1,0 +1,157 @@
+# EZTest on GitHub Actions (written by eztest init --ci github; docs/pipelines.md).
+#
+#   pull_request        -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
+#   schedule (nightly)  -> regression: --pipeline nightly in duration-balanced shards, merged into one verified run
+#   workflow_dispatch   -> deploy-sit, then deploy-uat: run after that environment's deployment
+#                          (or call this workflow from your deployment workflow: workflow_call)
+#
+# Schedules run in UTC on GitHub: '0 2 * * *' is 02:00 UTC every day.
+# JUnit results: junit.xml artifacts and the job summary (GitHub has no built-in test tab).
+# The readiness gate (eztest gate) fails the job on NO_GO.
+# Optional: repository variable EZTEST_SERVER_URL and secret EZTEST_SERVER_TOKEN (a tester token) to publish runs,
+# keep deployment records and share heal decisions, history and the shared store across machines.
+name: EZTest
+on:
+  pull_request:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment that was just deployed (sit or uat)
+        required: true
+        default: sit
+        type: choice
+        options: [sit, uat]
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+env:
+  EZTEST_MASTER_KEY: ${{ secrets.EZTEST_MASTER_KEY }}
+  EZTEST_SERVER_TOKEN: ${{ secrets.EZTEST_SERVER_TOKEN }}
+  EZTEST_APP_VERSION: ${{ github.sha }}
+jobs:
+  smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx eztest install-browsers chromium
+      - run: npx eztest run --reporter html,json,junit --pipeline pr
+        env: { EZTEST_BASE_REF: 'origin/${{ github.base_ref }}' }
+      # The run fails on failed journeys and on a NO_GO readiness decision (pipelines.pr.gate: readiness).
+      - if: always()
+        run: npx eztest ci summary "$(ls -td eztest-results/run-* | head -1)" >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: eztest-pr, path: eztest-results }
+  plan:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - uses: actions/cache/restore@v4
+        with:
+          path: .eztest
+          key: eztest-history-${{ github.run_id }}
+          restore-keys: eztest-history-
+      # Shard count and balance come from historical durations (results server or .eztest/history.json).
+      - id: m
+        run: echo "matrix=$(npx eztest ci matrix --shards auto --target 10m)" >> "$GITHUB_OUTPUT"
+  test:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx eztest install-browsers chromium
+      - uses: actions/cache/restore@v4
+        with:
+          path: .eztest
+          key: eztest-history-${{ github.run_id }}
+          restore-keys: eztest-history-
+      - run: npx eztest run --pipeline nightly --shard ${{ matrix.shard }} --reporter json,junit
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'shard-${{ matrix.index }}'
+          path: eztest-results
+  merge:
+    needs: test
+    if: always() && needs.test.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - uses: actions/cache/restore@v4
+        with:
+          path: .eztest
+          key: eztest-history-${{ github.run_id }}
+          restore-keys: eztest-history-
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'shard-*', path: shards }
+      # One run: evidence re-chained and linked to every shard chain, history, triage, readiness, reports.
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest evidence verify eztest-results/merged
+      - if: vars.EZTEST_SERVER_URL != ''
+        run: npx eztest publish eztest-results/merged --server "${{ vars.EZTEST_SERVER_URL }}"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .eztest
+          key: eztest-history-${{ github.run_id }}
+      - if: always()
+        run: npx eztest ci summary eztest-results/merged >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: eztest-results, path: eztest-results/merged }
+      - run: npx eztest gate eztest-results/merged --on-no-go fail
+  deploy-sit:
+    if: inputs.environment == 'sit'
+    runs-on: ubuntu-latest
+    environment: sit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx eztest install-browsers chromium
+      # deploy-sit: --env sit, the SIT test plan, a deployment record; values saved "for the pipeline" become job outputs.
+      - id: eztest
+        run: npx eztest run --reporter html,json,junit --pipeline deploy-sit
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: eztest-sit, path: eztest-results }
+  deploy-uat:
+    if: inputs.environment == 'uat'
+    runs-on: ubuntu-latest
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx eztest install-browsers chromium
+      # requires: [deploy-sit] in the config: the run stops unless SIT passed for this version (results server).
+      - run: npx eztest run --reporter html,json,junit --pipeline deploy-uat
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: eztest-uat, path: eztest-results }

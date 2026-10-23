@@ -1,0 +1,139 @@
+// EZTest on Jenkins: a declarative pipeline (written by eztest init --ci jenkins; docs/pipelines.md).
+//
+//   pull requests (multibranch)  -> Smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
+//   cron (nightly)               -> Regression: 4 parallel shards (EZTest balances them), merged into one verified run
+//   main                         -> Deploy SIT -> Test SIT -> Deploy UAT -> Test UAT
+//
+// The cron trigger uses the controller's time zone unless the spec starts with TZ=: here 02:00 UTC.
+// JUnit results go to the build's Test Result view (junit step), the run directory is archived, and
+// eztest gate fails the stage on NO_GO. Credentials: eztest-master-key (secret text), optional eztest-server-token.
+pipeline {
+  agent { label 'eztest' }
+  options {
+    timestamps()
+    disableConcurrentBuilds(abortPrevious: true)
+  }
+  triggers {
+    cron('''TZ=UTC
+H 2 * * *''')
+  }
+  environment {
+    EZTEST_MASTER_KEY = credentials('eztest-master-key')
+    EZTEST_APP_VERSION = "${env.BUILD_NUMBER}"
+  }
+  stages {
+    stage('Smoke') {
+      when { changeRequest() }
+      environment { EZTEST_BASE_REF = "origin/${env.CHANGE_TARGET}" }
+      steps {
+        sh 'npm ci && npx eztest install-browsers chromium'
+        // Fails on failed journeys and on a NO_GO readiness decision (pipelines.pr.gate: readiness).
+        sh 'npx eztest run --reporter html,json,junit --pipeline pr'
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'eztest-results/run-*/junit.xml'
+          archiveArtifacts artifacts: 'eztest-results/**', allowEmptyArchive: true
+        }
+      }
+    }
+    stage('Regression') {
+      when { triggeredBy 'TimerTrigger' }
+      stages {
+        stage('Shards') {
+          parallel {
+          stage('Shard 1/4') {
+            agent { label 'eztest' }
+            steps {
+              sh 'npm ci && npx eztest install-browsers chromium'
+              sh 'npx eztest run --pipeline nightly --shard 1/4 --reporter json,junit || true'
+              stash name: 'shard-1', includes: 'eztest-results/**', allowEmpty: true
+            }
+          }
+          stage('Shard 2/4') {
+            agent { label 'eztest' }
+            steps {
+              sh 'npm ci && npx eztest install-browsers chromium'
+              sh 'npx eztest run --pipeline nightly --shard 2/4 --reporter json,junit || true'
+              stash name: 'shard-2', includes: 'eztest-results/**', allowEmpty: true
+            }
+          }
+          stage('Shard 3/4') {
+            agent { label 'eztest' }
+            steps {
+              sh 'npm ci && npx eztest install-browsers chromium'
+              sh 'npx eztest run --pipeline nightly --shard 3/4 --reporter json,junit || true'
+              stash name: 'shard-3', includes: 'eztest-results/**', allowEmpty: true
+            }
+          }
+          stage('Shard 4/4') {
+            agent { label 'eztest' }
+            steps {
+              sh 'npm ci && npx eztest install-browsers chromium'
+              sh 'npx eztest run --pipeline nightly --shard 4/4 --reporter json,junit || true'
+              stash name: 'shard-4', includes: 'eztest-results/**', allowEmpty: true
+            }
+          }
+          }
+        }
+        stage('Merge') {
+          steps {
+            sh 'npm ci'
+            script {
+              for (int i = 1; i <= 4; i++) {
+                dir("shards/${i}") { unstash "shard-${i}" }
+              }
+            }
+            sh 'npx eztest merge shards -o eztest-results/merged --reporter html,json,junit'
+            sh 'npx eztest evidence verify eztest-results/merged'
+            sh 'npx eztest gate eztest-results/merged --on-no-go fail'
+          }
+          post {
+            always {
+              junit allowEmptyResults: true, testResults: 'eztest-results/merged/junit.xml'
+              archiveArtifacts artifacts: 'eztest-results/merged/**', allowEmptyArchive: true
+            }
+          }
+        }
+      }
+    }
+    stage('Deploy SIT') {
+      when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
+      steps {
+        sh 'echo "deploy the app to SIT here"'
+      }
+    }
+    stage('Test SIT') {
+      when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
+      steps {
+        sh 'npm ci && npx eztest install-browsers chromium'
+        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-sit'
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'eztest-results/run-*/junit.xml'
+          archiveArtifacts artifacts: 'eztest-results/**', allowEmptyArchive: true
+        }
+      }
+    }
+    stage('Deploy UAT') {
+      when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
+      input { message 'Deploy to UAT?' }
+      steps {
+        sh 'echo "deploy the app to UAT here"'
+      }
+    }
+    stage('Test UAT') {
+      when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
+      steps {
+        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-uat'
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'eztest-results/run-*/junit.xml'
+          archiveArtifacts artifacts: 'eztest-results/**', allowEmptyArchive: true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+# EZTest on GitLab CI/CD (written by eztest init --ci gitlab; docs/pipelines.md).
+#
+#   merge requests  -> eztest:smoke    --pipeline pr (@smoke, impacted journeys, 10 min budget)
+#   schedules       -> eztest:regression (parallel: 4, EZTest shards by historical duration) -> eztest:merge
+#                      Create the schedule in Build > Pipeline schedules: cron "0 2 * * *", and pick the time zone
+#                      there (GitLab schedules run in the time zone you choose; the example means 02:00 in it).
+#   main            -> deploy:sit -> eztest:sit -> deploy:uat -> eztest:uat (per environment, after its deployment)
+#
+# JUnit reports show on the merge request and the pipeline's Tests tab; the HTML report is an artifact;
+# eztest gate fails the job on NO_GO. Variables: EZTEST_MASTER_KEY (masked), optional EZTEST_SERVER_URL / EZTEST_SERVER_TOKEN.
+default:
+  image: mcr.microsoft.com/devcontainers/javascript-node:22
+  before_script:
+    - npm ci
+    - npx eztest install-browsers chromium
+
+stages: [test, merge, deploy-sit, test-sit, deploy-uat, test-uat]
+
+variables:
+  EZTEST_APP_VERSION: $CI_COMMIT_SHORT_SHA
+
+.eztest-artifacts: &eztest-artifacts
+  when: always
+  paths: [eztest-results/]
+  reports:
+    junit: eztest-results/**/junit.xml
+
+eztest:smoke:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: "0"
+    EZTEST_BASE_REF: origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  script:
+    # Fails on failed journeys and on a NO_GO readiness decision (pipelines.pr.gate: readiness).
+    - npx eztest run --reporter html,json,junit --pipeline pr
+  artifacts: *eztest-artifacts
+
+eztest:regression:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  parallel: 4
+  script:
+    # CI_NODE_INDEX / CI_NODE_TOTAL select this job's shard (pipelines.nightly.shards).
+    - npx eztest run --pipeline nightly --reporter json,junit || true
+    - mkdir -p shards && cp -r eztest-results/run-* shards/
+  artifacts:
+    when: always
+    paths: [shards/]
+
+eztest:merge:
+  stage: merge
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always
+  needs: [eztest:regression]
+  before_script: [npm ci]
+  script:
+    - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+    - npx eztest evidence verify eztest-results/merged
+    - if [ -n "$EZTEST_SERVER_URL" ]; then npx eztest publish eztest-results/merged --server "$EZTEST_SERVER_URL"; fi
+    - npx eztest gate eztest-results/merged --on-no-go fail
+  artifacts: *eztest-artifacts
+
+deploy:sit:
+  stage: deploy-sit
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+  environment: { name: sit }
+  before_script: []
+  script:
+    - echo "deploy the app to SIT here"
+
+eztest:sit:
+  stage: test-sit
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+  needs: [deploy:sit]
+  environment: { name: sit, action: verify }
+  script:
+    - npx eztest run --reporter html,json,junit --pipeline deploy-sit
+  artifacts: *eztest-artifacts
+
+deploy:uat:
+  stage: deploy-uat
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
+  needs: [eztest:sit]
+  environment: { name: uat }
+  before_script: []
+  script:
+    - echo "deploy the app to UAT here"
+
+eztest:uat:
+  stage: test-uat
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+  needs: [deploy:uat]
+  environment: { name: uat, action: verify }
+  script:
+    - npx eztest run --reporter html,json,junit --pipeline deploy-uat
+  artifacts: *eztest-artifacts

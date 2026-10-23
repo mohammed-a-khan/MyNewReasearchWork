@@ -38,6 +38,8 @@ export interface StepContext {
   platform?: { name: string; session: unknown };
   /** Multi-actor journeys: the actor whose context `page`, `context` and `session` belong to (docs/multi-actor.md). */
   actor?: string;
+  /** Id of the top-level journey of this attempt (sub-journeys and hooks run inside it); set by the web runner. */
+  rootJourneyId?: string;
 }
 
 export interface ApiResponse {
@@ -281,6 +283,8 @@ export interface RunOptions {
    * manual steps are recorded as not executed (docs/manual-testing.md).
    */
   manual?: import('./manual.js').ManualVerdictProvider;
+  /** Shared test data store and data pools (`Save ... to the shared store`, `Take one item from pool ...`); see docs/shared-data.md. */
+  store?: import('../store/types.js').StoreStepRuntime;
 }
 
 /** Lock coordination hook used by the runner's scheduler. */

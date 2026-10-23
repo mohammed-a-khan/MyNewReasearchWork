@@ -623,6 +623,92 @@ export const BddSchema = z.object({
   worldParameters: z.record(z.string(), z.unknown()).default({}),
 });
 
+const DURATION = /^\s*\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|weeks?)?\s*$/i;
+
+/** Shared test data: the store and data pools (docs/shared-data.md). */
+export const StoreConfigSchema = z.object({
+  /** auto: the results server when `server.url` is set, else local files. */
+  backend: z.enum(['auto', 'file', 'server']).default('auto'),
+  /** The file backend's directory (put it on a shared file system to share across machines). */
+  dir: z.string().min(1).default('.eztest/store'),
+  /** Default namespace (default: the environment name, e.g. sit). */
+  namespace: z.string().regex(/^[A-Za-z0-9_][\w.-]*$/).optional(),
+  /** Key for secret values (secret://..., ENC(...) or text); default EZTEST_STORE_KEY, then EZTEST_MASTER_KEY. */
+  key: z.string().min(1).optional(),
+  /** Expiry of values saved without "for <duration>", e.g. 7d (default: none). */
+  defaultTtl: z.string().regex(DURATION).optional(),
+  /** How long a pool claim lasts before a crashed run's item is free again. */
+  claimTtl: z.string().regex(DURATION).default('30m'),
+  /** Release a claimed pool item when its journey fails (false: the item is consumed anyway). */
+  releaseOnFailure: z.boolean().default(true),
+  /** Hand values saved "for the pipeline" to the CI system (Azure Pipelines output variables, $GITHUB_OUTPUT). */
+  pipelineOutputs: z.boolean().default(true),
+  pools: z
+    .record(
+      z.string().regex(/^[A-Za-z0-9_][\w.:@/-]*$/),
+      z.object({
+        /** Seed the pool from a data file (csv, xlsx, json) the first time it is used: one item per row. */
+        from: z.string().min(1).optional(),
+        sheet: z.string().min(1).optional(),
+        /** Take this column's value as the item instead of the whole row. */
+        column: z.string().min(1).optional(),
+        namespace: z.string().regex(/^[A-Za-z0-9_][\w.-]*$/).optional(),
+        releaseOnFailure: z.boolean().optional(),
+        claimTtl: z.string().regex(DURATION).optional(),
+      }),
+    )
+    .default({}),
+});
+
+/** One entry of `pipelines:`: which journeys a CI trigger or deployment stage runs, and how (docs/pipelines.md). */
+export const PipelineEntrySchema = z.object({
+  description: z.string().optional(),
+  /** Tag expression: "@smoke", "@regression and not @quarantined", "(@sit or @smoke) and not @slow". */
+  tags: z.string().min(1).optional(),
+  /** Journey files or folders (default: journeysDir). */
+  journeys: z.array(z.string().min(1)).optional(),
+  /** Only journeys impacted by the change (true: since EZTEST_BASE_REF or origin/main; or a git ref). */
+  impact: z.union([z.boolean(), z.string().min(1)]).optional(),
+  /** Highest risk-per-minute journeys that fit this time, e.g. 10m. */
+  budget: z.string().regex(/^\s*\d+(?:\.\d+)?\s*(?:ms|s|m|min|h)?\s*$/i).optional(),
+  /** Minimum risk (e.g. 4 or ">=4"). */
+  risk: z.union([z.number().int().min(1).max(5), z.string().min(1)]).optional(),
+  /** Parallel shards in CI (a number, or auto from historical durations). */
+  shards: z.union([z.number().int().min(1).max(256), z.literal('auto')]).optional(),
+  browsers: z.array(z.string().min(1)).optional(),
+  /** Environment the journeys run against (config/<env>.yaml); a deployment record is kept per environment and version. */
+  environment: z.string().min(1).optional(),
+  /** Azure Test Plans plan (and suite) updated with the results. */
+  testPlan: z.number().int().positive().optional(),
+  testSuite: z.number().int().positive().optional(),
+  /** readiness: NO_GO fails the pipeline; none: only failures do. */
+  gate: z.enum(['readiness', 'none']).default('readiness'),
+  /** Pipelines (by name) that must have passed for the same version before this one runs (deployment order). */
+  requires: z.array(z.string().min(1)).default([]),
+  retries: z.number().int().min(0).max(10).optional(),
+  workers: z.number().int().min(1).max(64).optional(),
+  /** CI stage, job or environment names that select this entry when `--pipeline auto` (default: the entry name). */
+  stages: z.array(z.string().min(1)).default([]),
+  /** When the CI templates run it: on pull requests, on a schedule (cron, UTC), after a deployment, or by hand. */
+  trigger: z.enum(['pr', 'schedule', 'deploy', 'manual']).optional(),
+  schedule: z.string().min(1).optional(),
+  /** Record a deployment test record on the results server (default: when `environment` is set). */
+  record: z.boolean().optional(),
+  /** The deployed version or build (text with ${ENV}; default from the CI: build number, tag or commit). */
+  version: z.string().min(1).optional(),
+  app: z.string().min(1).optional(),
+  /** Azure DevOps: build tags, a summary on the build, comments on the build's work items, the test plan. */
+  ado: z
+    .object({
+      summary: z.boolean().default(true),
+      tags: z.boolean().default(true),
+      commentWorkItems: z.boolean().default(false),
+      linkWorkItems: z.boolean().default(false),
+      publishTestPlan: z.boolean().default(true),
+    })
+    .prefault({}),
+});
+
 export const EzTestConfigSchema = z.object({
   /** Configuration schema version. Absent means 1; older versions are migrated by `eztest upgrade-config`. */
   configVersion: z.number().int().min(1).max(CONFIG_VERSION).default(CONFIG_VERSION),
@@ -775,6 +861,10 @@ export const EzTestConfigSchema = z.object({
   /** Results server for publishing runs, shared team state and cross-machine locks. */
   server: ServerClientSchema.optional(),
   locks: LocksSchema.prefault({}),
+  /** Shared test data across journeys, suites, runs and pipeline stages (docs/shared-data.md). */
+  store: StoreConfigSchema.prefault({}),
+  /** CI triggers and deployment stages mapped to journey selections (docs/pipelines.md). */
+  pipelines: z.record(z.string().regex(/^[A-Za-z0-9_][\w.-]*$/, 'pipeline names: letters, digits, _ . -'), PipelineEntrySchema).default({}),
   /** Test selection (`--changed-since`): the impact mapping file. */
   selection: z.object({ impactMapping: z.string().min(1).default('impact-mapping.yaml') }).prefault({}),
   /** Plugins: npm package names or local paths (see docs/plugins.md). */
@@ -804,6 +894,8 @@ export const EzTestConfigSchema = z.object({
     .optional(),
 });
 export type ServerClientConfig = z.infer<typeof ServerClientSchema>;
+export type StoreConfig = z.infer<typeof StoreConfigSchema>;
+export type PipelineEntry = z.infer<typeof PipelineEntrySchema>;
 export type PublisherConfig = z.infer<typeof PublisherConfigSchema>;
 export type PluginRef = z.infer<typeof PluginRefSchema>;
 

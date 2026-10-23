@@ -55,8 +55,8 @@ anonymousRead: false                  # true only on trusted internal networks
 
 | Action | viewer | tester | approver | admin |
 |---|---|---|---|---|
-| Read runs, dashboards, history, durations, shared state | ✓ | ✓ | ✓ | ✓ |
-| Publish runs, use locks, override triage | | ✓ | ✓ | ✓ |
+| Read runs, dashboards, history, durations, shared state, the shared store and pools, deployment records | ✓ | ✓ | ✓ | ✓ |
+| Publish runs, use locks, override triage, write the shared store, claim pool items, record deployments | | ✓ | ✓ | ✓ |
 | Accept or reject heals, change quarantine, sign readiness, upload signed packs, read the audit log | | | ✓ | ✓ |
 | Manage tokens, access and retention | | | | ✓ |
 
@@ -78,6 +78,10 @@ With `server.sharedState: true` (the default), `eztest run` pulls heal decisions
 
 `eztest studio` syncs these three kinds of state at start, every minute, and a second after the Studio changes one of them, pushing local changes with the reviewer's role. The local files in `.eztest/` are the working copy and the fallback: when the server cannot be reached, the run says so and uses them. Local changes that were not yet pushed, for example when a CI token lacks the approver role, are kept and merged over the server copy.
 
+## Shared test data and deployment records
+
+With `server.url` configured, the shared store and data pools ([shared-data.md](shared-data.md)) live on the server, so values and pool items are shared by every machine, CI agent and pipeline stage of the project. Values are kept per namespace (the environment) with their expiry; secret values arrive sealed by the client and are stored as they came (the server refuses a plain secret). Pool items are claimed with a single guarded `UPDATE` (only an item nobody holds, or whose claim expired), so concurrent claims from many machines never get the same item. Deployment test records ([pipelines.md](pipelines.md#deployment-test-records)) say what was tested in which environment for which version; `requires:` and release gates read them. Every save, delete, purge, pool add, claim, release, consume and removal and every deployment record is in the audit log. Databases created before these existed are migrated on start (schema 3).
+
 ## EZTest contracts
 
 The server keeps EZTest contracts for `eztest contracts publish | verify --publish | record-release | can-release`: every contract published per consumer version and branch, every verification result per provider version (against the contract's content hash) and the version of each application released to each environment. `can-release` is answered from those records; see [api-contracts.md](api-contracts.md#publishing-releases-and-can-release-eztest-results-server). Each write is in the audit log. Databases created before contracts existed are migrated on start (schema 2).
@@ -91,6 +95,7 @@ Every state change that matters is appended to `ez_audit` with the actor, the ac
 - quarantine added, changed or removed;
 - triage overrides;
 - readiness sign-offs and evidence-pack uploads;
+- shared store and data pool changes, and deployment test records;
 - tokens and grants;
 - retention changes and retention runs;
 - sign-ins.
@@ -127,6 +132,9 @@ The server is built to be secure by default:
 | `GET /api/projects/:p/{history,durations,flaky,traceability,heals,trends.csv}` | viewer |
 | `GET\|POST /api/projects/:p/state/{heal-decisions,quarantine,triage-overrides}` | viewer / role per kind |
 | `POST /api/projects/:p/locks/{acquire,renew,release}` | tester |
+| `GET /api/projects/:p/store[?namespace=]`, `GET .../store/:ns/:key` · `GET /api/projects/:p/pools[?namespace=]`, `GET .../pools/:ns/:pool` | viewer |
+| `PUT\|DELETE /api/projects/:p/store/:ns/:key`, `POST .../store-purge` · `POST .../pools/:ns/:pool/{items,claim,release,consume}`, `DELETE .../pools/:ns/:pool/items/:id` (permission `store.write`) | tester |
+| `POST /api/projects/:p/deployments` (permission `deployment.record`) · `GET /api/projects/:p/deployments[?environment=&version=&pipeline=]` | tester · viewer |
 | `POST /api/projects/:p/{contracts,verifications}` | tester |
 | `POST /api/projects/:p/releases` (permission `contracts.release`) | approver |
 | `GET /api/projects/:p/{contracts[/:consumer/:provider/:version],verifications,releases,can-release}` | viewer |

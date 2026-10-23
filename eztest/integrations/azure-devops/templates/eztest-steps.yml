@@ -52,6 +52,10 @@ parameters:
   - name: useTask
     type: boolean
     default: true
+  # A `pipelines:` entry (tags, test plan, gate, deployment record); passed as EZTEST_PIPELINE.
+  - name: pipeline
+    type: string
+    default: ''
 
 steps:
   - task: UseNode@1
@@ -80,6 +84,7 @@ steps:
           # The job's own token: no PAT. Grant the build service "Create test runs" and "Contribute to pull requests".
           SYSTEM_ACCESSTOKEN: $(System.AccessToken)
           EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
+          EZTEST_PIPELINE: ${{ parameters.pipeline }}
 
   - ${{ if eq(parameters.useTask, false) }}:
       - script: npm ci
@@ -90,11 +95,14 @@ steps:
             workingDirectory: ${{ parameters.workingDirectory }}
             displayName: Setup
       - script: npx eztest run ${{ parameters.journeys }} --env "${{ parameters.environment }}" --reporter html,json,junit
+        name: eztest   # values saved "for the pipeline" are output variables: eztest.<name>
         workingDirectory: ${{ parameters.workingDirectory }}
         displayName: EZTest run ${{ parameters.environment }}
         continueOnError: true
         env:
           EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
+          EZTEST_PIPELINE: ${{ parameters.pipeline }}
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
       - script: |
           RUN_DIR=$(ls -td eztest-results/run-* | head -1)
           echo "##vso[task.setvariable variable=EZTEST_RUN_DIR]$RUN_DIR"

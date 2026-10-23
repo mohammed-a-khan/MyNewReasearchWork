@@ -74,7 +74,22 @@ function ddlV2(d: SqlDialect): string[] {
   ];
 }
 
-export const SCHEMA_VERSION = 2;
+/** Schema 3: shared test data (store entries, data pool items) and deployment test records. */
+function ddlV3(d: SqlDialect): string[] {
+  const t = TYPES[d];
+  const K = t.key;
+  return [
+    `CREATE TABLE ez_store (project ${K} NOT NULL, namespace ${K} NOT NULL, skey ${K} NOT NULL, value ${t.text}, secret ${t.int}, pipeline ${t.int},
+      expires_at ${K}, created_at ${K}, updated_at ${K}, updated_by ${K}, source ${t.text}, PRIMARY KEY (project, namespace, skey))`,
+    `CREATE TABLE ez_pool_items (project ${K} NOT NULL, namespace ${K} NOT NULL, pool ${K} NOT NULL, item_id ${K} NOT NULL, value ${t.text}, secret ${t.int},
+      added_at ${K}, added_by ${K}, claim_owner ${K}, claim_at ${K}, claim_expires ${t.big}, PRIMARY KEY (project, namespace, pool, item_id))`,
+    `CREATE TABLE ez_deployments (project ${K} NOT NULL, id ${K} NOT NULL, recorded_at ${K} NOT NULL, environment ${K}, version ${K}, pipeline ${K},
+      decision ${K}, data ${t.text}, recorded_by ${K}, PRIMARY KEY (project, id))`,
+    `CREATE INDEX ez_deployments_env ON ez_deployments (project, environment, recorded_at)`,
+  ];
+}
+
+export const SCHEMA_VERSION = 3;
 
 /** Thin SQL helper with dialect-aware markers and paging. */
 export class Store {
@@ -107,7 +122,7 @@ export class Store {
     }
     if (version >= SCHEMA_VERSION) return;
     await this.db.transaction(async (tx) => {
-      const stmts = [...(version < 1 ? ddl(this.dialect) : []), ...(version < 2 ? ddlV2(this.dialect) : [])];
+      const stmts = [...(version < 1 ? ddl(this.dialect) : []), ...(version < 2 ? ddlV2(this.dialect) : []), ...(version < 3 ? ddlV3(this.dialect) : [])];
       for (const stmt of stmts) await tx.execute(stmt.replace(/\s+/g, ' '));
       await tx.execute(dialectSql(version < 1 ? 'INSERT INTO ez_meta (v, k) VALUES (?, ?)' : 'UPDATE ez_meta SET v = ? WHERE k = ?', this.dialect), [String(SCHEMA_VERSION), 'schema']);
     });

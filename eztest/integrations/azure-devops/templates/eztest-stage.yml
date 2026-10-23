@@ -5,6 +5,15 @@
 #   stages:
 #     - template: eztest/integrations/azure-devops/templates/eztest-stage.yml
 #       parameters: { environment: sit, dependsOn: deploy_sit, testPlanId: 417, testSuiteId: 418, shards: 2 }
+#
+# Run after deployment: with deploymentEnvironment the tests run as a deployment job in that Azure
+# DevOps environment (its approvals and checks apply, and the run shows on the environment's
+# deployment history). A deployment job is one job, so shards is ignored there.
+#
+#       parameters: { environment: sit, pipeline: deploy-sit, deploymentEnvironment: sit, dependsOn: [deploy_sit] }
+#
+# pipeline: a `pipelines:` entry of eztest.config.yaml (its tags, test plan, gate, deployment record);
+# it is passed as EZTEST_PIPELINE, so the EZTest task and the CLI steps both use it.
 parameters:
   - name: environment
     type: string
@@ -47,6 +56,12 @@ parameters:
   - name: setupCommand
     type: string
     default: ''
+  - name: pipeline
+    type: string
+    default: ''
+  - name: deploymentEnvironment
+    type: string
+    default: ''
 
 stages:
   - stage: eztest_${{ replace(parameters.environment, '-', '_') }}
@@ -56,24 +71,51 @@ stages:
     variables:
       - group: eztest-${{ parameters.environment }}   # e.g. EZTEST_MASTER_KEY and environment secrets (optional)
     jobs:
-      - job: journeys
-        displayName: Journeys (${{ parameters.environment }})
-        pool: ${{ parameters.pool }}
-        ${{ if gt(parameters.shards, 1) }}:
-          strategy:
-            parallel: ${{ parameters.shards }}   # the EZTest task shards by System.JobPositionInPhase
-        steps:
-          - checkout: self
-            fetchDepth: 0   # history for impacted journeys and blame
-          - template: eztest-steps.yml
-            parameters:
-              environment: ${{ parameters.environment }}
-              tags: ${{ parameters.tags }}
-              testPlanId: ${{ parameters.testPlanId }}
-              testSuiteId: ${{ parameters.testSuiteId }}
-              configuration: ${{ parameters.configuration }}
-              createBugs: ${{ parameters.createBugs }}
-              onNoGo: ${{ parameters.onNoGo }}
-              onRisks: ${{ parameters.onRisks }}
-              useTask: ${{ parameters.useTask }}
-              setupCommand: ${{ parameters.setupCommand }}
+      - ${{ if eq(parameters.deploymentEnvironment, '') }}:
+          - job: journeys
+            displayName: Journeys (${{ parameters.environment }})
+            pool: ${{ parameters.pool }}
+            ${{ if gt(parameters.shards, 1) }}:
+              strategy:
+                parallel: ${{ parameters.shards }}   # the EZTest task shards by System.JobPositionInPhase
+            steps:
+              - checkout: self
+                fetchDepth: 0   # history for impacted journeys and blame
+              - template: eztest-steps.yml
+                parameters:
+                  environment: ${{ parameters.environment }}
+                  tags: ${{ parameters.tags }}
+                  testPlanId: ${{ parameters.testPlanId }}
+                  testSuiteId: ${{ parameters.testSuiteId }}
+                  configuration: ${{ parameters.configuration }}
+                  createBugs: ${{ parameters.createBugs }}
+                  onNoGo: ${{ parameters.onNoGo }}
+                  onRisks: ${{ parameters.onRisks }}
+                  useTask: ${{ parameters.useTask }}
+                  setupCommand: ${{ parameters.setupCommand }}
+                  pipeline: ${{ parameters.pipeline }}
+      # Run after deployment: a deployment job in the environment (approvals, checks, deployment history).
+      - ${{ if ne(parameters.deploymentEnvironment, '') }}:
+          - deployment: journeys
+            displayName: Journeys after deployment (${{ parameters.deploymentEnvironment }})
+            pool: ${{ parameters.pool }}
+            environment: ${{ parameters.deploymentEnvironment }}
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                      fetchDepth: 0
+                    - template: eztest-steps.yml
+                      parameters:
+                        environment: ${{ parameters.environment }}
+                        tags: ${{ parameters.tags }}
+                        testPlanId: ${{ parameters.testPlanId }}
+                        testSuiteId: ${{ parameters.testSuiteId }}
+                        configuration: ${{ parameters.configuration }}
+                        createBugs: ${{ parameters.createBugs }}
+                        onNoGo: ${{ parameters.onNoGo }}
+                        onRisks: ${{ parameters.onRisks }}
+                        useTask: ${{ parameters.useTask }}
+                        setupCommand: ${{ parameters.setupCommand }}
+                        pipeline: ${{ parameters.pipeline }}

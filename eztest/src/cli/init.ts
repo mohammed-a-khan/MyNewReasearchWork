@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile, appendFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { CI_SYSTEMS, CI_TEMPLATES, type CiSystemName } from './ci-templates.js';
 
 const FILES: Record<string, string> = {
   'eztest.config.yaml': `# EZTest configuration (configVersion 1; see docs/versioning.md). Values can use \${ENV_VAR} and ENC(...) encrypted secrets
@@ -46,6 +47,20 @@ readiness:
 #   url: https://eztest.example.com
 #   token: secret://env/EZTEST_SERVER_TOKEN
 #   project: my-team
+
+# Shared test data across journeys, runs and pipeline stages (docs/shared-data.md).
+store:
+  backend: auto          # the results server when server.url is set, else .eztest/store
+  # defaultTtl: 7d
+  # pools:
+  #   approvable-policies: { from: data/policies.csv, column: policyNo }
+
+# What each CI trigger and deployment stage runs: eztest run --pipeline <name> (docs/pipelines.md).
+pipelines:
+  pr:         { trigger: pr, tags: "@smoke", impact: true, budget: 10m, browsers: [chromium] }
+  nightly:    { trigger: schedule, schedule: "0 2 * * *", tags: "not @quarantined", shards: 4, browsers: [chromium] }
+  deploy-sit: { trigger: deploy, environment: sit, tags: "@sit or @smoke", gate: readiness }
+  deploy-uat: { trigger: deploy, environment: uat, tags: "@uat or @smoke", requires: [deploy-sit], gate: readiness }
 `,
   'journeys/example.ez': `Journey: Example - home page loads
 Tags: @smoke
@@ -69,162 +84,19 @@ gates:
 `,
 };
 
-const CI: Record<'github' | 'azure', [string, string]> = {
-  github: [
-    '.github/workflows/eztest.yml',
-    `# EZTest: duration-balanced shards in parallel, merged into one verified run, published.
-# Optional: set the repository variable EZTEST_SERVER_URL and the secret EZTEST_SERVER_TOKEN
-# (a tester token) to publish runs and share heal decisions and history with the team.
-name: EZTest
-on: [push, pull_request]
-env:
-  EZTEST_MASTER_KEY: \${{ secrets.EZTEST_MASTER_KEY }}
-  EZTEST_SERVER_TOKEN: \${{ secrets.EZTEST_SERVER_TOKEN }}
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: \${{ steps.m.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm ci
-      - uses: actions/cache/restore@v4
-        with:
-          path: .eztest
-          key: eztest-history-\${{ github.run_id }}
-          restore-keys: eztest-history-
-      # Shard count and balance come from historical durations (results server or .eztest/history.json).
-      - id: m
-        run: echo "matrix=$(npx eztest ci matrix --shards auto --target 10m)" >> "$GITHUB_OUTPUT"
-  test:
-    needs: plan
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: \${{ fromJSON(needs.plan.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm ci
-      - run: npx eztest install-browsers chromium
-      - uses: actions/cache/restore@v4
-        with:
-          path: .eztest
-          key: eztest-history-\${{ github.run_id }}
-          restore-keys: eztest-history-
-      - run: npx eztest run --shard \${{ matrix.shard }} --reporter json,junit
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: 'shard-\${{ matrix.index }}'
-          path: eztest-results
-  merge:
-    needs: test
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm ci
-      - uses: actions/cache/restore@v4
-        with:
-          path: .eztest
-          key: eztest-history-\${{ github.run_id }}
-          restore-keys: eztest-history-
-      - uses: actions/download-artifact@v4
-        with: { pattern: 'shard-*', path: shards }
-      # One run: evidence re-chained and linked to every shard chain, history, triage, readiness, reports.
-      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
-      - run: npx eztest evidence verify eztest-results/merged
-      - if: vars.EZTEST_SERVER_URL != ''
-        run: npx eztest publish eztest-results/merged --server "\${{ vars.EZTEST_SERVER_URL }}"
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: .eztest
-          key: eztest-history-\${{ github.run_id }}
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with: { name: eztest-results, path: eztest-results/merged }
-`,
-  ],
-  azure: [
-    'azure-pipelines.yml',
-    `# EZTest: duration-balanced shards in parallel, merged into one verified run, published.
-# Optional: set the pipeline variables EZTEST_SERVER_URL and EZTEST_SERVER_TOKEN (secret) to
-# publish runs and share heal decisions and history with the team.
-# Azure DevOps Test Plans, the readiness gate, PR status and the EZTest task (multi-stage):
-# node_modules/eztest/integrations/azure-devops/templates and docs/azure-devops.md
-trigger: [main]
-pool: { vmImage: ubuntu-latest }
-variables:
-  npm_config_cache: $(Pipeline.Workspace)/.npm
-jobs:
-  - job: plan
-    steps:
-      - task: NodeTool@0
-        inputs: { versionSpec: '22.x' }
-      - script: npm ci
-      - script: echo "##vso[task.setvariable variable=matrix;isOutput=true]$(npx eztest ci matrix --provider azure --shards auto --target 10m)"
-        name: m
-        env: { EZTEST_SERVER_TOKEN: $(EZTEST_SERVER_TOKEN) }
-  - job: test
-    dependsOn: plan
-    strategy:
-      matrix: $[ dependencies.plan.outputs['m.matrix'] ]
-    steps:
-      - task: NodeTool@0
-        inputs: { versionSpec: '22.x' }
-      - script: npm ci
-      - script: npx eztest install-browsers chromium
-      - script: npx eztest run --shard $(SHARD) --reporter json,junit
-        env:
-          EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
-          EZTEST_SERVER_TOKEN: $(EZTEST_SERVER_TOKEN)
-      - task: PublishPipelineArtifact@1
-        condition: always()
-        inputs: { targetPath: eztest-results, artifact: 'shard-$(SHARD_INDEX)' }
-  - job: merge
-    dependsOn: test
-    condition: succeededOrFailed()
-    steps:
-      - task: NodeTool@0
-        inputs: { versionSpec: '22.x' }
-      - script: npm ci
-      - task: DownloadPipelineArtifact@2
-        inputs: { patterns: 'shard-*/**', path: shards }
-      - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
-      - script: npx eztest evidence verify eztest-results/merged
-      - script: npx eztest publish eztest-results/merged --server "$(EZTEST_SERVER_URL)"
-        condition: and(succeededOrFailed(), ne(variables['EZTEST_SERVER_URL'], ''))
-        env: { EZTEST_SERVER_TOKEN: $(EZTEST_SERVER_TOKEN) }
-      # Azure Test Plans (set EZTEST_ADO_PLAN) and the readiness gate: NO_GO fails, GO_WITH_RISKS warns.
-      - script: npx eztest ado publish eztest-results/merged --plan $(EZTEST_ADO_PLAN)
-        condition: and(succeededOrFailed(), ne(variables['EZTEST_ADO_PLAN'], ''))
-        env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
-      - script: npx eztest ado gate eztest-results/merged --on-no-go fail --on-risks warn
-        condition: succeededOrFailed()
-      - task: PublishTestResults@2
-        condition: always()
-        inputs: { testResultsFormat: JUnit, testResultsFiles: 'eztest-results/merged/junit.xml' }
-      - task: PublishPipelineArtifact@1
-        condition: always()
-        inputs: { targetPath: eztest-results/merged, artifact: eztest-results }
-`,
-  ],
-};
-
 const GITIGNORE = ['eztest-results/', '.eztest/', '.env', '.env.*'];
 
-export async function initProject(dir: string, opts: { ci?: 'github' | 'azure' } = {}): Promise<{ created: string[]; skipped: string[] }> {
+export { CI_SYSTEMS, type CiSystemName };
+
+export async function initProject(dir: string, opts: { ci?: CiSystemName } = {}): Promise<{ created: string[]; skipped: string[] }> {
   const created: string[] = [];
   const skipped: string[] = [];
   const files: Record<string, string> = { ...FILES };
-  if (opts.ci) files[CI[opts.ci][0]] = CI[opts.ci][1];
+  if (opts.ci) {
+    const t = CI_TEMPLATES[opts.ci];
+    if (!t) throw new Error(`Unknown CI system "${opts.ci}" (${CI_SYSTEMS.join(', ')})`);
+    for (const [path, content] of t) files[path] = content;
+  }
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(dir, rel);
     if (existsSync(abs)) {

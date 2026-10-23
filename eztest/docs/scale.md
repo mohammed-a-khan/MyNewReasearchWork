@@ -11,6 +11,8 @@ This guide covers suites of thousands of journeys that run on many machines, in 
 | Order and burn-in | `--failed-first`, `--shuffle`, `--repeat-each`, `--burn-in`, `--max-failures`, `--retry-strategy isolated`, `--fail-on-flaky` |
 | Inner loop | `--watch` and `webServer:` |
 | Share results, heal decisions and locks across a team | the results server (see [server.md](server.md)) |
+| Map PR, nightly and deployment stages to journeys | `pipelines:` and `eztest run --pipeline` (see [pipelines.md](pipelines.md)) |
+| Hand data between journeys, runs and stages; pools of test data | the shared store (see [shared-data.md](shared-data.md)) |
 
 ## Sharding
 
@@ -58,7 +60,7 @@ With `auto`, EZTest picks enough shards that each one takes about the target tim
 - GitHub Actions: `{"include":[{"shard":"1/4","index":1,"total":4,"estimatedMinutes":9.6},...]}`.
 - Azure DevOps: `{"shard_1":{"SHARD":"1/4","SHARD_INDEX":"1","SHARD_TOTAL":"4"},...}`.
 
-`eztest init --ci github|azure` writes a pipeline with a `plan` job, one `test` job per shard, and a `merge` job. The merge job merges the shards, verifies the evidence and publishes to the results server when one is configured.
+`eztest init --ci github|azure` writes a nightly regression with a `plan` job, one `test` job per shard, and a `merge` job. The merge job merges the shards, verifies the evidence and publishes to the results server when one is configured. `eztest init --ci` also covers GitLab, Jenkins, TeamCity, Bitbucket and CircleCI, with a pull-request smoke job and on-deploy jobs per environment; the `pipelines:` block maps each trigger and stage to its selection ([pipelines.md](pipelines.md)).
 
 ## Resource locks
 
