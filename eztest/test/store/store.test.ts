@@ -123,7 +123,7 @@ describe('file backend', () => {
       while (!existsSync(${JSON.stringify(dir)} + '/ready-1') || !existsSync(${JSON.stringify(dir)} + '/ready-2')) await new Promise((r) => setTimeout(r, 5));
       for (let i = 0; ; i++) {
         try { got.push(String((await s.take('approvable-policies', 'w' + process.argv[2] + '#' + i)).value)); } catch { break; }
-        await new Promise((r) => setTimeout(r, 1));
+        await new Promise((r) => setTimeout(r, 25)); // the other worker gets the lock in between
       }
       process.stdout.write(JSON.stringify(got));
     `);
