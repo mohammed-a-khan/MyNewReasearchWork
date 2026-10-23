@@ -1,0 +1,13 @@
+node_modules/
+# also a node_modules symlink (a shared install), which "node_modules/" does not match
+/node_modules
+dist/
+dist-load-agent/
+.eztest/
+eztest-results/
+*.log
+.env
+.env.*
+!.env.example
+coverage/
+*.tgz

@@ -1,0 +1,8 @@
+Journey: Sales rep signs in with MFA
+Tags: @smoke @identity
+Risk: 5
+Requirements: AUTH-1
+
+Log in as sales-rep
+Open "/dashboard"
+Expect the page to contain "Welcome, alice"

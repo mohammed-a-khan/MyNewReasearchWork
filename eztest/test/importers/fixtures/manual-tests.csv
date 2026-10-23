@@ -1,0 +1,10 @@
+ID,Title,Step,Expected Result,Tags,Priority
+TC-001,Bob signs in,Open /login,,smoke,High
+,,"Type ""bob"" into the Username field
+Type ""Builder#2"" into the Password field",,,
+,,"Click the ""Sign in"" button","The URL contains ""/dashboard""
+User is greeted warmly",,
+TC-002,Create an order,Go to /orders/new,,"orders, regression",2
+,,Pick a nice product,Verify the page contains "New order",,
+,,"Click the ""Submit order"" button",I should see "created",,
+TC-003,Vague case,Do the thing,It works,,Low

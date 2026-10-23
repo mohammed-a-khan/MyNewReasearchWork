@@ -1,0 +1,95 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Microsoft/azure-pipelines-task-lib/master/tasks.schema.json",
+  "id": "635890ab-0526-4339-a2c0-0d7ec7cc94e1",
+  "name": "EZTest",
+  "friendlyName": "EZTest",
+  "description": "Run EZTest journeys, publish results and evidence to Azure Test Plans and the pipeline, report to the pull request, and enforce the release readiness gate.",
+  "helpMarkDown": "EZTest for Azure DevOps: see docs/azure-devops.md in the EZTest package.",
+  "category": "Test",
+  "visibility": ["Build", "Release"],
+  "author": "EZTest",
+  "version": { "Major": 1, "Minor": 0, "Patch": 0 },
+  "minimumAgentVersion": "3.232.1",
+  "instanceNameFormat": "EZTest $(command)",
+  "groups": [
+    { "name": "run", "displayName": "Run", "isExpanded": true },
+    { "name": "publish", "displayName": "Publish", "isExpanded": true },
+    { "name": "gate", "displayName": "Readiness gate", "isExpanded": true },
+    { "name": "advanced", "displayName": "Advanced", "isExpanded": false }
+  ],
+  "inputs": [
+    {
+      "name": "command",
+      "type": "pickList",
+      "label": "Command",
+      "defaultValue": "all",
+      "required": true,
+      "options": { "all": "Run, publish, report and gate", "run": "Run only", "publish": "Publish an existing run", "merge": "Merge shard runs", "gate": "Readiness gate only" },
+      "helpMarkDown": "What the step does. 'all' installs, runs, publishes and gates in one step."
+    },
+    { "name": "workingDirectory", "type": "filePath", "label": "Project directory", "defaultValue": "$(System.DefaultWorkingDirectory)", "required": false, "helpMarkDown": "Where eztest.config.yaml lives." },
+    {
+      "name": "install",
+      "type": "pickList",
+      "label": "Install EZTest",
+      "defaultValue": "auto",
+      "required": false,
+      "options": { "auto": "npm ci when there is a package-lock.json", "npmCi": "npm ci", "package": "npm install eztest (version below)", "none": "Already installed" },
+      "groupName": "run"
+    },
+    { "name": "eztestVersion", "type": "string", "label": "EZTest version", "defaultValue": "latest", "required": false, "groupName": "run", "visibleRule": "install = package" },
+    { "name": "setupCommand", "type": "string", "label": "Setup command", "defaultValue": "", "required": false, "groupName": "run", "helpMarkDown": "Run before the journeys (no shell; quote arguments), e.g. browser or app setup." },
+    { "name": "journeys", "type": "string", "label": "Journeys", "defaultValue": "", "required": false, "groupName": "run", "helpMarkDown": "Journey files or directories (space separated). Default: journeysDir from the config." },
+    { "name": "environment", "type": "string", "label": "Environment", "defaultValue": "", "required": false, "groupName": "run", "helpMarkDown": "--env: selects config/<env>.yaml, including that environment's test plan and suite ids." },
+    { "name": "project", "type": "string", "label": "EZTest project", "defaultValue": "", "required": false, "groupName": "run" },
+    { "name": "tags", "type": "string", "label": "Tags", "defaultValue": "", "required": false, "groupName": "run", "helpMarkDown": "Only journeys with any of these tags (comma separated)." },
+    { "name": "shard", "type": "string", "label": "Shard", "defaultValue": "auto", "required": false, "groupName": "run", "helpMarkDown": "'auto' uses the job's position in a parallel strategy (System.JobPositionInPhase / System.TotalJobsInPhase); 'none', or i/n." },
+    { "name": "outputDirectory", "type": "string", "label": "Results directory", "defaultValue": "eztest-results", "required": false, "groupName": "run" },
+    { "name": "mergeInputs", "type": "string", "label": "Shard run directories to merge", "defaultValue": "", "required": false, "groupName": "run", "visibleRule": "command = merge" },
+    { "name": "runDirectory", "type": "string", "label": "Run directory", "defaultValue": "", "required": false, "groupName": "publish", "helpMarkDown": "For 'publish' and 'gate': the run to use. Default: the newest run in the results directory." },
+    { "name": "publishTestResults", "type": "boolean", "label": "Publish to the pipeline Tests tab (JUnit)", "defaultValue": "true", "required": false, "groupName": "publish" },
+    { "name": "publishArtifact", "type": "boolean", "label": "Publish the run (report, evidence) as a pipeline artifact", "defaultValue": "true", "required": false, "groupName": "publish" },
+    { "name": "evidencePack", "type": "boolean", "label": "Create a signed evidence pack", "defaultValue": "false", "required": false, "groupName": "publish" },
+    { "name": "signingKey", "type": "string", "label": "Signing key file", "defaultValue": "", "required": false, "groupName": "publish", "visibleRule": "evidencePack = true", "helpMarkDown": "Path to the ed25519 private key PEM (e.g. from a secure file: $(signingKey.secureFilePath))." },
+    { "name": "signer", "type": "string", "label": "Signer", "defaultValue": "$(Build.RequestedFor)", "required": false, "groupName": "publish", "visibleRule": "evidencePack = true" },
+    { "name": "publishTestPlans", "type": "boolean", "label": "Publish to Azure Test Plans", "defaultValue": "false", "required": false, "groupName": "publish", "helpMarkDown": "Results with step results, iterations and attachments, linked to this build." },
+    { "name": "testPlanId", "type": "string", "label": "Test plan id", "defaultValue": "", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true", "helpMarkDown": "Overrides ado.testPlanId (per environment in config/<env>.yaml)." },
+    { "name": "testSuiteId", "type": "string", "label": "Test suite id", "defaultValue": "", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true" },
+    { "name": "configuration", "type": "string", "label": "Test configuration", "defaultValue": "", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true" },
+    { "name": "createBugs", "type": "boolean", "label": "File bugs for product failures", "defaultValue": "false", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true" },
+    { "name": "markFlaky", "type": "boolean", "label": "Mark flaky results", "defaultValue": "false", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true" },
+    { "name": "commentRequirements", "type": "boolean", "label": "Comment results on linked requirements", "defaultValue": "false", "required": false, "groupName": "publish", "visibleRule": "publishTestPlans = true" },
+    { "name": "prReport", "type": "boolean", "label": "Post status and summary to the pull request", "defaultValue": "true", "required": false, "groupName": "publish", "helpMarkDown": "In pull request builds: the 'EZTest' status (GO / NO_GO) and one summary comment, updated on re-runs." },
+    {
+      "name": "onNoGo",
+      "type": "pickList",
+      "label": "When readiness is NO_GO",
+      "defaultValue": "fail",
+      "required": false,
+      "options": { "fail": "Fail the step", "warn": "Succeed with issues", "pass": "Ignore" },
+      "groupName": "gate"
+    },
+    {
+      "name": "onRisks",
+      "type": "pickList",
+      "label": "When readiness is GO_WITH_RISKS",
+      "defaultValue": "warn",
+      "required": false,
+      "options": { "fail": "Fail the step", "warn": "Succeed with issues", "pass": "Ignore" },
+      "groupName": "gate"
+    },
+    { "name": "failOnTestFailure", "type": "boolean", "label": "Without a readiness policy, fail when journeys fail", "defaultValue": "true", "required": false, "groupName": "gate" },
+    { "name": "eztestCommand", "type": "string", "label": "EZTest command", "defaultValue": "", "required": false, "groupName": "advanced", "helpMarkDown": "How to start the CLI (default: npx --no-install eztest)." },
+    { "name": "extraArgs", "type": "string", "label": "Extra arguments for eztest run", "defaultValue": "", "required": false, "groupName": "advanced" }
+  ],
+  "outputVariables": [
+    { "name": "EztestDecision", "description": "GO, GO_WITH_RISKS or NO_GO (empty without a readiness policy)." },
+    { "name": "EztestRunDir", "description": "The run directory." }
+  ],
+  "execution": {
+    "Node20_1": { "target": "index.js", "argumentFormat": "" }
+  },
+  "messages": {
+    "NoGo": "EZTest readiness is NO_GO"
+  }
+}

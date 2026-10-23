@@ -1,0 +1,21 @@
+# Synthetic project for the SDK tests: code journeys (*.journey.ts) next to .ez journeys.
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+browser: chromium
+headless: true
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [json, junit]
+timeouts:
+  step: 5000
+
+healing:
+  enabled: true
+  maxTier: T2-semantic
+
+db:
+  connections:
+    shop:
+      driver: sqlite
+      file: ${SHOP_DB:-./shop.db}
+  queries:
+    dir: queries

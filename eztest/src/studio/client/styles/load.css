@@ -1,0 +1,23 @@
+/* Performance workspace (EZTest Load). */
+.ld-chart { margin: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.ld-chart figcaption { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--fs-sm); margin-bottom: 4px; }
+.ld-chart-title { font-weight: 600; color: var(--text); }
+.ld-legend { display: inline-flex; flex-wrap: wrap; gap: 10px; color: var(--text-muted); }
+.ld-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.ld-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
+.ld-svg { display: block; width: 100%; height: 150px; }
+.ld-grid { stroke: var(--border-subtle); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ld-tick { fill: var(--text-muted); font-size: 10px; }
+.ld-series { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ld-series.s1, .ld-swatch.s1 { stroke: var(--accent); color: var(--accent); }
+.ld-series.s2, .ld-swatch.s2 { stroke: var(--ok); color: var(--ok); }
+.ld-series.s3, .ld-swatch.s3 { stroke: var(--heal); color: var(--heal); }
+.ld-series.s4, .ld-swatch.s4 { stroke: var(--warn); color: var(--warn); }
+.ld-series.s5, .ld-swatch.s5 { stroke: var(--danger); color: var(--danger); }
+.ld-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.ld-kpis { gap: 10px; }
+.ld-outline { list-style: none; margin: 0; padding-left: 14px; font-size: var(--fs-sm); }
+.ld-outline > li { margin: 2px 0; }
+.ld-kind { display: inline-block; min-width: 76px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.ld-kind-transaction { color: var(--accent-text); font-weight: 600; }
+.input-sm { min-width: 60px; }

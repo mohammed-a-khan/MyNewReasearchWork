@@ -1,0 +1,186 @@
+/**
+ * Post-condition evaluation. Conditions are declarative; each is evaluated
+ * against the page and the ledger, polling until all hold or time runs out.
+ * Targets in conditions use the same strict (exactly-one) resolution as actions.
+ */
+import { existsSync, statSync } from 'node:fs';
+import type { Page } from '../browser/index.js';
+import { sleep, type Condition, type ConditionResult, type Target } from '../core/index.js';
+import type { Ledger } from './ledger.js';
+import { describeCandidate, rootFor, targetLocators } from './locate.js';
+import { evaluateAdvancedCondition, framesOf } from './conditions-advanced.js';
+import type { BrowserSession } from './session.js';
+import { activeSurface } from './surface.js';
+
+export interface ConditionEnv {
+  page: Page;
+  ledger: Ledger;
+  vars: () => Record<string, unknown>;
+  interpolate: (s: string) => string;
+  /** Tabs, dialogs and recorded events (advanced conditions). */
+  session?: BrowserSession;
+  /** Current frame chain targets are resolved in. */
+  frames?: string[];
+  /** Directory relative files (e.g. JSON Schemas) resolve against. */
+  baseDir?: string;
+  /** The configured API spec for "conforms to the API spec" (RunOptions.apiSpec). */
+  apiSpec?: string;
+}
+
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+async function uniqueLocator(env: ConditionEnv, target: Target) {
+  const root = rootFor(env.page, framesOf(env, target));
+  const notes: string[] = [];
+  if (!target.locators.length) return { notes: [target.element ? `element @${target.element} is not in the element repository` : 'target has no locator candidates'] };
+  const t = await targetLocators(root, target, env.vars());
+  if (t.error) return { notes: [t.error] };
+  for (const { candidate: c, locator: loc } of t.locators) {
+    const n = await loc.count();
+    if (n === 1) return { locator: loc, notes };
+    notes.push(n === 0 ? `${describeCandidate(c)}: no match` : `${describeCandidate(c)}: ${n} matches (ambiguous)`);
+  }
+  return { notes };
+}
+
+function fail(condition: Condition, message: string, actual?: string): ConditionResult {
+  return { condition, passed: false, message, ...(actual !== undefined ? { actual } : {}) };
+}
+function ok(condition: Condition, actual?: string): ConditionResult {
+  return { condition, passed: true, ...(actual !== undefined ? { actual } : {}) };
+}
+function show(v: unknown): string {
+  if (v === undefined) return 'undefined';
+  return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+/** Evaluate one condition once (no polling). */
+export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Promise<ConditionResult> {
+  // An active desktop/terminal/SAP/screen surface answers the conditions it understands (runner/surface.ts).
+  const surface = activeSurface(env.session);
+  if (surface) {
+    const r = await surface.evaluate(c, env);
+    if (r) return r;
+  }
+  const I = env.interpolate;
+  const { page, ledger } = env;
+  switch (c.type) {
+    case 'urlContains': {
+      const url = page.url();
+      const v = I(c.value);
+      return url.includes(v) ? ok(c, url) : fail(c, `URL does not contain "${v}"`, url);
+    }
+    case 'urlMatches': {
+      const url = page.url();
+      const re = new RegExp(I(c.pattern));
+      return re.test(url) ? ok(c, url) : fail(c, `URL does not match /${re.source}/`, url);
+    }
+    case 'titleContains': {
+      const t = await page.title();
+      const v = I(c.value);
+      return t.includes(v) ? ok(c, t) : fail(c, `title does not contain "${v}"`, t);
+    }
+    case 'pageContainsText':
+    case 'pageNotContainsText': {
+      const body = norm(await page.locator('body').innerText({ timeout: 2000 }).catch(() => ''));
+      const v = norm(I(c.value));
+      if (!v) return fail(c, 'expected text is empty');
+      const has = body.includes(v);
+      if (c.type === 'pageContainsText') return has ? ok(c) : fail(c, `page does not contain "${v}"`, body.slice(0, 300));
+      return has ? fail(c, `page contains "${v}"`) : ok(c);
+    }
+    case 'visible':
+    case 'textContains':
+    case 'textEquals':
+    case 'valueEquals': {
+      const r = await uniqueLocator(env, c.target);
+      if (!r.locator) return fail(c, `${c.target.description}: not found exactly once (${r.notes.join('; ')})`);
+      if (c.type === 'visible') {
+        return (await r.locator.isVisible()) ? ok(c, 'visible') : fail(c, `${c.target.description} is not visible`, 'hidden');
+      }
+      if (c.type === 'valueEquals') {
+        const v = await r.locator.inputValue({ timeout: 2000 });
+        const want = I(c.value);
+        return v === want ? ok(c, v) : fail(c, `${c.target.description} value is "${v}", expected "${want}"`, v);
+      }
+      const text = norm(await r.locator.innerText({ timeout: 2000 }));
+      const want = norm(I(c.value));
+      if (c.type === 'textEquals') return text === want ? ok(c, text) : fail(c, `${c.target.description} text is "${text}", expected "${want}"`, text);
+      if (!want) return fail(c, 'expected text is empty');
+      return text.includes(want) ? ok(c, text) : fail(c, `${c.target.description} text "${text}" does not contain "${want}"`, text);
+    }
+    case 'hidden': {
+      if (!c.target.locators.length) return fail(c, `${c.target.description}: target has no locator candidates`);
+      const root = rootFor(page, framesOf(env, c.target));
+      // A scoped target whose container or anchor is gone is hidden too.
+      const t = await targetLocators(root, c.target, env.vars());
+      if (t.error && t.scope?.ambiguous) return fail(c, `${c.target.description}: ${t.error}`);
+      for (const { candidate, locator: loc } of t.locators) {
+        const n = await loc.count();
+        for (let i = 0; i < n; i++) {
+          if (await loc.nth(i).isVisible()) return fail(c, `${c.target.description} is visible (${describeCandidate(candidate)})`, 'visible');
+        }
+      }
+      return ok(c, 'hidden');
+    }
+    case 'count': {
+      if (!c.target.locators.length) return fail(c, `${c.target.description}: target has no locator candidates`);
+      const root = rootFor(page, framesOf(env, c.target));
+      let n = 0;
+      const t = await targetLocators(root, c.target, env.vars());
+      if (t.error) return fail(c, `${c.target.description}: ${t.error}`);
+      for (const { locator } of t.locators) {
+        n = await locator.count();
+        if (n > 0) break;
+      }
+      return n === c.equals ? ok(c, String(n)) : fail(c, `${c.target.description}: found ${n}, expected ${c.equals}`, String(n));
+    }
+    case 'ledgerEquals': {
+      const v = ledger.get(c.key);
+      if (v === undefined) return fail(c, `ledger has no value "${c.key}"`);
+      let want: unknown;
+      if (c.otherKey !== undefined) {
+        want = ledger.get(c.otherKey);
+        if (want === undefined) return fail(c, `ledger has no value "${c.otherKey}"`);
+      } else if (c.expected !== undefined) want = I(c.expected);
+      else return fail(c, 'ledgerEquals needs expected or otherKey');
+      return show(v) === show(want) ? ok(c, show(v)) : fail(c, `${c.key} is "${show(v)}", expected "${show(want)}"`, show(v));
+    }
+    case 'apiStatus': {
+      const r = ledger.get(c.captureKey) as { status?: unknown } | undefined;
+      if (!r || typeof r.status !== 'number') return fail(c, `ledger has no API response "${c.captureKey}"`);
+      return r.status === c.status ? ok(c, String(r.status)) : fail(c, `status ${r.status}, expected ${c.status}`, String(r.status));
+    }
+    case 'dbRowCount': {
+      const rows = ledger.get(c.captureKey);
+      if (!Array.isArray(rows)) return fail(c, `ledger has no query result "${c.captureKey}"`);
+      return rows.length === c.equals ? ok(c, String(rows.length)) : fail(c, `${rows.length} rows, expected ${c.equals}`, String(rows.length));
+    }
+    case 'downloadExists': {
+      const d = ledger.get(c.captureKey) as { path?: unknown } | undefined;
+      if (!d || typeof d.path !== 'string') return fail(c, `ledger has no download "${c.captureKey}"`);
+      if (!existsSync(d.path)) return fail(c, `downloaded file missing: ${d.path}`);
+      const size = statSync(d.path).size;
+      return size > 0 ? ok(c, `${size} bytes`) : fail(c, 'downloaded file is empty', '0 bytes');
+    }
+    default:
+      return evaluateAdvancedCondition(c, env);
+  }
+}
+
+/** Evaluate all conditions, polling until every one holds or `timeoutMs` elapses. */
+export async function evaluateConditions(conds: Condition[], env: ConditionEnv, timeoutMs: number): Promise<ConditionResult[]> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const results: ConditionResult[] = [];
+    for (const c of conds) {
+      try {
+        results.push(await evaluateConditionOnce(c, env));
+      } catch (e) {
+        results.push(fail(c, `error evaluating ${c.type}: ${(e as Error).message.split('\n')[0]}`));
+      }
+    }
+    if (results.every((r) => r.passed) || Date.now() >= deadline) return results;
+    await sleep(Math.min(150, Math.max(10, deadline - Date.now())));
+  }
+}

@@ -1,0 +1,79 @@
+# One test stage per environment: parallel shard jobs, each running the EZTest steps
+# with that environment's Test Plans ids. The stage fails on NO_GO (the readiness gate),
+# so later stages that depend on it do not run.
+#
+#   stages:
+#     - template: eztest/integrations/azure-devops/templates/eztest-stage.yml
+#       parameters: { environment: sit, dependsOn: deploy_sit, testPlanId: 417, testSuiteId: 418, shards: 2 }
+parameters:
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+  - name: condition
+    type: string
+    default: succeeded()
+  - name: pool
+    type: object
+    default: { vmImage: ubuntu-latest }
+  - name: shards
+    type: number
+    default: 1
+  - name: testPlanId
+    type: string
+    default: ''
+  - name: testSuiteId
+    type: string
+    default: ''
+  - name: configuration
+    type: string
+    default: ''
+  - name: tags
+    type: string
+    default: ''
+  - name: onNoGo
+    type: string
+    default: fail
+  - name: onRisks
+    type: string
+    default: warn
+  - name: createBugs
+    type: boolean
+    default: false
+  - name: useTask
+    type: boolean
+    default: true
+  - name: setupCommand
+    type: string
+    default: ''
+
+stages:
+  - stage: eztest_${{ replace(parameters.environment, '-', '_') }}
+    displayName: EZTest ${{ parameters.environment }}
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    variables:
+      - group: eztest-${{ parameters.environment }}   # e.g. EZTEST_MASTER_KEY and environment secrets (optional)
+    jobs:
+      - job: journeys
+        displayName: Journeys (${{ parameters.environment }})
+        pool: ${{ parameters.pool }}
+        ${{ if gt(parameters.shards, 1) }}:
+          strategy:
+            parallel: ${{ parameters.shards }}   # the EZTest task shards by System.JobPositionInPhase
+        steps:
+          - checkout: self
+            fetchDepth: 0   # history for impacted journeys and blame
+          - template: eztest-steps.yml
+            parameters:
+              environment: ${{ parameters.environment }}
+              tags: ${{ parameters.tags }}
+              testPlanId: ${{ parameters.testPlanId }}
+              testSuiteId: ${{ parameters.testSuiteId }}
+              configuration: ${{ parameters.configuration }}
+              createBugs: ${{ parameters.createBugs }}
+              onNoGo: ${{ parameters.onNoGo }}
+              onRisks: ${{ parameters.onRisks }}
+              useTask: ${{ parameters.useTask }}
+              setupCommand: ${{ parameters.setupCommand }}

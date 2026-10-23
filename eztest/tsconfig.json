@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "paths": {
+      "eztest/sdk": ["./src/sdk/index.ts"],
+      "eztest/browser": ["./src/browser/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "examples/**/*.ts",
+    "tools/**/*.ts"
+  ],
+  "exclude": [
+    "src/studio/client/**",
+    "test/importers/fixtures/**",
+    "test/lint/fixtures/**"
+  ]
+}

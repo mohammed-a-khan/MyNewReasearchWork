@@ -1,0 +1,432 @@
+/**
+ * Runs from the Studio: start one run at a time in-process, stream its events
+ * to any number of SSE listeners (with replay for late subscribers), analyze
+ * it afterwards, and read past runs from the output directory.
+ */
+import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { EventBus, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
+import { loadConfig, createMaskedLogger, type LoadedConfig, type SecretMasker } from '../config/index.js';
+import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, type AnalyzeResult } from '../engine/index.js';
+import { journeyKind, type ManualVerdictProvider } from '../runner/manual.js';
+import { expandExamples } from '../runner/journey-hooks.js';
+import type { Journey } from '../core/index.js';
+import { loadJourneys, filterJourneys } from '../cli/journeys.js';
+import { expandBrowserMatrix } from '../runner/browsers.js';
+import { HistoryStore, scoreHistory, loadRunArtifacts, triageRun, readEvidenceManifest } from '../insights/index.js';
+import type { ReportFormat } from '../report/index.js';
+import { HttpError } from './http.js';
+import type { EventHub, StudioEvent } from './events.js';
+
+export { HttpError, type StudioEvent };
+
+export interface RunRequest {
+  /** Journey ids to run (default: all, filtered by tags). */
+  journeys?: string[];
+  tags?: string[];
+  browser?: 'chromium' | 'firefox' | 'webkit';
+  /** Cross-browser run: every journey on each of these (chromium, firefox, msedge, chrome); overrides `browser`. */
+  browsers?: string[];
+  headed?: boolean;
+  workers?: number;
+  retries?: number;
+  heal?: boolean;
+  lenses?: string[];
+  /** Record DOM snapshots per step (time-travel trace), e.g. for the UI coverage map. */
+  timeTravel?: boolean;
+  /** Test cycle this run executes (recorded in the cycle's run list). */
+  cycle?: string;
+  /** Tester running the manual steps (shown in the guided runner). */
+  tester?: string;
+}
+
+type Listener = (e: StudioEvent) => void;
+
+export interface RunPlanJourney {
+  id: string;
+  name: string;
+  type: 'automated' | 'manual' | 'hybrid';
+  assignee?: string;
+  preconditions?: string;
+  steps: Array<{ id: string; intent: string; manual: boolean; instruction?: string; expected?: string[]; attachments?: string[]; depth: number }>;
+}
+
+/** The plan of journeys (Examples rows expanded) as the guided runner shows it. */
+export function runPlan(journeys: Journey[]): RunPlanJourney[] {
+  return expandExamples(journeys).map((j) => {
+    const steps: RunPlanJourney['steps'] = [];
+    const walk = (list: Journey['steps'], depth: number) => {
+      for (const s of list) {
+        const a = (s.args ?? {}) as { expected?: string[]; attachments?: string[] };
+        steps.push({ id: s.id, intent: s.intent, manual: s.action === 'manual', depth, ...(s.action === 'manual' ? { instruction: s.value ?? '', expected: a.expected ?? [], attachments: a.attachments ?? [] } : {}) });
+        walk(s.steps ?? [], depth + 1);
+        walk(s.else ?? [], depth + 1);
+        walk(s.catch ?? [], depth + 1);
+      }
+    };
+    walk(j.steps, 0);
+    return { id: j.id, name: j.name, type: journeyKind(j), ...(j.assignee ? { assignee: j.assignee } : {}), ...(j.preconditions ? { preconditions: j.preconditions } : {}), steps };
+  });
+}
+
+export type RunState = 'running' | 'cancelling' | 'analyzing' | 'done' | 'cancelled' | 'error';
+
+export interface ActiveRun {
+  id: string;
+  state: RunState;
+  startedAt: string;
+  /** The request that started the run (for the UI's "run again"). */
+  request: RunRequest;
+  journeys: Array<{ id: string; name: string; steps: number }>;
+  /** Steps of every journey (manual ones with their instruction and expected results), for the guided runner. */
+  plan: RunPlanJourney[];
+  events: StudioEvent[];
+  listeners: Set<Listener>;
+  result?: Record<string, unknown>;
+  abort: AbortController;
+}
+
+const RUN_ID = /^[A-Za-z0-9][\w.-]{0,120}$/;
+
+export function assertRunId(id: string): void {
+  if (!RUN_ID.test(id) || id.includes('..')) throw new HttpError(400, 'Invalid run id');
+}
+
+function newRunId(): string {
+  return `run-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')}-${randomBytes(3).toString('hex')}`;
+}
+
+export interface StudioContext {
+  cwd: string;
+  env: Record<string, string | undefined>;
+  addons: { d365?: unknown; off(): void };
+}
+
+export async function loadStudioConfig(ctx: StudioContext, overrides: Record<string, unknown> = {}): Promise<LoadedConfig> {
+  return loadConfig({ cwd: ctx.cwd, environment: ctx.env, overrides });
+}
+
+function positiveInt(v: unknown, name: string, max: number): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > max) throw new HttpError(400, `${name} must be an integer between 0 and ${max}`);
+  return n;
+}
+
+export class RunManager {
+  private active?: ActiveRun;
+  private readonly recent = new Map<string, ActiveRun>();
+
+  constructor(
+    private readonly ctx: StudioContext,
+    private readonly hub?: EventHub,
+    /** Verdicts for manual steps (the Studio's guided runner). */
+    private readonly manual?: ManualVerdictProvider,
+  ) {}
+
+  get current(): ActiveRun | undefined {
+    const s = this.active?.state;
+    return s === 'running' || s === 'cancelling' || s === 'analyzing' ? this.active : undefined;
+  }
+
+  /** Runs started in this Studio session, newest first. */
+  list(): ActiveRun[] {
+    return [...this.recent.values()].reverse();
+  }
+
+  /**
+   * Cancel the run in progress. The runner stops at the next step boundary,
+   * records what did not run as skipped and closes the browser; the run then
+   * ends with a `done` event whose state is `cancelled`.
+   */
+  cancel(id: string): ActiveRun {
+    const run = this.current;
+    if (!run || run.id !== id) throw new HttpError(404, 'No run in progress with this id');
+    if (run.state === 'running') {
+      run.state = 'cancelling';
+      run.abort.abort();
+      this.emit(run, 'cancelling', { runId: id });
+    }
+    return run;
+  }
+
+  find(id: string): ActiveRun | undefined {
+    return this.recent.get(id);
+  }
+
+  private emit(run: ActiveRun, type: string, data: Record<string, unknown>, masker?: SecretMasker): void {
+    const e: StudioEvent = { seq: run.events.length + 1, type, data: masker ? masker.maskDeep(data) : data };
+    run.events.push(e);
+    this.hub?.publish('run', { ...e.data, type, runId: run.id });
+    for (const l of run.listeners) {
+      try {
+        l(e);
+      } catch {
+        // a broken listener never breaks the run
+      }
+    }
+  }
+
+  subscribe(run: ActiveRun, l: Listener): () => void {
+    run.listeners.add(l);
+    return () => run.listeners.delete(l);
+  }
+
+  /** Validate the request, load journeys and start the run in the background. */
+  async start(req: RunRequest): Promise<ActiveRun> {
+    if (this.current) throw new HttpError(409, `A run is already in progress (${this.current.id})`);
+    const overrides: Record<string, unknown> = {};
+    if (req.browser !== undefined) {
+      if (!['chromium', 'firefox', 'webkit'].includes(req.browser)) throw new HttpError(400, 'browser must be chromium, firefox or webkit');
+      overrides.browser = req.browser;
+    }
+    if (req.browsers !== undefined) {
+      if (!Array.isArray(req.browsers) || req.browsers.some((b) => typeof b !== 'string' || !/^(?:chromium|firefox|chrome|msedge)(?:-(?:beta|dev|canary))?$/.test(b))) {
+        throw new HttpError(400, 'browsers must be a list of chromium, firefox, chrome, msedge (or a chrome/msedge channel such as msedge-beta)');
+      }
+      if (new Set(req.browsers).size !== req.browsers.length) throw new HttpError(400, 'browsers lists a browser twice');
+      if (req.browsers.length) overrides.browsers = req.browsers;
+    }
+    if (req.headed) overrides.headless = false;
+    const workers = positiveInt(req.workers, 'workers', 16);
+    if (workers) overrides.concurrency = workers;
+    const retries = positiveInt(req.retries, 'retries', 5);
+    if (retries !== undefined) overrides.retries = retries;
+    if (req.heal === false) overrides.healing = { enabled: false };
+    const lenses = Array.isArray(req.lenses) ? req.lenses.map(String) : undefined;
+    if (lenses) {
+      for (const l of lenses) if (!/^(?:a11y|security|visual|perf)(?::warn)?$/.test(l)) throw new HttpError(400, `Unknown lens "${l}"`);
+      overrides.lenses = lenses;
+    }
+
+    const loaded = await loadStudioConfig(this.ctx, overrides);
+    const cfg = loaded.config;
+    const { journeys: all, errors } = await loadJourneys([cfg.journeysDir], this.ctx.cwd);
+    if (errors.length) throw new HttpError(422, `Some journeys do not parse: ${errors.map((e) => `${e.file}: ${e.message}`).join('; ')}`);
+    const tags = Array.isArray(req.tags) ? req.tags.map(String) : undefined;
+    const ids = Array.isArray(req.journeys) ? req.journeys.map(String) : undefined;
+    const picked = filterJourneys(all, { tags, ids: ids?.length ? ids : undefined });
+    if (picked.length === 0) throw new HttpError(400, 'No journeys matched the selection');
+    // A cross-browser run shows (and runs) one journey x browser unit per browser, ids ending in @<browser>.
+    const names = (cfg.browsers ?? []).map((b) => (typeof b === 'string' ? b : b.name).toLowerCase());
+    const matrix = expandBrowserMatrix(picked, names);
+    const journeys = [...matrix.journeys, ...matrix.excluded.map((x) => x.journey)];
+
+    const id = newRunId();
+    const run: ActiveRun = {
+      id, state: 'running', startedAt: new Date().toISOString(), request: req, events: [], listeners: new Set(), abort: new AbortController(),
+      journeys: journeys.map((j) => ({ id: j.id, name: j.name, steps: j.steps.length })),
+      plan: runPlan(journeys),
+    };
+    this.active = run;
+    this.recent.set(id, run);
+    if (this.recent.size > 20) this.recent.delete(this.recent.keys().next().value as string);
+    this.emit(run, 'queued', { runId: id, journeys: journeys.map((j) => ({ id: j.id, name: j.name, steps: j.steps.map((s) => ({ id: s.id, intent: s.intent })) })) });
+
+    void this.execute(run, loaded, journeys, lenses).catch((e: unknown) => {
+      run.state = 'error';
+      this.emit(run, 'run-error', { message: loaded.masker.mask((e as Error)?.message ?? String(e)) });
+      this.emit(run, 'done', { runId: id, state: 'error' });
+    });
+    return run;
+  }
+
+  private async execute(run: ActiveRun, loaded: LoadedConfig, journeys: Awaited<ReturnType<typeof loadJourneys>>['journeys'], lenses?: string[]): Promise<void> {
+    const cfg = loaded.config;
+    const masker = loaded.masker;
+    const events = new EventBus();
+    events.on((e: EzEvent) => this.emit(run, e.type, { ...e } as Record<string, unknown>, masker));
+    const engine = await createEngine(loaded, {
+      cwd: this.ctx.cwd,
+      addons: this.ctx.addons as never,
+      logger: createMaskedLogger('error', masker),
+      runOptions: {
+        events,
+        runId: run.id,
+        screenshots: 'every-step',
+        lenses: lensesFromConfig(lenses ?? cfg.lenses, this.ctx.cwd, { branchBaselines: cfg.vcs.branchScope.baselines, defaultBranch: cfg.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(cfg) }),
+        signal: run.abort.signal,
+        // Manual steps pause for a verdict in the guided runner (#/manual/run/<runId>).
+        ...(this.manual ? { manual: this.manual } : {}),
+        ...(run.request.timeTravel ? { timeTravel: { ...cfg.trace.timeTravel, enabled: true, masker } } : {}),
+      },
+    });
+    let result: RunResult;
+    try {
+      result = await engine.run(journeys);
+    } finally {
+      await engine.close();
+    }
+    const runDir = join(engine.runOptions.outputDir, result.runId);
+    this.emit(run, 'run:summary', { runId: result.runId, summary: result.summary });
+    if (run.abort.signal.aborted) {
+      // A cancelled run is kept on disk (run.json, evidence) but not analyzed, so it never skews history.
+      run.result = { runId: result.runId, summary: result.summary, cancelled: true };
+      run.state = 'cancelled';
+      this.emit(run, 'cancelled', { runId: result.runId, summary: result.summary });
+      this.emit(run, 'done', { runId: result.runId, state: 'cancelled' });
+      return;
+    }
+    run.state = 'analyzing';
+    let analysis: AnalyzeResult | undefined;
+    try {
+      const policy = cfg.readiness.policyPath;
+      const formats = cfg.reporters.filter((r: string) => ['html', 'json', 'junit'].includes(r)) as ReportFormat[];
+      analysis = await analyzeRun(runDir, {
+        historyPath: resolve(this.ctx.cwd, '.eztest', 'history.json'),
+        readinessPolicyPath: policy ? resolve(this.ctx.cwd, policy) : undefined,
+        formats: formats.length ? (formats.includes('html') ? formats : [...formats, 'html']) : ['html', 'json'],
+        ...(cfg.vcs.branchScope.history && result.environment?.gitBranch ? { historyBranch: result.environment.gitBranch } : {}),
+        journeys, uiCoverage: cfg.coverage.ui, a11yScopes: cfg.accessibility.scopes,
+      });
+    } catch (e) {
+      this.emit(run, 'warning', { message: `Analysis failed: ${(e as Error).message}` }, masker);
+    }
+    const summary = {
+      runId: result.runId,
+      summary: result.summary,
+      triage: analysis?.triage.verdicts.map((v) => ({ journeyId: v.journeyId, journeyName: v.journeyName, category: v.category, confidence: v.confidence, status: v.status, reasons: v.reasons })) ?? [],
+      readiness: analysis?.readiness ? { decision: analysis.readiness.decision, score: analysis.readiness.score, rationale: analysis.readiness.rationale.map((r) => r.text) } : undefined,
+      warnings: analysis?.warnings ?? [],
+      report: analysis?.reports.html ? `/runs/${encodeURIComponent(result.runId)}/report.html` : undefined,
+      ...(result.browsers ? { browsers: result.browsers } : {}),
+      ...(analysis?.readiness?.browsers ? { readinessByBrowser: analysis.readiness.browsers } : {}),
+    };
+    run.result = summary;
+    run.state = 'done';
+    this.emit(run, 'analysis', summary, masker);
+    this.emit(run, 'done', { runId: result.runId, state: 'done' });
+  }
+}
+
+// ------------------------------------------------------------------ past runs
+
+export async function outputDirOf(ctx: StudioContext): Promise<string> {
+  try {
+    const l = await loadStudioConfig(ctx);
+    return resolve(ctx.cwd, l.config.outputDir);
+  } catch {
+    return resolve(ctx.cwd, 'eztest-results');
+  }
+}
+
+export interface RunListItem {
+  runId: string;
+  startedAt?: string;
+  durationMs?: number;
+  summary?: RunResult['summary'];
+  hasReport: boolean;
+  /** True when the run was cancelled from the Studio. */
+  cancelled?: boolean;
+  error?: string;
+  /** Git branch and commit the run tested (branch filters). */
+  branch?: string;
+  commit?: string;
+}
+
+export async function listRuns(outputDir: string): Promise<RunListItem[]> {
+  if (!existsSync(outputDir)) return [];
+  const out: RunListItem[] = [];
+  for (const name of await readdir(outputDir)) {
+    if (!RUN_ID.test(name)) continue;
+    const dir = join(outputDir, name);
+    if (!(await stat(dir)).isDirectory()) continue;
+    const runJson = join(dir, 'run.json');
+    if (!existsSync(runJson)) continue;
+    try {
+      const run = JSON.parse(await readFile(runJson, 'utf8')) as RunResult;
+      const cancelled = run.journeys?.some((j) => j.error?.name === 'CancelledError') || undefined;
+      const branch = run.environment?.gitBranch;
+      const commit = run.environment?.gitCommit;
+      out.push({ runId: name, startedAt: run.startedAt, durationMs: run.durationMs, summary: run.summary, hasReport: existsSync(join(dir, 'report.html')), cancelled, ...(branch ? { branch } : {}), ...(commit ? { commit } : {}) });
+    } catch (e) {
+      out.push({ runId: name, hasReport: false, error: `run.json unreadable: ${(e as Error).message}` });
+    }
+  }
+  return out.sort((a, b) => (b.startedAt ?? b.runId).localeCompare(a.startedAt ?? a.runId));
+}
+
+export async function runDetail(outputDir: string, runId: string, masker?: SecretMasker): Promise<Record<string, unknown>> {
+  assertRunId(runId);
+  const dir = join(outputDir, runId);
+  const runJson = join(dir, 'run.json');
+  if (!existsSync(runJson)) throw new HttpError(404, `Run ${runId} not found`);
+  const run = JSON.parse(await readFile(runJson, 'utf8')) as RunResult;
+  const evidence = await readEvidenceManifest(dir);
+  const evidenceMap: Record<string, { kind: string; path: string; description?: string }> = {};
+  for (const e of evidence) evidenceMap[e.id] = { kind: e.kind, path: e.path, description: e.description };
+  const verification = await verifyEvidence(dir);
+  let healProposals: unknown;
+  const hp = join(dir, 'heal-proposals.json');
+  if (existsSync(hp)) healProposals = JSON.parse(await readFile(hp, 'utf8'));
+  let insights: unknown;
+  const rj = join(dir, 'report.json');
+  if (existsSync(rj)) {
+    try {
+      insights = (JSON.parse(await readFile(rj, 'utf8')) as { insights?: unknown }).insights;
+    } catch {
+      insights = undefined;
+    }
+  }
+  const detail = {
+    run,
+    evidence: evidenceMap,
+    verification: { ok: verification.ok, entries: verification.entries, problems: verification.problems },
+    healProposals,
+    insights,
+    report: existsSync(join(dir, 'report.html')) ? `/runs/${encodeURIComponent(runId)}/report.html` : undefined,
+  };
+  return masker ? masker.maskDeep(detail) : detail;
+}
+
+// ------------------------------------------------------------------ insights
+
+export async function insights(ctx: StudioContext, outputDir: string): Promise<Record<string, unknown>> {
+  const historyPath = resolve(ctx.cwd, '.eztest', 'history.json');
+  const warnings: string[] = [];
+  let flaky: ReturnType<typeof scoreHistory> = [];
+  const trend: Array<{ runId: string; startedAt: string; total: number; passed: number; healed: number; failed: number; healedRatio: number }> = [];
+  try {
+    const store = await HistoryStore.open(historyPath);
+    if (store.journeyIds().length) flaky = scoreHistory(store);
+    for (const r of store.runs.slice(-30)) {
+      const total = r.outcomes.length;
+      const healed = r.outcomes.filter((o) => o.status === 'passed-healed').length;
+      const passed = r.outcomes.filter((o) => o.status === 'passed').length;
+      const failed = r.outcomes.filter((o) => o.status === 'failed' || o.status === 'error').length;
+      trend.push({ runId: r.runId, startedAt: r.startedAt, total, passed, healed, failed, healedRatio: total ? healed / total : 0 });
+    }
+  } catch (e) {
+    warnings.push(`History could not be read: ${(e as Error).message}`);
+  }
+  let latest: Record<string, unknown> | undefined;
+  const runs = await listRuns(outputDir);
+  const last = runs.find((r) => r.summary);
+  if (last) {
+    try {
+      const art = await loadRunArtifacts(join(outputDir, last.runId));
+      const t = triageRun({ run: art.run, evidence: art.evidence, networkLogs: art.networkLogs, flaky });
+      latest = {
+        runId: last.runId,
+        summary: art.run.summary,
+        clusters: t.clusters.map((c) => ({ id: c.id, size: c.size, members: c.members, message: c.normalized, cohesion: c.cohesion })),
+        verdicts: t.verdicts.map((v) => ({ journeyId: v.journeyId, category: v.category, confidence: v.confidence, status: v.status, reason: v.reasons[0] ?? '' })),
+      };
+    } catch (e) {
+      warnings.push(`Latest run could not be analyzed: ${(e as Error).message}`);
+    }
+  }
+  return {
+    flaky: flaky.map((f) => ({
+      journeyId: f.journeyId, state: f.state, samples: f.samples, failRate: f.failRate, flipRate: f.flipRate, healedRate: f.healedRate,
+      healedTrendRising: f.healedTrendRising, sequence: f.sequence, quarantine: f.quarantine,
+    })),
+    trend,
+    latest,
+    warnings,
+  };
+}
+
+export { enableAddons };

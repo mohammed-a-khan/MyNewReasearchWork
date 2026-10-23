@@ -1,0 +1,126 @@
+# EZTest steps template: install, run (sharded across parallel jobs), publish to the
+# pipeline and Azure Test Plans, report to the pull request, readiness gate.
+#
+#   steps:
+#     - template: eztest/integrations/azure-devops/templates/eztest-steps.yml
+#       parameters: { environment: sit, testPlanId: 417, testSuiteId: 418 }
+#
+# useTask: true uses the EZTest task from the extension; false runs the same steps
+# with the eztest CLI (for organisations that have not installed the extension).
+parameters:
+  - name: environment
+    type: string
+    default: ''
+  - name: journeys
+    type: string
+    default: ''
+  - name: tags
+    type: string
+    default: ''
+  - name: testPlanId
+    type: string
+    default: ''
+  - name: testSuiteId
+    type: string
+    default: ''
+  - name: configuration
+    type: string
+    default: ''
+  - name: publishTestPlans
+    type: boolean
+    default: true
+  - name: createBugs
+    type: boolean
+    default: false
+  - name: onNoGo
+    type: string
+    default: fail
+    values: [fail, warn, pass]
+  - name: onRisks
+    type: string
+    default: warn
+    values: [fail, warn, pass]
+  - name: setupCommand
+    type: string
+    default: ''
+  - name: workingDirectory
+    type: string
+    default: $(System.DefaultWorkingDirectory)
+  - name: nodeVersion
+    type: string
+    default: 22.x
+  - name: useTask
+    type: boolean
+    default: true
+
+steps:
+  - task: UseNode@1
+    inputs: { version: '${{ parameters.nodeVersion }}' }
+
+  - ${{ if eq(parameters.useTask, true) }}:
+      - task: EZTest@1
+        displayName: EZTest ${{ parameters.environment }}
+        inputs:
+          command: all
+          workingDirectory: ${{ parameters.workingDirectory }}
+          environment: ${{ parameters.environment }}
+          journeys: ${{ parameters.journeys }}
+          tags: ${{ parameters.tags }}
+          setupCommand: ${{ parameters.setupCommand }}
+          shard: auto
+          publishTestPlans: ${{ parameters.publishTestPlans }}
+          testPlanId: ${{ parameters.testPlanId }}
+          testSuiteId: ${{ parameters.testSuiteId }}
+          configuration: ${{ parameters.configuration }}
+          createBugs: ${{ parameters.createBugs }}
+          prReport: true
+          onNoGo: ${{ parameters.onNoGo }}
+          onRisks: ${{ parameters.onRisks }}
+        env:
+          # The job's own token: no PAT. Grant the build service "Create test runs" and "Contribute to pull requests".
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
+
+  - ${{ if eq(parameters.useTask, false) }}:
+      - script: npm ci
+        workingDirectory: ${{ parameters.workingDirectory }}
+        displayName: Install EZTest
+      - ${{ if ne(parameters.setupCommand, '') }}:
+          - script: ${{ parameters.setupCommand }}
+            workingDirectory: ${{ parameters.workingDirectory }}
+            displayName: Setup
+      - script: npx eztest run ${{ parameters.journeys }} --env "${{ parameters.environment }}" --reporter html,json,junit
+        workingDirectory: ${{ parameters.workingDirectory }}
+        displayName: EZTest run ${{ parameters.environment }}
+        continueOnError: true
+        env:
+          EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
+      - script: |
+          RUN_DIR=$(ls -td eztest-results/run-* | head -1)
+          echo "##vso[task.setvariable variable=EZTEST_RUN_DIR]$RUN_DIR"
+          npx eztest ado summary "$RUN_DIR"
+          echo "##vso[task.uploadsummary]$(pwd)/$RUN_DIR/eztest-summary.md"
+        workingDirectory: ${{ parameters.workingDirectory }}
+        displayName: EZTest summary
+        condition: always()
+      - task: PublishTestResults@2
+        condition: always()
+        inputs: { testResultsFormat: JUnit, testResultsFiles: '$(EZTEST_RUN_DIR)/junit.xml', searchFolder: '${{ parameters.workingDirectory }}', testRunTitle: 'EZTest ${{ parameters.environment }}' }
+      - task: PublishPipelineArtifact@1
+        condition: always()
+        inputs: { targetPath: '${{ parameters.workingDirectory }}/$(EZTEST_RUN_DIR)', artifact: 'eztest-${{ parameters.environment }}-$(System.JobName)' }
+      - ${{ if eq(parameters.publishTestPlans, true) }}:
+          - script: npx eztest ado publish "$(EZTEST_RUN_DIR)" --env "${{ parameters.environment }}" --trace ${{ iif(ne(parameters.testPlanId, ''), format('--plan {0}', parameters.testPlanId), '') }} ${{ iif(ne(parameters.testSuiteId, ''), format('--suite {0}', parameters.testSuiteId), '') }} ${{ iif(eq(parameters.createBugs, true), '--create-bugs', '') }}
+            workingDirectory: ${{ parameters.workingDirectory }}
+            displayName: Publish to Azure Test Plans
+            condition: always()
+            env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
+      - script: npx eztest pr report "$(EZTEST_RUN_DIR)" --env "${{ parameters.environment }}"
+        workingDirectory: ${{ parameters.workingDirectory }}
+        displayName: Pull request status and summary
+        condition: and(always(), eq(variables['Build.Reason'], 'PullRequest'))
+        env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
+      - script: npx eztest ado gate "$(EZTEST_RUN_DIR)" --on-no-go ${{ parameters.onNoGo }} --on-risks ${{ parameters.onRisks }}
+        workingDirectory: ${{ parameters.workingDirectory }}
+        displayName: Readiness gate
+        condition: always()

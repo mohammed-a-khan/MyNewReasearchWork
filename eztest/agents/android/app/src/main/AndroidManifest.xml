@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The agent serves its HTTP API on the device loopback only (reached through adb forward). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Launch intents of the apps under test ("Activate the app ..."). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application android:label="EZTest agent" android:allowBackup="false" />
+
+    <instrumentation
+        android:name=".AgentInstrumentation"
+        android:targetPackage="io.eztest.agent"
+        android:label="EZTest device agent" />
+</manifest>

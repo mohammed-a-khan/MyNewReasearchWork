@@ -1,0 +1,12 @@
+node_modules
+dist
+eztest-results
+.eztest
+test
+examples
+coverage
+*.log
+.env
+.env.*
+tools
+testkit.config.mjs

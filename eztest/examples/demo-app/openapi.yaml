@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: EZ Shop API
+  version: 1.0.0
+  description: The JSON API of the EZ Shop demo app (examples/demo-app/server.ts).
+servers:
+  - url: http://127.0.0.1:4600
+tags:
+  - name: auth
+  - name: orders
+  - name: customers
+  - name: public
+paths:
+  /api/token:
+    post:
+      operationId: getToken
+      summary: Issue an access token (OAuth client credentials)
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type: { type: string, enum: [client_credentials] }
+                client_id: { type: string, example: ez-client }
+                client_secret: { type: string, format: password }
+            # The demo app's public test client (examples/demo-app/server.ts DEMO_CLIENT); never put real secrets in a spec.
+            example: { grant_type: client_credentials, client_id: ez-client, client_secret: ez-client-secret }
+      responses:
+        '200':
+          description: A bearer token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, enum: [Bearer] }
+                  expires_in: { type: integer, minimum: 1 }
+        '401':
+          $ref: '#/components/responses/Error'
+  /api/public/quote:
+    post:
+      operationId: quote
+      summary: Price a quantity of one product
+      tags: [public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+            example: { sku: SKU-100, qty: 2 }
+      responses:
+        '200':
+          description: The quote
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quote' }
+        '400':
+          $ref: '#/components/responses/Error'
+  /api/orders:
+    get:
+      operationId: listOrders
+      summary: All orders, oldest first
+      tags: [orders]
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrderSummary' }
+        '401':
+          $ref: '#/components/responses/Error'
+  /api/orders/{id}:
+    get:
+      operationId: getOrder
+      summary: One order with its lines
+      tags: [orders]
+      security: [{ bearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          example: 1
+      responses:
+        '200':
+          description: The order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/customers:
+    get:
+      operationId: listCustomers
+      summary: All customers
+      tags: [customers]
+      security: [{ bearer: [] }]
+      parameters:
+        - name: region
+          in: query
+          required: false
+          schema: { type: string, enum: [EU, US] }
+      responses:
+        '200':
+          description: Customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Customer' }
+        '401':
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  responses:
+    Error:
+      description: An error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+    QuoteRequest:
+      type: object
+      required: [sku, qty]
+      properties:
+        sku: { type: string, pattern: '^SKU-\d+$', example: SKU-100 }
+        qty: { type: integer, minimum: 1, example: 2 }
+    Quote:
+      type: object
+      required: [sku, name, qty, total, currency]
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        qty: { type: integer }
+        total: { type: string, pattern: '^\d+\.\d{2}$' }
+        currency: { type: string, enum: [USD] }
+        warnings:
+          type: array
+          nullable: true
+          items: { type: string }
+    OrderSummary:
+      type: object
+      required: [id, customer, status, total]
+      properties:
+        id: { type: integer }
+        customer: { type: string }
+        status: { type: string }
+        total: { type: number }
+    Order:
+      type: object
+      required: [id, customer, status, total, created_by, created_at, lines]
+      properties:
+        id: { type: integer }
+        customer_id: { type: integer }
+        customer: { type: string }
+        status: { type: string, enum: [Submitted, Shipped, Cancelled] }
+        total: { type: number }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/OrderLine' }
+    OrderLine:
+      type: object
+      required: [sku, name, qty, unit_price, line_total]
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        qty: { type: integer, minimum: 1 }
+        unit_price: { type: number }
+        line_total: { type: number }
+    Customer:
+      type: object
+      required: [id, name, region, credit_limit]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        region: { type: string, enum: [EU, US] }
+        credit_limit: { type: number }

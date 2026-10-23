@@ -1,0 +1,17 @@
+Journey: Anti-patterns everywhere
+Id: anti-patterns
+Variables: apiToken="sk_live_51Hq0aB3cD4eF5gH6", password="Spring2026!"
+Locale: de-DE
+
+Open /orders
+Wait 3 seconds
+Click xpath=/html/body/div[2]/form/button[1]
+Click xpath=//table[@id='orders']/tbody/tr[3]/td[2]/a
+Type "Hunter2!" into the Password field
+Click the "Save" button
+Click the "Submit order" button
+  Expect the page contains "Order created"
+Pause for 500 ms
+Click xpath=//a[text()='Orders']
+Click xpath=//a[text()=\'Bob\']
+Call API POST /api/orders with body "{}" and store as created

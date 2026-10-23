@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0" width="1080" height="2280">
+  <android.widget.FrameLayout index="0" class="android.widget.FrameLayout" package="com.shop.app" bounds="[0,0][1080,2280]" enabled="true">
+    <android.widget.TextView index="0" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/title" text="Welcome to Shop" bounds="[40,60][1040,160]" enabled="true"/>
+    <android.widget.EditText index="1" class="android.widget.EditText" package="com.shop.app" resource-id="com.shop.app:id/username" text="" hint="Username" content-desc="Username" clickable="true" focusable="true" bounds="[40,220][1040,340]" enabled="true"/>
+    <android.widget.EditText index="2" class="android.widget.EditText" package="com.shop.app" resource-id="com.shop.app:id/password" text="" hint="Password" password="true" clickable="true" focusable="true" bounds="[40,380][1040,500]" enabled="true"/>
+    <android.widget.CheckBox index="3" class="android.widget.CheckBox" package="com.shop.app" resource-id="com.shop.app:id/remember" text="Remember me" checkable="true" checked="false" clickable="true" bounds="[40,540][1040,620]" enabled="true"/>
+    <android.widget.Button index="4" class="android.widget.Button" package="com.shop.app" resource-id="com.shop.app:id/loginBtn" text="Log in" clickable="true" ez-alert="Signed in as {username}" bounds="[40,660][1040,780]" enabled="true"/>
+    <android.widget.Button index="5" class="android.widget.Button" package="com.shop.app" resource-id="com.shop.app:id/ordersTab" text="Orders" clickable="true" ez-sets="status=Showing orders" bounds="[40,820][520,940]" enabled="true"/>
+    <android.widget.Button index="6" class="android.widget.Button" package="com.shop.app" resource-id="com.shop.app:id/helpBtn" text="Help" clickable="true" bounds="[560,820][1040,940]" enabled="true"/>
+    <android.widget.TextView index="7" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/status" text="Ready" bounds="[40,960][1040,1020]" enabled="true"/>
+    <androidx.recyclerview.widget.RecyclerView index="8" class="androidx.recyclerview.widget.RecyclerView" package="com.shop.app" resource-id="com.shop.app:id/orders" scrollable="true" bounds="[0,1040][1080,1800]" enabled="true">
+      <android.widget.TextView index="0" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/order1" text="ORD-1001 Shipped" clickable="true" bounds="[0,1040][1080,1200]" enabled="true"/>
+      <android.widget.TextView index="1" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/order2" text="ORD-1002 Pending" clickable="true" bounds="[0,1200][1080,1360]" enabled="true"/>
+      <android.widget.TextView index="2" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/promo" text="Promo" ez-hidden="true" bounds="[0,1360][1080,1520]" enabled="true"/>
+      <android.widget.TextView index="3" class="android.widget.TextView" package="com.shop.app" resource-id="com.shop.app:id/settings" text="Settings" clickable="true" bounds="[0,3200][1080,3360]" enabled="true"/>
+    </androidx.recyclerview.widget.RecyclerView>
+    <android.widget.ImageView index="9" class="android.widget.ImageView" package="com.shop.app" resource-id="com.shop.app:id/map" content-desc="Map" bounds="[40,1820][1040,2200]" enabled="true"/>
+  </android.widget.FrameLayout>
+</hierarchy>

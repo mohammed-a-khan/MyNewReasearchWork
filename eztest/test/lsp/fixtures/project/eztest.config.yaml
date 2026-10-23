@@ -1,0 +1,25 @@
+# Fixture project for the language server tests (fictional).
+baseUrl: http://127.0.0.1:4600
+journeysDir: journeys
+identity:
+  roles:
+    manager:
+      loginUrl: /login
+      username: bob
+      password: secret://env/BOB_PASSWORD
+      successUrl: /dashboard
+    sales-rep:
+      loginUrl: /login
+      username: alice
+      password: secret://env/ALICE_PASSWORD
+      totp: secret://env/ALICE_TOTP
+db:
+  connections:
+    shop:
+      driver: sqlite
+      file: ./shop.db
+documents:
+  invoice-vs-order:
+    template: templates/invoice.yaml
+    fields:
+      - { name: total, ui: orderTotal, pdf: total, type: currency }

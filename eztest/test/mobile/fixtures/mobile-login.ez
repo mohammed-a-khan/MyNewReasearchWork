@@ -1,0 +1,17 @@
+Journey: Mobile shop login
+Platform: android
+App: "com.shop.app"
+Device: Pixel 8 (Android 15)
+Tags: @mobile @smoke
+
+Type "alice" into the Username field
+  Expect the Username field has value "alice"
+Tap the "Log in" button
+  Expect an alert saying "Signed in as alice"
+Accept the system alert
+Expect the screen to contain "ORD-"
+Capture the text of the "ORD-1001 Shipped" item as firstOrder
+  Expect the "ORD-1001 Shipped" item contains "ORD-1001"
+Swipe up until "ORD-1002 Pending" is visible
+Rotate to landscape
+Rotate to portrait

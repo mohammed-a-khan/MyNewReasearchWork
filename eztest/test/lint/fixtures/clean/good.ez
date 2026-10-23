@@ -1,0 +1,14 @@
+Journey: Clean journey
+Id: clean
+Role: manager
+Variables: password=${PASSWORD}
+
+Log in as manager
+Open /orders/new
+Select "Gadget (49.50)" from the Product dropdown
+Type "2" into the Quantity field
+Click the "Submit order" button
+  Expect the page contains "created"
+Wait for the text "Order created"
+Click testid=download-invoice
+  Expect the page contains "Invoice"

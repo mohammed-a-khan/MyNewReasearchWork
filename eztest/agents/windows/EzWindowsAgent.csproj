@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    EZTest's Windows desktop agent (protocol ez-agent/1). It uses only Windows'
+    own UI Automation API (System.Windows.Automation) and Win32 SendInput; no
+    third-party automation tool. Build on any OS: dotnet publish -c Release -r win-x64
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ez-windows-agent</AssemblyName>
+    <RootNamespace>EzTest.WindowsAgent</RootNamespace>
+    <Version>0.1.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,70 @@
+# EZTest example project for the EZ Shop demo app (examples/demo-app).
+# Start the app:  npx tsx examples/demo-app/server.ts   (or let the tests start it)
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+browser: chromium
+headless: true
+concurrency: 1
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [console, html, json, junit]
+
+healing:
+  enabled: true
+  maxTier: T2-semantic
+
+lenses: [a11y:warn]
+
+identity:
+  sessionDir: .eztest/sessions
+  secretStores:
+    - type: env
+      prefix: SHOP_
+  roles:
+    sales-rep:
+      loginUrl: /login
+      username: alice
+      password: secret://env/ALICE_PASSWORD
+      totp: secret://env/ALICE_TOTP
+      successUrl: /dashboard
+    manager:
+      loginUrl: /login
+      username: bob
+      password: secret://env/BOB_PASSWORD
+      successUrl: /dashboard
+      api:
+        tokenUrl: /api/token
+        clientId: ez-client
+        clientSecret: secret://env/API_CLIENT_SECRET
+
+db:
+  connections:
+    shop:
+      driver: sqlite
+      file: ${SHOP_DB:-./shop.db}
+
+documents:
+  invoice-vs-order:
+    template: templates/invoice.yaml
+    db:
+      connection: shop
+      query: >
+        SELECT o.id, c.name AS customer, o.total, o.created_at
+        FROM orders o JOIN customers c ON c.id = o.customer_id
+        WHERE 'ORD-' || o.id = ?
+      linesQuery: >
+        SELECT l.sku, l.name, l.qty, l.unit_price, l.line_total
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE 'ORD-' || o.id = ?
+      params: ['$${orderNumber}']   # $${...} = a value captured during the run
+    fields:
+      - { name: orderNumber, ui: { key: orderNumber, pattern: 'ORD-(\d+)' }, pdf: { key: invoiceNo, pattern: 'INV-(\d+)' }, db: id, type: number }
+      - { name: customer, ui: orderCustomer, pdf: customer, db: customer, type: text }
+      - { name: total, ui: orderTotal, pdf: total, db: total, type: currency, tolerance: { abs: 0.005 } }
+    lines:
+      pdfTable: lines
+      key: SKU
+      fieldMap: { SKU: sku, Item: name, Qty: qty, Unit Price: unit_price, Line Total: line_total }
+    footing: { pdfTable: lines, column: Line Total }
+
+readiness:
+  policyPath: readiness-policy.yaml

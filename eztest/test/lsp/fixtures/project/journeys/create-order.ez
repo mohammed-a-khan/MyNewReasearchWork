@@ -1,0 +1,14 @@
+Journey: Manager creates an order
+Tags: @smoke
+Role: manager
+Variables: qty=3
+
+Run journey "open-the-orders-page" with role=manager
+Go to /orders/new
+Fill the Quantity field with ${qty}
+Click the "Submit order" button
+  Expect the page contains "created"
+Capture the text of testid=order-total as total
+Set variable doubled to total * 2
+Expect ${doubled} equals "99"
+Run query "OPEN_ORDERS" on shop with customer=1 and store the rows as open

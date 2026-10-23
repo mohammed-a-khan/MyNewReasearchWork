@@ -1,0 +1,12 @@
+Journey: Log in as a user
+Id: login-as
+Tags: @library
+Params: user, password
+Returns: welcome
+
+Open /login
+Type "${user}" into the Username field
+Type "${password}" into the Password field
+Click the "Sign in" button
+  Expect the URL contains "/dashboard"
+Capture the text of testid=welcome-user as welcome

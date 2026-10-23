@@ -1,0 +1,7 @@
+Journey: Open the orders page
+Tags: @library
+Params: role
+
+Log in as ${role}
+Open /dashboard
+  Expect the page contains "Recent orders"

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.Client.ServerForm.TaskRecording">
+  <Name>Create a sales order</Name>
+  <Description>Create a sales order for customer US-001 and confirm it.</Description>
+  <Scope>
+    <Id>8f1d2c34-0000-4b3a-9e57-000000000001</Id>
+  </Scope>
+  <RootTaskStep>
+    <Id>8f1d2c34-0000-4b3a-9e57-000000000002</Id>
+    <Description>Create a sales order</Description>
+    <ChildNodes>
+      <Node i:type="MenuItemUserAction">
+        <Description>Go to Accounts receivable &gt; Orders &gt; All sales orders.</Description>
+        <Id>a0000000-0000-0000-0000-000000000001</Id>
+        <Sequence>1</Sequence>
+        <MenuItemName>SalesTableListPage</MenuItemName>
+        <MenuItemType>Display</MenuItemType>
+        <NavigationPath>Accounts receivable/Orders/All sales orders</NavigationPath>
+      </Node>
+      <Node i:type="CommandUserAction">
+        <Description>Click New.</Description>
+        <Id>a0000000-0000-0000-0000-000000000002</Id>
+        <Sequence>2</Sequence>
+        <CommandName>SystemDefinedNewButton</CommandName>
+        <ControlLabel>New</ControlLabel>
+        <ControlName>SystemDefinedNewButton</ControlName>
+        <ControlType>CommandButton</ControlType>
+        <FormId>SalesTableListPage</FormId>
+      </Node>
+      <Node i:type="TaskNode">
+        <Description>Fill in the order header</Description>
+        <Id>a0000000-0000-0000-0000-000000000003</Id>
+        <ChildNodes>
+          <Node i:type="PropertyUserAction">
+            <Description>In the Customer account field, enter or select a value.</Description>
+            <Id>a0000000-0000-0000-0000-000000000004</Id>
+            <ControlLabel>Customer account</ControlLabel>
+            <ControlName>SalesTable_CustAccount</ControlName>
+            <ControlType>SegmentedEntry</ControlType>
+            <PropertyName>Value</PropertyName>
+            <Value>US-001</Value>
+          </Node>
+          <Node i:type="PropertyUserAction">
+            <Description>In the Delivery terms list, select an option.</Description>
+            <Id>a0000000-0000-0000-0000-000000000005</Id>
+            <ControlLabel>Delivery terms</ControlLabel>
+            <ControlName>SalesTable_DlvTerm</ControlName>
+            <ControlType>ComboBox</ControlType>
+            <Value>FOB</Value>
+          </Node>
+          <Node i:type="PropertyUserAction">
+            <Description>Select Yes in the Prices include sales tax field.</Description>
+            <Id>a0000000-0000-0000-0000-000000000006</Id>
+            <ControlLabel>Prices include sales tax</ControlLabel>
+            <ControlName>SalesTable_InclTax</ControlName>
+            <ControlType>CheckBox</ControlType>
+            <Value>Yes</Value>
+          </Node>
+          <Node i:type="InfoUserAction">
+            <Description>The order header defaults the site and warehouse from the customer.</Description>
+            <Id>a0000000-0000-0000-0000-000000000007</Id>
+          </Node>
+        </ChildNodes>
+      </Node>
+      <Node i:type="CommandUserAction">
+        <Description>Click OK.</Description>
+        <Id>a0000000-0000-0000-0000-000000000008</Id>
+        <CommandName>OK</CommandName>
+        <ControlLabel>OK</ControlLabel>
+        <ControlName>OK</ControlName>
+        <ControlType>CommandButton</ControlType>
+      </Node>
+      <Node i:type="PropertyUserAction">
+        <Description>In the Item number field, enter or select a value.</Description>
+        <Id>a0000000-0000-0000-0000-000000000009</Id>
+        <ControlName>SalesLine_ItemId</ControlName>
+        <ControlType>Input</ControlType>
+        <Value>D0001</Value>
+      </Node>
+      <Node i:type="ValidationUserAction">
+        <Description>Validate that Customer account is US-001.</Description>
+        <Id>a0000000-0000-0000-0000-000000000010</Id>
+        <ControlLabel>Customer account</ControlLabel>
+        <ControlName>SalesTable_CustAccount</ControlName>
+        <Operator>Equal</Operator>
+        <Value>US-001</Value>
+      </Node>
+      <Node i:type="ValidationUserAction">
+        <Description>Validate that Order status is not Invoiced.</Description>
+        <Id>a0000000-0000-0000-0000-000000000011</Id>
+        <ControlLabel>Order status</ControlLabel>
+        <Operator>NotEqual</Operator>
+        <Value>Invoiced</Value>
+      </Node>
+      <Node i:type="GridRowUserAction">
+        <Description>In the list, mark the selected row.</Description>
+        <Id>a0000000-0000-0000-0000-000000000012</Id>
+        <ControlName>SalesLineGrid</ControlName>
+        <RowIndex>0</RowIndex>
+      </Node>
+    </ChildNodes>
+  </RootTaskStep>
+</Recording>

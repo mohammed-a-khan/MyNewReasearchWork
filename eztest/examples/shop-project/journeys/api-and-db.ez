@@ -1,0 +1,7 @@
+Journey: Orders API and database agree
+Tags: @api @db
+Risk: 3
+
+Call API "GET /api/customers" as manager and store as customers
+Expect the customers response status to be 200
+Run query "SELECT COUNT(*) AS n FROM customers" on shop as customerCount

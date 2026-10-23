@@ -1,0 +1,40 @@
+{
+  "manifestVersion": 1,
+  "id": "eztest",
+  "name": "EZTest",
+  "version": "1.0.0",
+  "publisher": "eztest",
+  "description": "Run EZTest journeys in Azure Pipelines: results and evidence in Azure Test Plans and the pipeline, pull request status and summary, and the release readiness gate.",
+  "public": false,
+  "categories": ["Azure Pipelines", "Azure Test Plans"],
+  "tags": ["testing", "test automation", "release readiness", "evidence"],
+  "targets": [{ "id": "Microsoft.VisualStudio.Services" }],
+  "scopes": ["vso.build", "vso.test"],
+  "icons": { "default": "images/eztest.png" },
+  "content": { "details": { "path": "overview.md" } },
+  "demands": ["api-version/7.0"],
+  "files": [
+    { "path": "tasks/EZTest" },
+    { "path": "web", "addressable": true },
+    { "path": "images", "addressable": true }
+  ],
+  "contributions": [
+    {
+      "id": "eztest-task",
+      "type": "ms.vss-distributed-task.task",
+      "targets": ["ms.vss-distributed-task.tasks"],
+      "properties": { "name": "tasks/EZTest" }
+    },
+    {
+      "id": "eztest-results-tab",
+      "type": "ms.vss-build-web.build-results-tab",
+      "description": "The EZTest report of the run: readiness decision, gates, failures with their journey line, heals awaiting review.",
+      "targets": ["ms.vss-build-web.build-results-view"],
+      "properties": {
+        "name": "EZTest",
+        "uri": "web/results-tab.html",
+        "supportsTasks": ["635890ab-0526-4339-a2c0-0d7ec7cc94e1"]
+      }
+    }
+  ]
+}

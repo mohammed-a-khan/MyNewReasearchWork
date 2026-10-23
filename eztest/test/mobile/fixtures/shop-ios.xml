@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy width="390" height="844">
+  <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Shop" label="Shop" enabled="true" visible="true" x="0" y="0" width="390" height="844">
+    <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="title" label="Welcome to Shop" enabled="true" visible="true" x="20" y="60" width="350" height="40"/>
+    <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="username" label="Username" placeholderValue="Username" value="" enabled="true" visible="true" x="20" y="120" width="350" height="44"/>
+    <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" name="remember" label="Remember me" value="0" enabled="true" visible="true" x="20" y="180" width="350" height="44"/>
+    <XCUIElementTypeButton type="XCUIElementTypeButton" name="loginBtn" label="Log in" enabled="true" visible="true" ez-alert="Welcome back" x="20" y="240" width="350" height="50"/>
+    <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="status" label="Ready" enabled="true" visible="true" x="20" y="310" width="350" height="30"/>
+  </XCUIElementTypeApplication>
+</hierarchy>

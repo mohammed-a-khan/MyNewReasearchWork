@@ -1,0 +1,9 @@
+Journey: Interop: .ez calls code
+Id: ez-calls-code
+Tags: @sdk @interop
+
+Run journey "login-as" with user="bob", password="Builder#2"
+Run code "steps/billing.steps.ts#orderTotals" with region="EU", minLimit="10000" as totals
+Expect ${totals.count} == 2
+Expect ${totals.first} == "Contoso Ltd"
+Expect ${checkedBy} == "code"

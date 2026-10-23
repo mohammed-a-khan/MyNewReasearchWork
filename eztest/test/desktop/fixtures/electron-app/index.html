@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Orders Desk</title></head>
+<body>
+  <h1 id="title">Orders Desk</h1>
+  <label for="customer">Customer</label>
+  <input id="customer" data-testid="customer">
+  <label for="region">Region</label>
+  <select id="region"><option>North</option><option>South</option></select>
+  <label><input type="checkbox" id="rush"> Rush order</label>
+  <button id="place" type="button">Place order</button>
+  <button id="report" type="button">Open report</button>
+  <p id="status" role="status">Ready</p>
+  <script>
+    if (new URLSearchParams(location.search).get('variant') === 'renamed') document.getElementById('place').textContent = 'Submit order';
+    document.getElementById('place').addEventListener('click', () => {
+      const c = document.getElementById('customer').value;
+      const r = document.getElementById('region').value;
+      const rush = document.getElementById('rush').checked;
+      document.getElementById('status').textContent = c ? `Order placed for ${c} (${r}${rush ? ', rush' : ''})` : 'Customer is required';
+    });
+    document.getElementById('customer').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('status').textContent = 'Looked up ' + e.target.value;
+    });
+    document.getElementById('report').addEventListener('click', () => window.desk.openReport());
+  </script>
+</body>
+</html>

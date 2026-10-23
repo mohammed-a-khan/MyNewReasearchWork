@@ -1,0 +1,14 @@
+/* EZTest Studio styles, bundled by esbuild into app.css. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./shell.css";
+@import "./components.css";
+@import "./editor.css";
+@import "./pages.css";
+@import "./quality.css";
+@import "./debug.css";
+@import "./trace.css";
+@import "./assurance.css";
+@import "./scm.css";
+@import "./load.css";
+@import "./manual.css";

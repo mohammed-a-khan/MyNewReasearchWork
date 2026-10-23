@@ -1,0 +1,5 @@
+version: 1
+gates:
+  noFailedCriticalJourneys: { minRisk: 4 }
+  minPassRate: { min: 1 }
+  maxHealedRatio: { max: 0.5 }

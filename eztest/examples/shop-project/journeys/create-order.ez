@@ -1,0 +1,16 @@
+Journey: Create an order and verify the invoice three ways
+Tags: @smoke @orders @documents
+Risk: 5
+Requirements: ORD-1, ORD-7
+
+Log in as manager
+Go to /orders/new
+Select "Gadget (49.50)" from the Product dropdown
+Fill the Quantity field with 3
+Click the "Submit order" button
+Expect the page to contain "created"
+Capture the text of testid=order-number as orderNumber
+Capture the text of testid=order-customer as orderCustomer
+Capture the text of testid=order-total as orderTotal
+Download the "Download invoice" link as invoice
+Compare document invoice to the order using invoice-vs-order and store as invoiceCheck

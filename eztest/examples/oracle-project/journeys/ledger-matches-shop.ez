@@ -1,0 +1,26 @@
+Journey: The Oracle customer ledger matches the shop
+Tags: @oracle @db @api
+Risk: 3
+
+# API <-> DB: the shop's customers API and the ledger agree, column by column (Oracle returns UPPER CASE names)
+Call API "GET /api/customers" as manager and store as customers
+Expect the customers response status is 200
+Run query "LEDGER_CUSTOMERS" on ledger and store the rows as ledger
+Compare ${customers.body} with ${ledger} by id
+
+# Named binds, a fragment and a typed default
+Expect query "CUSTOMERS_BY_REGION" on ledger with region="EU" returns 2 rows
+Expect query "CUSTOMERS_BY_REGION" on ledger with region="EU", min_limit=20000 returns 1 row
+Get the value of query "CUSTOMER_NAME" with id=${customers.body.1.id} as secondName
+Expect ${secondName} equals "Fabrikam Inc"
+
+# Oracle syntax: DBMS_RANDOM, FETCH FIRST, TO_DATE, SYSDATE
+Get the first row of query "RANDOM_ACTIVE_CUSTOMER" as pick
+Expect len(pick.customer_name) > 0
+Expect query "CUSTOMERS_ONBOARDED_SINCE" with since="2024-06-01" returns 2 rows
+Wait until query "LEDGER_CUSTOMER_COUNT" on ledger returns 1 row within 5 seconds
+
+# UI <-> DB: the customer picked from the ledger is offered on the order form
+Log in as manager
+Open /orders/new
+Expect the page contains "${pick.customer_name}"

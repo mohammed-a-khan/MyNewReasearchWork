@@ -1,0 +1,154 @@
+{
+  "name": "eztest-vscode",
+  "displayName": "EZTest",
+  "description": "EZTest journeys (.ez) in VS Code: language server (diagnostics, completion, hover, go to definition, rename, quick fixes), test explorer, run and debug, EZTest Studio.",
+  "version": "0.1.0",
+  "publisher": "eztest",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "eztest",
+    "test automation",
+    "ez",
+    "journeys"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/*.ez",
+    "workspaceContains:**/eztest.config.{yaml,yml,json}"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "ez",
+        "aliases": [
+          "EZTest journey",
+          "ez"
+        ],
+        "extensions": [
+          ".ez"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ez",
+        "scopeName": "source.ez",
+        "path": "./syntaxes/ez.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "eztest.runJourney",
+        "title": "Run journey",
+        "category": "EZTest",
+        "icon": "$(play)"
+      },
+      {
+        "command": "eztest.debugJourney",
+        "title": "Debug journey (headed, with trace)",
+        "category": "EZTest",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "eztest.validate",
+        "title": "Validate journeys",
+        "category": "EZTest"
+      },
+      {
+        "command": "eztest.openStudio",
+        "title": "Open EZTest Studio",
+        "category": "EZTest",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "eztest.restartServer",
+        "title": "Restart the .ez language server",
+        "category": "EZTest"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "eztest.runJourney",
+          "when": "resourceLangId == ez",
+          "group": "navigation@0"
+        },
+        {
+          "command": "eztest.debugJourney",
+          "when": "resourceLangId == ez",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "eztest.openStudio",
+          "when": "resourceLangId == ez",
+          "group": "navigation@9"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "eztest.runJourney",
+          "when": "resourceExtname == .ez",
+          "group": "eztest@0"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "EZTest",
+      "properties": {
+        "eztest.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the eztest CLI. Empty: node_modules/.bin/eztest in the workspace, else `npx eztest`."
+        },
+        "eztest.runArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra arguments for `eztest run` (e.g. [\"--env\", \"test\"])."
+        },
+        "eztest.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication with the .ez language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "node build.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license -o eztest-vscode.vsix",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.9.1",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.3",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.2.0"
+  }
+}

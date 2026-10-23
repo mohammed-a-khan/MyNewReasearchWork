@@ -1,0 +1,45 @@
+/* EZTest results tab. Follows the Azure DevOps theme variables when the host applies them, with readable fallbacks (WCAG AA in light and dark). */
+:root {
+  color-scheme: light dark;
+  --ez-text: var(--text-primary-color, #1e1e1e);
+  --ez-muted: var(--text-secondary-color, #4f4f4f);
+  --ez-bg: var(--background-color, #ffffff);
+  --ez-border: rgba(0, 0, 0, 0.16);
+  --ez-ok: #0e700e;
+  --ez-warn: #8a5300;
+  --ez-bad: #b3261e;
+  --ez-code-bg: rgba(0, 0, 0, 0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ez-text: var(--text-primary-color, #f0f0f0);
+    --ez-muted: var(--text-secondary-color, #c8c8c8);
+    --ez-bg: var(--background-color, #1e1e1e);
+    --ez-border: rgba(255, 255, 255, 0.2);
+    --ez-ok: #7fd17f;
+    --ez-warn: #f0b552;
+    --ez-bad: #ff9a92;
+    --ez-code-bg: rgba(255, 255, 255, 0.08);
+  }
+}
+body { margin: 0; padding: 16px; font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ez-text); background: var(--ez-bg); }
+.ez-h1 { font-size: 20px; margin: 0 0 4px; }
+.ez-h2 { font-size: 16px; margin: 20px 0 6px; }
+.ez-sub { margin: 0; }
+.muted { color: var(--ez-muted); }
+.small { font-size: 12px; }
+.mono, code, pre { font-family: "Cascadia Code", Consolas, ui-monospace, monospace; }
+code { background: var(--ez-code-bg); padding: 0 3px; border-radius: 3px; }
+.ez-head { border-left: 4px solid var(--ez-muted); padding: 4px 0 4px 12px; }
+.ez-head.d-GO { border-left-color: var(--ez-ok); }
+.ez-head.d-GO_WITH_RISKS { border-left-color: var(--ez-warn); }
+.ez-head.d-NO_GO { border-left-color: var(--ez-bad); }
+.d-GO .ez-decision { color: var(--ez-ok); }
+.d-GO_WITH_RISKS .ez-decision { color: var(--ez-warn); }
+.d-NO_GO .ez-decision { color: var(--ez-bad); }
+.ez-table { border-collapse: collapse; width: 100%; }
+.ez-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ez-table th, .ez-table td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid var(--ez-border); }
+.ez-err { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+tr.st-failed td:nth-child(2), tr.st-error td:nth-child(2) { color: var(--ez-bad); font-weight: 600; }
+tr.st-passed-healed td:nth-child(2) { color: var(--ez-warn); font-weight: 600; }

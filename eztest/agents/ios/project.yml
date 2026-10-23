@@ -1,0 +1,36 @@
+# Xcode project for the EZTest iOS agent. Generate EZTestAgent.xcodeproj with
+# `xcodegen generate` in this directory (or create the two targets by hand in
+# Xcode: an iOS app "EZTestAgentHost" and a UI Testing Bundle "EZTestAgentUITests"
+# with the sources below). Then: `eztest mobile build-agent --ios`.
+name: EZTestAgent
+options:
+  bundleIdPrefix: io.eztest
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  EZTestAgentHost:
+    type: application
+    platform: iOS
+    sources: [EZTestAgentHost]
+    info:
+      path: EZTestAgentHost/Info.plist
+      properties:
+        UILaunchScreen: {}
+  EZTestAgentUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [EZTestAgentUITests]
+    dependencies:
+      - target: EZTestAgentHost
+    info:
+      path: EZTestAgentUITests/Info.plist
+schemes:
+  EZTestAgent:
+    build:
+      targets:
+        EZTestAgentHost: all
+        EZTestAgentUITests: [test]
+    test:
+      targets: [EZTestAgentUITests]
+      environmentVariables:
+        EZTEST_AGENT_PORT: "8790"

@@ -1,0 +1,44 @@
+# EZTest example: the EZ Shop demo app (examples/demo-app) plus an Oracle
+# "customer ledger" that mirrors the shop's customers. Fictional data only.
+#
+#   docker run -d --name ez-oracle -p 1521:1521 -e ORACLE_PASSWORD=EzOracle_1 \
+#     -e APP_USER=eztest -e APP_USER_PASSWORD=EzTest_1 gvenzl/oracle-free:23-slim-faststart
+#   export SHOP_ORACLE_PASSWORD=EzTest_1
+#   npx eztest queries check          # parse every catalogue query against Oracle
+#   npx eztest run journeys
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [console, json]
+healing:
+  enabled: false
+
+identity:
+  secretStores:
+    - type: env
+      prefix: SHOP_
+  roles:
+    manager:
+      loginUrl: /login
+      username: bob
+      password: secret://env/BOB_PASSWORD
+      successUrl: /dashboard
+      api:
+        tokenUrl: /api/token
+        clientId: ez-client
+        clientSecret: secret://env/API_CLIENT_SECRET
+
+db:
+  connections:
+    ledger:
+      type: oracle
+      host: ${ORACLE_HOST:-localhost}
+      port: 1521
+      serviceName: ${ORACLE_SERVICE:-FREEPDB1}
+      user: ${ORACLE_USER:-eztest}
+      password: secret://env/ORACLE_PASSWORD
+      pool: { min: 0, max: 4 }
+  queries:
+    dir: queries
+    inline:
+      LEDGER_CUSTOMER_COUNT: SELECT COUNT(*) AS customer_count FROM ezt_ledger_customers

@@ -1,0 +1,16 @@
+{
+  "name": "eztest-azure-devops",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EZTest Azure DevOps extension: the EZTest pipeline task and the pipeline run results tab.",
+  "type": "commonjs",
+  "scripts": {
+    "validate": "node scripts/validate.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "azure-devops-extension-sdk": "4.0.2",
+    "tfx-cli": "0.24.2"
+  },
+  "license": "UNLICENSED"
+}

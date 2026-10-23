@@ -1,0 +1,14 @@
+fields:
+  - { name: invoiceNo, label: Invoice No, readFrom: right }
+  - { name: customer, label: Customer }
+  - { name: date, label: Date, type: date }
+  - { name: total, label: Total, type: currency }
+tables:
+  - name: lines
+    key: SKU
+    columns:
+      - SKU
+      - Item
+      - { name: Qty, type: number }
+      - { name: Unit Price, type: currency }
+      - { name: Line Total, type: currency }

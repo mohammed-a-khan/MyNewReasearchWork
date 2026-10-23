@@ -1,0 +1,36 @@
+# A multi-stage pipeline: pull request validation, then deploy and test per environment.
+# Each environment publishes to its own Azure Test Plans plan and suite (the same ids
+# can live in config/<env>.yaml as ado.testPlanId / ado.testSuiteId instead).
+# NO_GO fails the environment's test stage, so promotion stops there.
+trigger: [main]
+pr: [main]
+
+variables:
+  - name: isPR
+    value: ${{ eq(variables['Build.Reason'], 'PullRequest') }}
+
+stages:
+  # Pull requests: run the smoke journeys, post "EZTest: GO / NO_GO" and the summary comment.
+  - ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+      - template: eztest-stage.yml
+        parameters: { environment: dev, tags: smoke, shards: 2, onRisks: pass }
+
+  - ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+      - stage: deploy_sit
+        jobs:
+          - deployment: deploy
+            environment: sit
+            strategy: { runOnce: { deploy: { steps: [ { script: echo "deploy the app to SIT here" } ] } } }
+
+      - template: eztest-stage.yml
+        parameters: { environment: sit, dependsOn: [deploy_sit], shards: 3, testPlanId: '417', testSuiteId: '418', configuration: 'Windows + Chrome', createBugs: true }
+
+      - stage: deploy_uat
+        dependsOn: [eztest_sit]
+        jobs:
+          - deployment: deploy
+            environment: uat
+            strategy: { runOnce: { deploy: { steps: [ { script: echo "deploy the app to UAT here" } ] } } }
+
+      - template: eztest-stage.yml
+        parameters: { environment: uat, dependsOn: [deploy_uat], testPlanId: '517', testSuiteId: '518', onRisks: fail }

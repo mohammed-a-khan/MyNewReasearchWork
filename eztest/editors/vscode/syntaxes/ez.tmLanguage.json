@@ -1,0 +1,136 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "EZTest journey",
+  "scopeName": "source.ez",
+  "fileTypes": ["ez"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#journey-header" },
+    { "include": "#header" },
+    { "include": "#examples" },
+    { "include": "#table-row" },
+    { "include": "#expect" },
+    { "include": "#flow" },
+    { "include": "#step" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "^\\s*(#|//).*$",
+      "name": "comment.line.number-sign.ez"
+    },
+    "journey-header": {
+      "match": "^\\s*(?i:(journey|name))\\s*(:)\\s*(.*)$",
+      "captures": {
+        "1": { "name": "keyword.other.header.ez" },
+        "2": { "name": "punctuation.separator.key-value.ez" },
+        "3": { "name": "entity.name.section.journey.ez" }
+      }
+    },
+    "header": {
+      "begin": "^\\s*(?i:(id|tags|role|requirements?|risk|base\\s*url|variables|vars|description|lenses|data|params|parameters|returns|device|viewport|locale|time\\s*zone|colou?r\\s*scheme|reduced\\s*motion|geolocation|permissions|user\\s*agent|touch|offline|http\\s*credentials|extra\\s*headers|headers|loaders))\\s*(:)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.header.ez" },
+        "2": { "name": "punctuation.separator.key-value.ez" }
+      },
+      "end": "$",
+      "patterns": [
+        { "match": "@[\\w-]+", "name": "entity.name.tag.ez" },
+        { "match": "\\b([A-Za-z_][\\w.-]*)(=)", "captures": { "1": { "name": "variable.other.definition.ez" }, "2": { "name": "keyword.operator.assignment.ez" } } },
+        { "include": "#value" }
+      ]
+    },
+    "examples": {
+      "match": "^\\s*(?i:(examples|scenarios|data\\s+table))\\s*(:)(.*)$",
+      "captures": {
+        "1": { "name": "keyword.control.examples.ez" },
+        "2": { "name": "punctuation.separator.key-value.ez" },
+        "3": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "table-row": {
+      "begin": "^\\s*(\\|)",
+      "beginCaptures": { "1": { "name": "punctuation.separator.table.ez" } },
+      "end": "$",
+      "name": "meta.table.row.ez",
+      "patterns": [
+        { "match": "\\|", "name": "punctuation.separator.table.ez" },
+        { "include": "#string" },
+        { "match": "[^|\"]+", "name": "string.unquoted.cell.ez" }
+      ]
+    },
+    "expect": {
+      "begin": "^\\s*((?i:(?:then|and|also)\\s+)?(?i:expect|verify)(?:\\s+(?i:softly))?|(?i:soft(?:ly)?\\s+(?:expect|verify)))\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.expect.ez" } },
+      "end": "$",
+      "name": "meta.expectation.ez",
+      "patterns": [{ "include": "#value" }]
+    },
+    "flow": {
+      "begin": "^\\s*((?i:otherwise\\s+if|otherwise\\s+unless|otherwise|else|if|unless|repeat\\s+until|repeat|for\\s+each|while|retry|try|on\\s+failure|on\\s+error|catch|group|in\\s+(?:the\\s+)?frame|in\\s+the|end(?:\\s+\\w+)?|done))\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.flow.ez" } },
+      "end": "$",
+      "name": "meta.flow.ez",
+      "patterns": [
+        { "match": "\\b(?i:then|in|as|at\\s+most|times|up\\s+to|every)\\b", "name": "keyword.control.flow.ez" },
+        { "include": "#value" }
+      ]
+    },
+    "step": {
+      "begin": "^\\s*((?i:(?:and|then|when|given|but|also|next|finally|first)\\s+)*(?i:(?:i|we|the\\s+user|user|they)\\s+)?)([A-Za-z][\\w-]*)",
+      "beginCaptures": { "2": { "name": "keyword.other.step.ez" } },
+      "end": "$",
+      "name": "meta.step.ez",
+      "patterns": [{ "include": "#value" }]
+    },
+    "value": {
+      "patterns": [
+        { "include": "#annotation" },
+        { "include": "#string" },
+        { "include": "#variable" },
+        { "include": "#placeholder" },
+        { "include": "#locator" },
+        { "include": "#url" },
+        { "match": "\\b\\d+(?:\\.\\d+)?\\b", "name": "constant.numeric.ez" },
+        { "match": "\\b(?i:as|store(?:\\s+the\\s+\\w+)?\\s+as)\\s+([A-Za-z_][\\w.-]*)\\s*$", "captures": { "1": { "name": "variable.other.definition.ez" } } },
+        { "match": "\\b(?i:into|from|to|with|on|using|and|as|in|of)\\b", "name": "keyword.operator.word.ez" }
+      ]
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.ez",
+      "patterns": [{ "include": "#variable" }, { "include": "#placeholder" }]
+    },
+    "variable": {
+      "match": "(\\$\\{)([A-Za-z_][\\w.]*)(?::-[^}]*)?(\\})",
+      "captures": {
+        "1": { "name": "punctuation.definition.variable.begin.ez" },
+        "2": { "name": "variable.other.ez" },
+        "3": { "name": "punctuation.definition.variable.end.ez" }
+      }
+    },
+    "placeholder": {
+      "match": "<[A-Za-z_][\\w -]*>",
+      "name": "variable.parameter.example.ez"
+    },
+    "locator": {
+      "match": "\\b((?i:testid|css|xpath|role|label|text|placeholder|alt|title))(=)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.locator.ez" },
+        "2": { "name": "keyword.operator.assignment.ez" }
+      }
+    },
+    "url": {
+      "match": "(?<=\\s|^)(?:https?://\\S+|/[\\w./?=&%#:-]*)",
+      "name": "markup.underline.link.ez"
+    },
+    "annotation": {
+      "match": "(\\[)((?:\\s*(?:id\\s*=\\s*[\\w.-]+|optional|soft|timeout\\s*=\\s*[\\d.]+\\s*(?:ms|s|m)?|risk\\s*=\\s*[1-5]|retry\\s*=\\s*\\d+|every\\s*=\\s*[\\d.]+\\s*(?:ms|s|m)?)\\s*)+)(\\])\\s*$",
+      "captures": {
+        "1": { "name": "punctuation.definition.annotation.begin.ez" },
+        "2": { "name": "storage.modifier.annotation.ez" },
+        "3": { "name": "punctuation.definition.annotation.end.ez" }
+      }
+    }
+  }
+}
