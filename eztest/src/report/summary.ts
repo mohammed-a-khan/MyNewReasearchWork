@@ -22,7 +22,7 @@ body{background:var(--surface)}
 .viz-table{display:none}
 h2{font-size:14px;margin:14px 0 6px}
 .s-row .donut{flex-wrap:nowrap;gap:12px}.s-row .donut svg{width:140px}.s-row .legend{min-width:0}
-ul.tight{margin:0;padding-left:18px;font-size:12.5px}
+ul.tight{margin:0;padding-left:18px;font-size:12.5px;line-height:2.1}ul.tight a{display:inline-block;padding:4px 4px;line-height:16px}
 @media print{.page{padding:0}}
 `;
 
