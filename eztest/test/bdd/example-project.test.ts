@@ -39,6 +39,7 @@ describe('examples/bdd-project', () => {
     const { run } = await latestRun(project);
     const all = run.journeys.map((j) => `${j.journeyId} ${j.status}\n${tree(j.steps, 1)}`).join('\n');
     expect(run.journeys.map((j) => j.journeyId).sort(), all).toEqual([
+      'bdd-before-all--the-quote-api-answers',
       'orders--order-qty-product-for-customer-1',
       'orders--order-qty-product-for-customer-2',
       'orders--place-an-order',

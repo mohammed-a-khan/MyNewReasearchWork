@@ -80,7 +80,7 @@ export interface StepDefinition {
   line: number;
 }
 
-export type HookKind = 'before' | 'after' | 'beforeStep' | 'afterStep';
+export type HookKind = 'before' | 'after' | 'beforeStep' | 'afterStep' | 'beforeAll' | 'afterAll';
 
 export interface HookOptions {
   /** Tag expression the scenario must match (`@db and not @readonly`). */
@@ -226,6 +226,39 @@ export function AfterStep(a: string | HookOptions | HookFn, b?: HookFn): void {
   hook('afterStep', a, b);
 }
 
+/**
+ * What BeforeAll / AfterAll hooks receive: the SDK (`api`, `db`, `ui` ...), `shared` (values set on it
+ * by a BeforeAll are copied into the World of every scenario the hook applies to; AfterAll sees them
+ * all), the World parameters and `attach`.
+ */
+export interface BddAllContext extends SdkContext {
+  shared: Record<string, unknown>;
+  parameters: Record<string, unknown>;
+  attach(name: string, content: string | Uint8Array, description?: string): Promise<string>;
+  result?: HookResult;
+}
+
+export type AllHookFn = (this: Record<string, unknown>, ctx: BddAllContext) => unknown;
+
+/**
+ * Runs once per run (per `eztest run` process, so once per shard with --shard; every --workers slot
+ * shares it) before the first scenario it applies to. Tag-filtered like Before. The values it sets on
+ * `ctx.shared` (or returns as an object) are copied into every matching scenario's World. When it fails,
+ * the scenarios it applies to fail without running.
+ */
+export function BeforeAll(fn: AllHookFn): void;
+export function BeforeAll(tagsOrOptions: string | HookOptions, fn: AllHookFn): void;
+export function BeforeAll(a: string | HookOptions | AllHookFn, b?: AllHookFn): void {
+  hook('beforeAll', a as string | HookOptions | HookFn, b as HookFn | undefined);
+}
+
+/** Runs once at the end of the run when a scenario it applies to ran; sees every BeforeAll's `shared` values. */
+export function AfterAll(fn: AllHookFn): void;
+export function AfterAll(tagsOrOptions: string | HookOptions, fn: AllHookFn): void;
+export function AfterAll(a: string | HookOptions | AllHookFn, b?: AllHookFn): void {
+  hook('afterAll', a as string | HookOptions | HookFn, b as HookFn | undefined);
+}
+
 /** A custom parameter type for expressions: `{color}`, `{customer}`. */
 export function defineParameterType<T>(spec: ParameterTypeSpec<T>): void {
   if (!spec || typeof spec.name !== 'string') throw new TypeError('defineParameterType({ name, regexp, transformer }) needs a name');
@@ -330,7 +363,7 @@ export function hooksFor(glue: Glue, kind: HookKind, tags: string[]): HookDefini
   const list = glue.hooks.filter((h) => h.kind === kind && (!h.tagExpression || evaluateTags(h.tagExpression, tags)));
   list.sort((a, b) => a.order - b.order || a.seq - b.seq);
   // After hooks run in reverse: the last registered (and the lowest order) runs last.
-  return kind === 'after' || kind === 'afterStep' ? list.reverse() : list;
+  return kind === 'after' || kind === 'afterStep' || kind === 'afterAll' ? list.reverse() : list;
 }
 
 /** Forget every registration (tests). */

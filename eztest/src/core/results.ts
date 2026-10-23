@@ -102,7 +102,7 @@ export interface StepResult {
 
 /** How a Gherkin step (or hook) of a `.feature` scenario ran. */
 export interface GherkinStepRecord {
-  kind: 'step' | 'before' | 'after';
+  kind: 'step' | 'before' | 'after' | 'beforeAll' | 'afterAll';
   /** Steps: the keyword as written ("Given", "And", "*"). */
   keyword?: string;
   /** Steps: the step text (with the Examples row's values). */

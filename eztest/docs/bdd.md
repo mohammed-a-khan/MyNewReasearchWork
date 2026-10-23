@@ -72,9 +72,16 @@ definition: they run as EZTest steps. The other two run the definitions.
   fields: `@req:ORD-1` (or `@requirement:`) adds a requirement for traceability and readiness,
   `@risk:5` sets the risk, and `@role:manager` sets the Identity Vault role. `@TestCaseId:123`
   links a scenario to an Azure DevOps test case, as for any journey.
+- **Native apps and browsers.** `@platform:android` (or `ios`) with `@app:com.shop.app` runs the
+  scenario on the mobile driver ([mobile.md](mobile.md)): EZTest phrasings and the `ui.*` calls of
+  step definitions become native steps on the device. `@capability:serial=R58M123` sets a
+  capability, and `@browser:firefox` (one tag per browser) limits the browsers of a cross-browser run.
+- **Scenarios as sub-journeys.** `Run journey "orders-ordering--place-an-order"` in an `.ez` journey
+  (or `run('...')` in code) runs a scenario with its definitions, phrasings and hooks.
 - **Step results map one to one to Gherkin steps.** A scenario's results are its Background steps,
   then its own steps, each with the Gherkin text as the step name (`When I order 3 ...`) and its
-  line (`L15`). Before and After hooks are results of their own, marked as hooks. A step's
+  line (`L15`). Before and After hooks are results of their own, marked as hooks; an After hook
+  that passed without making an SDK call or an attachment is not listed. A step's
   definition calls (`ui.click`, `api.post`, `expect`) are its children. After a failed step the
   remaining steps are skipped, and After hooks still run.
 
@@ -122,7 +129,7 @@ runs or is validated, never when journeys are listed.
 import { Given, When, Then, Step, defineParameterType, type DataTable } from 'eztest/bdd';
 
 Given('the customer {string} has {int} orders', async ({ ui, api, db, vars, data, world }, name, n) => { /* ... */ });
-When(/^I pay (\d+) (EUR|USD)$/, async ({ api }, amount, currency) => { /* regex groups arrive as strings */ });
+When(/^I pay (\d+) (EUR|USD)$/, async ({ api }, amount, currency) => { /* amount is a number (see below), currency a string */ });
 Then('the totals are:', async ({ expect }, table: DataTable) => { /* the data table is the last argument */ });
 When('I send this request:', async ({ api }, body: string) => { /* so is the doc string */ });
 Step('any keyword', async () => {});
@@ -181,6 +188,23 @@ Then('the quote total is {money}', async ({ expect, world }, total: number) => {
 The transformer receives the regexp's capture groups, or the whole match when it has none.
 Patterns may use a type defined later in the same file.
 
+### Regular expressions
+
+The top-level capture groups of a regex definition are its arguments (groups nested inside them,
+and `(?:...)` groups, are not). Each one is converted:
+
+- a **named group** whose name is a parameter type is converted with that type:
+  `(?<int>\d+)`, `(?<float>[\d.]+)`, `"(?<string>[^"]*)"`, `(?<money>\S+)` (a custom type; its own
+  regexp then gives the transformer its groups);
+- an **unnamed group** whose pattern is a type's own pattern is converted with that type: `(\d+)` and
+  `(-?\d+)` are `{int}`, the `{float}` and `{string}` patterns convert too, and so does a custom type's
+  regexp (`(red|blue)` for a type defined with `/red|blue/`);
+- every other group arrives as a string, or `undefined` when it took no part in the match.
+
+```ts
+When(/^I pay (?<money>\S+) for (\d+) (?<color>\w+) items$/, async (ctx, price, count, color) => { /* typed */ });
+```
+
 ### Undefined and ambiguous steps
 
 A step that no definition matches and that is not an EZTest phrasing fails as **undefined**. Its
@@ -218,7 +242,12 @@ and they show up in the result's ledger.
 ## Hooks
 
 ```ts
-import { Before, After, BeforeStep, AfterStep } from 'eztest/bdd';
+import { Before, After, BeforeStep, AfterStep, BeforeAll, AfterAll } from 'eztest/bdd';
+
+BeforeAll({ tags: '@api', name: 'get a token' }, async ({ api, shared }) => {
+  shared.token = (await api.post('/oauth/token', { grant_type: 'client_credentials' })).body.access_token;
+});
+AfterAll(async ({ db, shared }) => { /* clean up what the run created */ });
 
 Before(async ({ db }) => { /* every scenario */ });
 Before('@db and not @readonly', async ({ db }) => { /* tag-filtered */ });
@@ -234,8 +263,32 @@ AfterStep(async ({ result }) => { /* result of the step */ });
 - **Failures.** A failed Before hook skips the scenario's steps. After hooks always run, also when
   a step failed, and get `result` (`status`, `error`). A failed After hook fails the scenario.
 - **Reporting.** Before and After hooks are results of their own (`Before hook: get a token
-  (steps/hooks.steps.ts:12)`), so their SDK calls have evidence and traces too. BeforeStep and
-  AfterStep calls are children of the step they surround.
+  (steps/hooks.steps.ts:12)`), so their SDK calls have evidence and traces too. An After hook that
+  passed without an SDK call or an `attach()` did nothing to report and is not listed; one that
+  fails or attaches something is. `attach()` evidence belongs to the step or hook that made it.
+  BeforeStep and AfterStep calls are children of the step they surround.
+
+### BeforeAll and AfterAll
+
+- **Scope: once per run.** A run is one `eztest run`, one Studio run or one debug session. Every
+  `--workers` slot shares it. With `--shard i/n` each shard is a run of its own (on its own machine),
+  so each shard runs the hook once. Shards are not coordinated with each other: for setup that must
+  happen once across shards, use a CI step before the shards, or the config `hooks.beforeAll`
+  journeys in a pipeline stage of their own.
+- **When.** Before the scenarios start, each BeforeAll that applies to at least one scenario of the
+  run (by its tag expression) runs as a hook journey of its own, `BeforeAll hook: get a token
+  (steps/hooks.steps.ts:3)`, tagged `hook`, `beforeAll` and `bdd`. It has a browser context and the
+  whole SDK (`ui`, `api`, `db` ...), evidence and a trace. After the scenarios, each AfterAll that
+  applies to a scenario that ran runs the same way.
+- **Values for the World.** What a BeforeAll sets on `ctx.shared` (or returns as an object) is
+  copied into the World of every scenario the hook applies to (`world.token`). AfterAll gets the
+  `shared` values of every BeforeAll.
+- **Failures.** A failed BeforeAll fails the scenarios it applies to without running them (their
+  first result says which hook failed and why). Other scenarios run. A failed AfterAll is a failed
+  result of the run.
+- **Without the run's preparation.** A scenario run as a sub-journey of another journey
+  (`Run journey`) runs a BeforeAll it needs itself, once per run, inside its own result. AfterAll
+  hooks run only in runs that ran scenarios themselves.
 
 ## The plain-English fallback
 
@@ -256,7 +309,15 @@ When no definition matches, EZTest reads the step text with its own grammar (see
 | `When I fill in the form:` plus a two-column table | one `Type "<value>" into the "<field>" field` per row (a `field \| value` header row is skipped) |
 
 The step runs as that EZTest step, with the Gherkin text as its name: strict locating, verified
-healing and evidence included. Nothing is guessed. Domain steps such as `Given the customer
+healing and evidence included. Its heals are listed in the heal proposals, the reports and the
+Studio's Quality > Heal review, also when the step ran inside a group (with step hooks, or a form
+table). Accepting one writes the healed locator to the feature's sidecar,
+`<file>.feature.locators.json`, and leaves the `.feature` text unchanged; every scenario and Examples
+row that runs that line uses the accepted locator first. A heal of a locator written inside a step
+definition (or a code journey) is listed too, and the review says which line of code to change.
+A healed click is accepted only when the step itself checks the outcome: `When I click ...` has no
+post-condition of its own, so a heal of it is not verified (the next `Then` step is a step of its
+own); check outcomes in a definition (`ui.click(t, { expect })`) where healing a click matters. Nothing is guessed. Domain steps such as `Given the customer
 "Acme" has 3 orders` are never read as EZTest steps: they need a definition. Definitions always
 win over the fallback. Set `bdd.fallback: false` to require a definition for every step.
 
@@ -395,10 +456,8 @@ described here.
 
 ## Limits
 
-- No `BeforeAll` / `AfterAll` hooks. Use the config `hooks:`, `webServer:` or a library journey
-  for one-time setup.
-- Regex definitions pass their capture groups as strings. The `{...}` parameter conversion
-  applies to expressions only.
+- BeforeAll / AfterAll run once per run, and with `--shard` once per shard; shards are not
+  coordinated with each other.
 - Step definitions run in Node. Like code journeys, only their SDK calls are steps (healed,
   verified, traced). Other code inside a definition is not.
 - The Studio's step diagnostics come from a static scan. A definition whose pattern is computed

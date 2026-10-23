@@ -10,9 +10,9 @@
  * the tag expressions and the runner integration.
  */
 export {
-  Given, When, Then, Step, Before, After, BeforeStep, AfterStep, defineParameterType, setWorldConstructor, pending, PendingStepError,
+  Given, When, Then, Step, Before, After, BeforeStep, AfterStep, BeforeAll, AfterAll, defineParameterType, setWorldConstructor, pending, PendingStepError,
   glueOf, matchStep, hooksFor, resetBddRegistry,
-  type BddContext, type World, type ScenarioInfo, type StepInfo, type HookResult, type StepFn, type HookFn, type StepDefinition,
+  type BddContext, type BddAllContext, type AllHookFn, type World, type ScenarioInfo, type StepInfo, type HookResult, type StepFn, type HookFn, type StepDefinition,
   type StepDefinitionOptions, type HookDefinition, type HookOptions, type HookKind, type Glue, type StepMatch, type WorldConstructor,
 } from './registry.js';
 export { DataTable } from './datatable.js';

@@ -648,6 +648,14 @@ export const Journey = z.object({
   code: CodeRef.optional(),
   /** Set for Gherkin scenarios (`.feature` files): the runner binds each step to a step definition or an EZTest phrasing. */
   bdd: BddMeta.optional(),
+  /** A Gherkin BeforeAll / AfterAll hook run as a journey of its own (src/runner/bdd-all.ts). */
+  bddAll: z.object({
+    kind: z.enum(['beforeAll', 'afterAll']),
+    /** The hook's id (`beforeAll:<file>:<line>`). */
+    hook: z.string().min(1),
+    glue: z.array(z.string()).default([]),
+    worldParameters: z.record(z.string(), z.unknown()).optional(),
+  }).optional(),
   examplesFrom: z.object({
     from: z.string().optional(),
     query: z.string().optional(),

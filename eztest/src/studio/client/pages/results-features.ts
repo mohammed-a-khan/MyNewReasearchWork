@@ -66,11 +66,9 @@ function scenarioItem(d: RunDetail, j: J): HTMLElement {
   ));
   det.appendChild(h('ol', { class: 'bdd-steps' }, steps.map((s) => {
     const g = s.gherkin!;
-    const label = g.kind === 'step' ? null : h('span', { class: 'bdd-kw', text: g.kind === 'before' ? 'Before ' : 'After ' });
     return h('li', { class: ['bdd-step', `st-${s.status}`, g.kind !== 'step' && 'bdd-hook'] },
       h('div', { class: 'tl-row' },
         statusIcon(s.status),
-        label,
         g.kind === 'step' ? h('span', { class: 'bdd-kw', text: `${g.keyword ?? ''} ` }) : null,
         h('a', { class: 'tl-intent', href: link('runs', d.run.runId, j.journeyId, s.stepId), text: g.kind === 'step' ? g.text ?? s.intent : s.intent }),
         g.match ? h('span', { class: ['tag', `bdd-match-${g.match}`], title: g.location ?? '', text: MATCH[g.match] ?? g.match }) : null,

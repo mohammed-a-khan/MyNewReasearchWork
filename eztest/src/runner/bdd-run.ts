@@ -28,6 +28,7 @@ import { sdk } from '../sdk/journey.js';
 import { openCodeHost, type CodeHostHandle } from './code-host.js';
 import type { FlowEnv, FlowScope } from './flow.js';
 import { skippedStep } from './step.js';
+import { beforeAllFor } from './bdd-all.js';
 
 interface BddStepArgs {
   keyword: string;
@@ -121,6 +122,9 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
     uri: file, line: b.scenario.line, ...(Object.keys(journey.variables).length && b.examples ? { example: { ...journey.variables } } : {}),
   };
   const world: Record<string, unknown> = glue.world ? (new glue.world({ parameters: b.worldParameters ?? {} }) as Record<string, unknown>) : {};
+  // Values shared by the BeforeAll hooks that apply to this scenario (run once per run).
+  const all = await h.within(() => beforeAllFor(h, glue, journey.tags, baseDir, b.worldParameters ?? {}));
+  Object.assign(world, all.shared);
   // attach() evidence belongs to the step or hook that made it.
   let attachments: string[] = [];
   const attach = async (name: string, content: string | Uint8Array, description?: string) => {
@@ -259,7 +263,11 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
 
   await h.within(async () => {
     let blocked: string | undefined;
-    for (const hk of hooksFor(glue, 'before', tags)) {
+    if (all.failed) {
+      h.results.push(all.failed);
+      blocked = all.failed.error?.message ?? 'not run: a BeforeAll hook failed';
+    }
+    for (const hk of blocked ? [] : hooksFor(glue, 'before', tags)) {
       if (flow.opts.signal?.aborted) break;
       const r = await runHook(hk, 'before');
       if (failedHard(r)) {

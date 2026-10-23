@@ -9,6 +9,8 @@ class ShopWorld {
   readonly shopName: string;
   order?: string;
   quote?: { sku: string; name: string; qty: number; total: string };
+  /** From the BeforeAll hook (steps/hooks.steps.ts). */
+  widgetPrice?: string;
   constructor({ parameters }: { parameters: Record<string, unknown> }) {
     this.shopName = String(parameters.shopName ?? 'shop');
   }
@@ -57,6 +59,12 @@ Then('the quote total is {money}', async ({ expect, world }, total: number) => {
 // A regular expression works too; its groups arrive as strings.
 Then(/^the quote is for "([^"]+)"$/, async ({ expect, world }, name: string) => {
   await expect((world as ShopWorld).quote?.name, 'quoted product').toBe(name);
+});
+
+// A named group converts the argument with that parameter type: count is a number.
+Then(/^it costs (?<int>\d+) widget prices$/, async ({ expect, world }, count: number) => {
+  const w = world as ShopWorld;
+  await expect(Number(w.quote?.total), 'quote total').toBeCloseTo(count * Number(w.widgetPrice));
 });
 
 Given('the shop is open', async ({ api, expect }) => {

@@ -64,7 +64,7 @@ describe('healing Gherkin steps', () => {
     const second = await cli(p.project, ['run', '--tags', '@healing']);
     const { dir, run } = await latestRun(p.project);
     const all = run.journeys.map((j) => `${j.journeyId} ${j.status}\n${tree(j.steps)}`).join('\n');
-    expect(run.journeys.map((j) => j.status), all).toEqual(['passed-healed', 'passed-healed']);
+    expect(run.journeys.filter((j) => j.journeyId.startsWith('heal--')).map((j) => j.status), all).toEqual(['passed-healed', 'passed-healed']);
     expect(second.exitCode).toBe(0);
     const top = run.journeys.find((j) => j.journeyId === 'heal--sign-in')!;
     const nested = run.journeys.find((j) => j.journeyId === 'heal--sign-in-with-step-hooks')!;

@@ -157,7 +157,7 @@ export interface RunDetail {
         evidence: string[];
         conditions?: Array<{ passed: boolean; description?: string; message?: string }>;
         /** Gherkin scenarios: the feature step or hook, and what it was bound to. */
-        gherkin?: { kind: 'step' | 'before' | 'after'; keyword?: string; text?: string; line: number; match?: string; location?: string; snippet?: string; background?: boolean };
+        gherkin?: { kind: 'step' | 'before' | 'after' | 'beforeAll' | 'afterAll'; keyword?: string; text?: string; line: number; match?: string; location?: string; snippet?: string; background?: boolean };
       }>;
       evidence: string[];
     }>;
