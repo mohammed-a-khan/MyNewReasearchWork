@@ -12,7 +12,7 @@ import { WebSocketTransport } from './transport/transport.js';
 import { CrBrowser, type ChromiumBrowserType, type CrBrowserContext } from './chromium/browser.js';
 import type { CrPage } from './chromium/page.js';
 import { KEEP_NAMES_SHIM, deserializeValue, functionSource, pageCodec, serializeArgument } from './serializer.js';
-import { withTimeout } from './util.js';
+import { settleWithin, withTimeout } from './util.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface ElectronLaunchOptions {
@@ -85,7 +85,7 @@ export class ElectronApplication extends TypedEmitter<ElectronEvents> {
       else this.proc.once('exit', () => r());
     });
     await this.evaluate((e: any) => e.app.quit()).catch(() => undefined);
-    await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+    await settleWithin(exited, 5000, undefined);
     if (this.proc.exitCode === null) this.proc.kill('SIGKILL');
     this.nodeConnection.close();
     await this.browser.close().catch(() => undefined);
