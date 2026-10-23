@@ -226,6 +226,18 @@ npx eztest run
 
 Restart the demo app with `DEMO_BUG=invoice-total` to watch EZTest catch a document defect three ways. Restart it with `DEMO_VARIANT=b` to watch verified healing.
 
+## Run from a clone (Windows, macOS, Linux)
+
+```bash
+cd eztest
+npm install                    # once
+npm run build                  # once, and after pulling changes
+npx eztest install-browsers    # once, if Chrome is not installed
+npx eztest studio              # or: node dist/cli/bin.js studio
+```
+
+To type `eztest` without `npx` from any folder, run `npm link` once in `eztest/` (on Windows, open the terminal as the same user that installed Node.js).
+
 ## Develop
 
 ```bash

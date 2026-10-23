@@ -12,7 +12,7 @@
     "test:ci": "node tools/testkit/cli.mjs --reporter default --reporter junit",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "eztest": "tsx src/cli/bin.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/build-studio.mjs && node scripts/build-injected.mjs",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/build-studio.mjs && node scripts/build-injected.mjs",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "demo": "tsx examples/demo-app/server.ts",
     "notices": "node scripts/third-party-notices.mjs",
