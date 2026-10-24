@@ -760,7 +760,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
 
   // ------------------------------------------------------------------ import (Migration Factory)
   withConfigOpts(program.command('import'))
-    .description('convert tests from Cucumber, Playwright, Selenium, Excel/CSV manual cases, RSAT Task Recorder, OpenAPI/Swagger specs or Postman collections into .ez journeys; importer plugins add more formats (docs/plugins.md)')
+    .description('convert tests from Cucumber, Playwright, Selenium, Excel/CSV manual cases, RSAT Task Recorder, OpenAPI/Swagger specs, Postman collections or WSDLs (eztest import wsdl <file>) into .ez journeys; importer plugins add more formats (docs/plugins.md)')
     .argument('<paths...>', 'source files or directories')
     .option('-o, --out <dir>', 'output directory', 'journeys/imported')
     .addOption(new Option('--kind <kind>', 'built-in format (default: detect per file)').choices([...BUILTIN_IMPORT_KINDS]))
@@ -774,6 +774,11 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--verify', 'run the imported journeys and mark each one verified or not (needs baseUrl)')
     .addOption(new Option('--as <mode>', 'Excel/CSV manual cases: automated (TODO lines), manual (Manual: steps run in Studio) or hybrid').choices(['automated', 'manual', 'hybrid']))
     .action(async (paths: string[], o) => {
+      // "eztest import wsdl <file>": a built-in format named before the files.
+      if (paths.length > 1 && (BUILTIN_IMPORT_KINDS as readonly string[]).includes(paths[0]) && !existsSync(resolve(io.cwd, paths[0]))) {
+        o.kind ??= paths[0];
+        paths = paths.slice(1);
+      }
       const importers = await loadImporterPlugins({ cwd: io.cwd, env: io.env, extra: o.plugin, warn: (s) => io.err(`warning: ${s}`) });
       let report;
       try {

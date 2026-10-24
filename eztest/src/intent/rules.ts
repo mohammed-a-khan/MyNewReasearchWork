@@ -23,6 +23,7 @@ import { SPECIALIST_RULES } from './rules-specialist.js';
 import { MANUAL_RULES } from './rules-manual.js';
 import { KEYBOARD_RULES } from './rules-keyboard.js';
 import { STORE_RULES } from '../store/rules.js';
+import { SOAP_RULES } from './rules-soap.js';
 
 /** What a rule builds: a step without id/intent (the parser adds those). */
 export type StepBody = Omit<StepInput, 'id' | 'intent'>;
@@ -115,6 +116,8 @@ export const INTENT_RULES: IntentRule[] = [
   ...ACTOR_RULES,
   // ------------------------------------------------------------ integration: messaging, gRPC, files/SSH, batch, EDI, contracts (before generic waits/asserts)
   ...INTEGRATION_RULES,
+  // ------------------------------------------------------------ SOAP operations of configured services (before the raw "Call SOAP action" API step)
+  ...SOAP_RULES,
   // ------------------------------------------------------------ browser clock and time (before "Set ... to ..." variables)
   ...CLOCK_RULES,
   // ------------------------------------------------------------ components (grids, combo boxes, date pickers, trees, ...)

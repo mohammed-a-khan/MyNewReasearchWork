@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { ApiSpecOptionsSchema, ContractsSchema } from '../contracts/config.js';
 import { BatchSchema, FilesSchema, GrpcSchema, MessagingSchema } from '../integration/config.js';
+import { SoapConfigSchema } from '../surfaces/soap-config.js';
 
 const positiveMs = z.number().int().positive();
 
@@ -811,6 +812,8 @@ export const EzTestConfigSchema = z.object({
   api: ApiConfigSchema.prefault({}),
   /** Message brokers for messaging steps (docs/messaging.md). */
   messaging: MessagingSchema.optional(),
+  /** SOAP services from WSDLs: endpoint, validation, WS-Security, MTOM (docs/soap.md). */
+  soap: SoapConfigSchema.optional(),
   /** gRPC services (proto files and addresses). */
   grpc: GrpcSchema.optional(),
   /** SFTP servers, SSH hosts (allow-listed commands) and local drop folders. */

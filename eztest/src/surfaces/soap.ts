@@ -3,6 +3,16 @@ import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import { EzTestError } from '../core/index.js';
 import type { ApiClient, ApiResponse, RequestOptions } from './api.js';
 
+// The SOAP stack (re-exported here so the surfaces index stays as it is).
+export * from './xml-dom.js';
+export * from './c14n.js';
+export * from './xmldsig.js';
+export * from './wssecurity.js';
+export * from './mtom.js';
+export * from './xsd.js';
+export * from './wsdl.js';
+export * from './soap-service.js';
+
 export type SoapVersion = '1.1' | '1.2';
 export const SOAP_NS: Record<SoapVersion, string> = {
   '1.1': 'http://schemas.xmlsoap.org/soap/envelope/',

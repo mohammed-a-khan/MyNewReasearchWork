@@ -62,7 +62,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (367 phrasings)
+## Actions (368 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -234,7 +234,7 @@ Times read as `YYYY-MM-DD[ HH:mm[:ss]]` in the journey's `Timezone:`, else the r
 | Read responses | `Capture "$.items[0].id" from orders as firstId` · `Capture the header "x-request-id" of orders as requestId` · `Capture the status of orders as code` |
 | Check responses | `Expect the orders response status is 200` · `Expect response orders matches schema "schemas/orders.json"` · `Expect response orders "$[0].status" equals "Shipped"` · `Expect response orders has "$[0].id"` · `Expect the orders response took less than 500 ms` |
 | GraphQL | `Send GraphQL query "{ orders { id } }" to /graphql and store as gq` · `Run GraphQL mutation "mutation($t: String) { add(t: $t) }" on /graphql with variables '{"t":"x"}' and store as m` (GraphQL errors fail the step) |
-| SOAP | `Call SOAP action "GetOrder" on /soap with body "<GetOrder><Id>1</Id></GetOrder>" and store as order` · `... using SOAP 1.2 ...` (faults fail the step) |
+| SOAP | `Call SOAP action "GetOrder" on /soap with body "<GetOrder><Id>1</Id></GetOrder>" and store as order` · `... using SOAP 1.2 ...` (faults fail the step) · `Call SOAP operation "GetPolicy" on "policy" with PolicyId = "P-100" and store as policy` (a configured WSDL service: XSD-validated, WS-Security, MTOM; see [soap.md](soap.md)) |
 | WebSocket | `Connect to websocket "/ws" as feed` · `Send "ping" on websocket feed` · `Wait for a websocket message containing "pong" on feed and store it as reply` · `Expect websocket feed received "pong"` · `Close websocket feed` |
 
 ### Databases

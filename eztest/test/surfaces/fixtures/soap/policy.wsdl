@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions name="PolicyService"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:tns="urn:example:policy"
+    xmlns:c="urn:example:common"
+    targetNamespace="urn:example:policy">
+  <wsdl:documentation>Insurance policy service (test fixture).</wsdl:documentation>
+  <wsdl:types>
+    <xs:schema targetNamespace="urn:example:policy" elementFormDefault="qualified">
+      <xs:import namespace="urn:example:common" schemaLocation="common.xsd"/>
+      <xs:simpleType name="Status">
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="Active"/>
+          <xs:enumeration value="Lapsed"/>
+          <xs:enumeration value="Cancelled"/>
+        </xs:restriction>
+      </xs:simpleType>
+      <xs:complexType name="Coverage">
+        <xs:simpleContent>
+          <xs:extension base="c:Money">
+            <xs:attribute name="code" type="xs:NCName" use="required"/>
+          </xs:extension>
+        </xs:simpleContent>
+      </xs:complexType>
+      <xs:complexType name="Policy">
+        <xs:sequence>
+          <xs:element name="Id" type="c:PolicyId"/>
+          <xs:element name="Holder" type="c:Person"/>
+          <xs:element name="Status" type="tns:Status"/>
+          <xs:element name="StartDate" type="xs:date"/>
+          <xs:element name="Premium" type="c:Money"/>
+          <xs:element name="Coverage" type="tns:Coverage" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="version" type="xs:positiveInteger"/>
+      </xs:complexType>
+      <xs:element name="GetPolicy">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="PolicyId" type="c:PolicyId"/>
+            <xs:element name="IncludeCoverage" type="xs:boolean" minOccurs="0"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="GetPolicyResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="Policy" type="tns:Policy"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SearchPolicies">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:choice>
+              <xs:element name="HolderName" type="xs:string"/>
+              <xs:element name="Status" type="tns:Status"/>
+            </xs:choice>
+            <xs:element name="MaxResults" minOccurs="0">
+              <xs:simpleType>
+                <xs:restriction base="xs:int">
+                  <xs:minInclusive value="1"/>
+                  <xs:maxInclusive value="100"/>
+                </xs:restriction>
+              </xs:simpleType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SearchPoliciesResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="PolicyId" type="c:PolicyId" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="UploadDocument">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="PolicyId" type="c:PolicyId"/>
+            <xs:element name="FileName" type="xs:string"/>
+            <xs:element name="Content" type="xs:base64Binary"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="UploadDocumentResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="Size" type="xs:nonNegativeInteger"/>
+            <xs:element name="Sha256" type="xs:hexBinary"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="PolicyFault">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="Code" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </wsdl:types>
+
+  <wsdl:message name="GetPolicyRequest"><wsdl:part name="parameters" element="tns:GetPolicy"/></wsdl:message>
+  <wsdl:message name="GetPolicyResponse"><wsdl:part name="parameters" element="tns:GetPolicyResponse"/></wsdl:message>
+  <wsdl:message name="SearchPoliciesRequest"><wsdl:part name="parameters" element="tns:SearchPolicies"/></wsdl:message>
+  <wsdl:message name="SearchPoliciesResponse"><wsdl:part name="parameters" element="tns:SearchPoliciesResponse"/></wsdl:message>
+  <wsdl:message name="UploadDocumentRequest"><wsdl:part name="parameters" element="tns:UploadDocument"/></wsdl:message>
+  <wsdl:message name="UploadDocumentResponse"><wsdl:part name="parameters" element="tns:UploadDocumentResponse"/></wsdl:message>
+  <wsdl:message name="PolicyFault"><wsdl:part name="fault" element="tns:PolicyFault"/></wsdl:message>
+
+  <wsdl:portType name="PolicyPort">
+    <wsdl:operation name="GetPolicy">
+      <wsdl:documentation>Read one policy by id.</wsdl:documentation>
+      <wsdl:input message="tns:GetPolicyRequest"/>
+      <wsdl:output message="tns:GetPolicyResponse"/>
+      <wsdl:fault name="PolicyFault" message="tns:PolicyFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="SearchPolicies">
+      <wsdl:input message="tns:SearchPoliciesRequest"/>
+      <wsdl:output message="tns:SearchPoliciesResponse"/>
+    </wsdl:operation>
+    <wsdl:operation name="UploadDocument">
+      <wsdl:input message="tns:UploadDocumentRequest"/>
+      <wsdl:output message="tns:UploadDocumentResponse"/>
+    </wsdl:operation>
+  </wsdl:portType>
+
+  <wsdl:binding name="PolicySoap11" type="tns:PolicyPort">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetPolicy">
+      <soap:operation soapAction="urn:example:policy/GetPolicy"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="PolicyFault"><soap:fault name="PolicyFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="SearchPolicies">
+      <soap:operation soapAction="urn:example:policy/SearchPolicies"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UploadDocument">
+      <soap:operation soapAction="urn:example:policy/UploadDocument"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:binding name="PolicySoap12" type="tns:PolicyPort">
+    <soap12:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetPolicy">
+      <soap12:operation soapAction="urn:example:policy/GetPolicy"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SearchPolicies">
+      <soap12:operation soapAction="urn:example:policy/SearchPolicies"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UploadDocument">
+      <soap12:operation soapAction="urn:example:policy/UploadDocument"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:service name="PolicyService">
+    <wsdl:port name="PolicySoap11Port" binding="tns:PolicySoap11">
+      <soap:address location="http://localhost:8080/policy"/>
+    </wsdl:port>
+    <wsdl:port name="PolicySoap12Port" binding="tns:PolicySoap12">
+      <soap12:address location="http://localhost:8080/policy12"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

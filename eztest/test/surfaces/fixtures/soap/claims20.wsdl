@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<description xmlns="http://www.w3.org/ns/wsdl"
+             xmlns:wsoap="http://www.w3.org/ns/wsdl/soap"
+             xmlns:tns="urn:example:claims"
+             xmlns:xs="http://www.w3.org/2001/XMLSchema"
+             targetNamespace="urn:example:claims">
+  <types>
+    <xs:schema targetNamespace="urn:example:claims" elementFormDefault="qualified">
+      <xs:element name="OpenClaim">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="PolicyId" type="xs:string"/>
+            <xs:element name="Amount" type="xs:decimal"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="OpenClaimResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="ClaimId" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </types>
+  <interface name="ClaimsInterface">
+    <operation name="OpenClaim" pattern="http://www.w3.org/ns/wsdl/in-out" style="http://www.w3.org/ns/wsdl/style/iri">
+      <documentation>Open a claim.</documentation>
+      <input element="tns:OpenClaim"/>
+      <output element="tns:OpenClaimResponse"/>
+    </operation>
+  </interface>
+  <binding name="ClaimsSoap" interface="tns:ClaimsInterface" type="http://www.w3.org/ns/wsdl/soap" wsoap:version="1.2" wsoap:protocol="http://www.w3.org/2003/05/soap/bindings/HTTP/">
+    <operation ref="tns:OpenClaim" wsoap:action="urn:example:claims/OpenClaim"/>
+  </binding>
+  <service name="ClaimsService" interface="tns:ClaimsInterface">
+    <endpoint name="ClaimsEndpoint" binding="tns:ClaimsSoap" address="http://localhost:8080/claims"/>
+  </service>
+</description>

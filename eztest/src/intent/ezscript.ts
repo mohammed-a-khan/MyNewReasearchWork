@@ -29,6 +29,7 @@ import { isDesktopExpectation } from './rules-desktop.js';
 import { isIntegrationExpectation } from '../integration/rules.js';
 import { isStoreExpectation } from '../store/rules.js';
 import { isDocumentLookExpectation } from './rules.js';
+import { SOAP_STEP_HANDLER, soapStepToText } from './rules-soap.js';
 import { isSpecialistExpectation } from './rules-specialist.js';
 import { dependsOnToText, parseDependsOn, parseRequires, requiresToText } from './requires.js';
 import { mobileStepToText } from './rules-mobile.js';
@@ -629,6 +630,7 @@ export function stepToText(s: Step): string {
       return `Compare document ${a.document} to ${quoteText(String(a.against))}${a.using ? ` using ${a.using}` : ''}${s.captureAs ? ` and store as ${s.captureAs}` : ''}`;
     }
     case 'custom': {
+      if (s.handler === SOAP_STEP_HANDLER) return soapStepToText(s.args ?? {}, s.captureAs, quoteText);
       const args = Object.entries(s.args ?? {}).map(([k, val]) => `${k}=${quoteText(String(val))}`).join(', ');
       return `Run step ${quoteText(s.handler ?? '')}${args ? ` with ${args}` : ''}`;
     }

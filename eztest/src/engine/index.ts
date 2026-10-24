@@ -30,6 +30,7 @@ import {
 import { autoApplyHeals, collectHealProposals, createHealer, FingerprintStore, HealDecisions } from '../heal/index.js';
 import { extractPdf, reconcileThreeWay, renderHtml, type ThreeWayMapping } from '../docs/index.js';
 import { visualDocumentCheck } from '../docs/visual-step.js';
+import { createSoapStepHandler, SOAP_STEP } from '../surfaces/soap-step.js';
 import type { CompareDocumentHandler, DataHandler, DbHandler, Lens, RunHooks, RunOptions, StepContext } from '../runner/index.js';
 import { loadJourneyFile } from '../intent/index.js';
 import { SmtpSink, TwilioSmsProvider, TwilioVoiceProvider, loadTranscriptFixtures } from '../messaging/index.js';
@@ -599,6 +600,8 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
   };
   // "Expect <element|the page> to look like the baseline": visual assertions with modes, keyed and branched baselines.
   runOptions.customSteps = {
+    // "Call SOAP operation ... on <service>": WSDL services with validation, WS-Security and MTOM (docs/soap.md).
+    [SOAP_STEP]: createSoapStepHandler(config.soap, { baseDir: cwd, resolveSecret: (ref) => vault.registry.resolve(ref), addSecret: (v) => loaded.masker.add(v) }),
     [VISUAL_STEP]: createVisualStepHandler({ baselineDir: resolvePath(cwd, '.eztest/baselines'), branch: currentBranch(cwd), update: () => process.env.EZTEST_UPDATE_BASELINES === '1' }),
     // "Check accessibility": EZTest's accessibility engine, static and dynamic checks.
     [A11Y_STEP]: createA11yStepHandler(),

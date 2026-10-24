@@ -5,10 +5,10 @@
 import type { Journey } from '../core/index.js';
 
 /** Source formats the built-in importers understand. */
-export type BuiltinImportKind = 'gherkin' | 'playwright' | 'selenium' | 'manual-csv' | 'manual-xlsx' | 'task-recorder' | 'openapi' | 'postman' | 'ado-test-plans';
+export type BuiltinImportKind = 'gherkin' | 'playwright' | 'selenium' | 'manual-csv' | 'manual-xlsx' | 'task-recorder' | 'openapi' | 'postman' | 'wsdl' | 'ado-test-plans';
 
 /** The built-in formats `eztest import --kind` accepts (ADO test plans are imported by `eztest ado`). */
-export const BUILTIN_IMPORT_KINDS: readonly BuiltinImportKind[] = ['gherkin', 'playwright', 'selenium', 'manual-csv', 'manual-xlsx', 'task-recorder', 'openapi', 'postman'];
+export const BUILTIN_IMPORT_KINDS: readonly BuiltinImportKind[] = ['gherkin', 'playwright', 'selenium', 'manual-csv', 'manual-xlsx', 'task-recorder', 'openapi', 'postman', 'wsdl'];
 
 /** A built-in format, or the name of a format an importer plugin registers (docs/plugins.md). */
 export type ImportKind = BuiltinImportKind | (string & {});

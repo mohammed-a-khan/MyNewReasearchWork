@@ -13,6 +13,7 @@ import { importTaskRecorder, type TaskRecorderOptions } from './task-recorder.js
 import { BUILTIN_IMPORT_KINDS, type ImportKind, type ImportReport, type ImporterPlugin } from './types.js';
 import { registries } from '../plugins/registry.js';
 import { importApiFile, isApiSpecPath } from './api-files.js';
+import { importWsdl, looksLikeWsdl } from './wsdl.js';
 import { coverageEquivalence, verifiedRunOf, type ImportVerification } from './verify.js';
 import { credentialsMarkdown, scrubJourney, scrubText, type CredentialFinding } from './credentials.js';
 
@@ -52,7 +53,7 @@ export function importerPlugins(): ImporterPlugin[] {
 export function importFormats(): Array<{ name: string; title: string; plugin: boolean; extensions?: string[] }> {
   const titles: Record<string, string> = {
     gherkin: 'Cucumber / Gherkin', playwright: 'Playwright', selenium: 'Selenium', 'manual-csv': 'Manual cases (CSV)', 'manual-xlsx': 'Manual cases (Excel)',
-    'task-recorder': 'D365 Task Recorder', openapi: 'OpenAPI / Swagger', postman: 'Postman collection',
+    'task-recorder': 'D365 Task Recorder', openapi: 'OpenAPI / Swagger', postman: 'Postman collection', wsdl: 'WSDL (SOAP)',
   };
   return [
     ...BUILTIN_IMPORT_KINDS.map((k) => ({ name: k, title: titles[k] ?? k, plugin: false })),
@@ -67,12 +68,13 @@ async function runPlugin(p: ImporterPlugin, paths: string[], opts: ImportFilesOp
   });
 }
 
-const EXTS = ['.feature', '.ts', '.js', '.mjs', '.cjs', '.java', '.cs', '.py', '.csv', '.xlsx', '.xml', '.json', '.yaml', '.yml'];
+const EXTS = ['.feature', '.ts', '.js', '.mjs', '.cjs', '.java', '.cs', '.py', '.csv', '.xlsx', '.xml', '.json', '.yaml', '.yml', '.wsdl'];
 
 /** Detect an importer from the file name and (for ambiguous extensions) its content. */
 export function detectImportKind(path: string, content?: string): ImportKind | undefined {
   const ext = extname(path).toLowerCase();
   if (ext === '.feature') return 'gherkin';
+  if (ext === '.wsdl') return 'wsdl';
   if (ext === '.csv') return 'manual-csv';
   if (ext === '.xlsx') return 'manual-xlsx';
   if (ext === '.java' || ext === '.cs') return 'selenium';
@@ -82,6 +84,7 @@ export function detectImportKind(path: string, content?: string): ImportKind | u
     return /@playwright\/test|\bpage\.(?:goto|getBy|locator)\b/.test(content) ? 'playwright' : undefined;
   }
   if (ext === '.xml') {
+    if (content !== undefined && looksLikeWsdl(content)) return 'wsdl';
     if (content === undefined) return 'task-recorder';
     return /<(?:\w+:)?(?:Recording|TaskRecording|UserAction|Node)\b|MenuItemName|ControlLabel/.test(content) ? 'task-recorder' : undefined;
   }
@@ -155,6 +158,7 @@ export async function importFiles(paths: string[], opts: ImportFilesOptions = {}
         break;
       case 'task-recorder': reports.push(importTaskRecorder(text!, { ...base, ...(opts.taskRecorder ?? {}) })); break;
       case 'openapi': case 'postman': break; // handled above
+      case 'wsdl': reports.push(await importWsdl({ ...base, absPath: abs, cwd, ...(opts.outDir ? { outDir: opts.outDir } : {}) })); break;
       default: reports.push({ journeys: [], converted: [], todo: [], warnings: [`${file}: no importer for format "${kind}"; skipped`], coverage: { sourceSteps: 0, convertedSteps: 0, assertions: 0, convertedAssertions: 0 }, files: [file] });
     }
   }
