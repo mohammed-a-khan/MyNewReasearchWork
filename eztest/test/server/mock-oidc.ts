@@ -224,6 +224,23 @@ export async function startMockOidc(user: MockUser, opts: MockOidcOptions = {}):
         res.end();
       });
     }
+    // The verification page: a sign-in form (loginForm credentials) that approves the user code.
+    if (url.pathname === '/device' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      return res.end(`<!doctype html><html><head><title>Activate device</title></head><body><h1>Activate your device</h1>
+<form method="post" action="/device/approve">
+<label for="c">Code</label> <input id="c" name="user_code" value="${(url.searchParams.get('user_code') ?? '').replace(/[^\w-]/g, '')}">
+<label for="u">Username</label> <input id="u" name="username" autocomplete="username">
+<label for="p">Password</label> <input id="p" name="password" type="password">
+<button type="submit">Sign in and approve</button></form></body></html>`);
+    }
+    if (url.pathname === '/device/approve' && req.method === 'POST') {
+      return readForm((f) => {
+        const ok = opts.loginForm && f.username === opts.loginForm.username && f.password === opts.loginForm.password && state.approveDevice(f.user_code);
+        res.writeHead(ok ? 200 : 401, { 'content-type': 'text/html' });
+        res.end(ok ? '<!doctype html><p>Device approved. You can close this window.</p>' : '<!doctype html><p role="alert" class="error">Wrong code, username or password</p>');
+      });
+    }
     if (url.pathname === '/device_authorization' && req.method === 'POST') {
       return readForm((f) => {
         const a = authenticate(f);

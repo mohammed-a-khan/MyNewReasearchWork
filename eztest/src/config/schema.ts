@@ -59,9 +59,34 @@ export const RoleFieldsSchema = z.object({
 export const RoleApiSchema = z.object({
   tokenUrl: z.string().min(1),
   clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
+  /** Secret reference; not needed with clientAuth private_key_jwt or none. */
+  clientSecret: z.string().min(1).optional(),
   scope: z.string().optional(),
   audience: z.string().optional(),
+  /** OAuth grant (docs/api-contracts.md, "OAuth for API steps"); default client_credentials. */
+  grant: z.enum(['client_credentials', 'password', 'authorization_code', 'device_code', 'jwt_bearer', 'refresh_token']).optional(),
+  clientAuth: z.enum(['client_secret_basic', 'client_secret_post', 'private_key_jwt', 'none']).optional(),
+  /** private_key_jwt client authentication: a PEM key (secret reference). */
+  clientKey: z.object({ privateKey: z.string().min(1), alg: z.enum(['RS256', 'PS256', 'ES256']).optional(), kid: z.string().optional() }).optional(),
+  /** jwt_bearer grant: the assertion's key and claims. */
+  assertion: z.object({ privateKey: z.string().min(1), subject: z.string().min(1), issuer: z.string().optional(), audience: z.string().optional(), alg: z.enum(['RS256', 'PS256', 'ES256']).optional(), kid: z.string().optional() }).optional(),
+  /** authorization_code grant (PKCE): EZTest's browser signs in as the role at authorizeUrl; the redirect is intercepted. */
+  authorizeUrl: z.string().min(1).optional(),
+  redirectUri: z.string().url().optional(),
+  /** device_code grant: approved in EZTest's browser as the role. */
+  deviceAuthorizationUrl: z.string().min(1).optional(),
+  /** refresh_token grant: a stored refresh token (secret reference). */
+  refreshToken: z.string().min(1).optional(),
+  /** Refresh tokens this many seconds before they expire (default 60). */
+  skewSeconds: z.number().int().min(0).optional(),
+}).superRefine((a, ctx) => {
+  const grant = a.grant ?? 'client_credentials';
+  if (grant === 'authorization_code' && (!a.authorizeUrl || !a.redirectUri)) ctx.addIssue({ code: 'custom', message: 'the authorization_code grant needs authorizeUrl and redirectUri' });
+  if (grant === 'device_code' && !a.deviceAuthorizationUrl) ctx.addIssue({ code: 'custom', message: 'the device_code grant needs deviceAuthorizationUrl' });
+  if (grant === 'jwt_bearer' && !a.assertion) ctx.addIssue({ code: 'custom', message: 'the jwt_bearer grant needs assertion: { privateKey, subject }' });
+  if (grant === 'refresh_token' && !a.refreshToken) ctx.addIssue({ code: 'custom', message: 'the refresh_token grant needs refreshToken' });
+  if (a.clientAuth === 'private_key_jwt' && !a.clientKey) ctx.addIssue({ code: 'custom', message: 'clientAuth private_key_jwt needs clientKey: { privateKey }' });
+  if (grant === 'client_credentials' && !a.clientSecret && a.clientAuth !== 'private_key_jwt') ctx.addIssue({ code: 'custom', message: 'client credentials need clientSecret (or clientAuth: private_key_jwt with clientKey)' });
 });
 
 /** Which login recipe the vault uses for a role. */
@@ -116,7 +141,8 @@ export const RoleSchema = z
       return;
     }
     if (r.username === undefined) ctx.addIssue({ code: 'custom', path: ['username'], message: 'a role that signs in to a browser needs "username"' });
-    if (r.loginUrl === undefined) ctx.addIssue({ code: 'custom', path: ['loginUrl'], message: 'a role that signs in to a browser needs "loginUrl"' });
+    const idpSignIn = ['password', 'authorization_code', 'device_code'].includes(r.api?.grant ?? '');
+    if (r.loginUrl === undefined && !idpSignIn) ctx.addIssue({ code: 'custom', path: ['loginUrl'], message: 'a role that signs in to a browser needs "loginUrl"' });
     if (r.password === undefined && r.passwordRotation === undefined) ctx.addIssue({ code: 'custom', path: ['password'], message: 'a role needs "password" or "passwordRotation"' });
   });
 

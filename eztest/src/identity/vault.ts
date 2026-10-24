@@ -46,7 +46,34 @@ export interface RoleDefinition {
   verifyUrl?: string;
   totpOptions?: { digits?: number; algorithm?: TotpAlgorithm; step?: number };
   /** API access for this role: an OAuth2 client config or any TokenProvider. */
-  api?: { tokenUrl: string; clientId: string; clientSecret: string | SecretHandle; scope?: string; audience?: string } | TokenProvider;
+  api?: RoleApi | TokenProvider;
+}
+
+/** OAuth 2.0 for a role's API calls (docs/api-contracts.md, "OAuth for API steps"). */
+export interface RoleApi {
+  tokenUrl: string;
+  clientId: string;
+  /** Not needed with clientAuth private_key_jwt or none (public clients). */
+  clientSecret?: string | SecretHandle;
+  scope?: string;
+  audience?: string;
+  /**
+   * client_credentials (default); password (the role's username and password); authorization_code
+   * (PKCE, EZTest's browser signs in as the role); device_code (approved in the browser as the
+   * role); jwt_bearer (a signed assertion); refresh_token (a stored refresh token).
+   */
+  grant?: 'client_credentials' | 'password' | 'authorization_code' | 'device_code' | 'jwt_bearer' | 'refresh_token';
+  clientAuth?: 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt' | 'none';
+  /** private_key_jwt: the client's PEM key (secret reference), alg and kid. */
+  clientKey?: { privateKey: string | SecretHandle; alg?: 'RS256' | 'PS256' | 'ES256'; kid?: string };
+  /** jwt_bearer: the assertion key and claims. */
+  assertion?: { privateKey: string | SecretHandle; subject: string; issuer?: string; audience?: string; alg?: 'RS256' | 'PS256' | 'ES256'; kid?: string };
+  authorizeUrl?: string;
+  redirectUri?: string;
+  deviceAuthorizationUrl?: string;
+  refreshToken?: string | SecretHandle;
+  /** Refresh this many seconds before expiry (default 60). */
+  skewSeconds?: number;
 }
 
 export interface IdentityVaultOptions {
@@ -60,6 +87,8 @@ export interface IdentityVaultOptions {
   /** Per-step login timeout (default 15s). */
   timeoutMs?: number;
   logger?: Logger;
+  /** Browser for OAuth sign-ins (authorization code, device approval); default: EZTest's headless Chromium. */
+  launchBrowser?: () => Promise<{ newPage(): Promise<Page>; close(): Promise<void> }>;
 }
 
 export interface LoginOutcome {
@@ -114,7 +143,8 @@ export class IdentityVault {
     this.maxAgeMs = o.sessionMaxAgeMs ?? 30 * 60_000;
     this.timeoutMs = o.timeoutMs ?? 15_000;
     this.logger = o.logger ?? silentLogger;
-    for (const [name, def] of Object.entries(o.roles)) {
+    for (const [name, given] of Object.entries(o.roles)) {
+      let def = given;
       if (def.flow && def.flow !== 'form') throw new EzTestError(`Role ${name}: login flow "${def.flow}" is not supported`, 'IDENTITY_CONFIG');
       const browser = def.loginUrl !== undefined || def.username !== undefined || def.password !== undefined;
       if (!browser && def.api) {
@@ -122,6 +152,10 @@ export class IdentityVault {
         this.apiOnly.add(name);
         continue;
       }
+      // A role that only signs in to an identity provider for API tokens (password, authorization
+      // code, device code) needs no application login page of its own.
+      const oauthOnly = def.api && !('getToken' in def.api) && ['password', 'authorization_code', 'device_code'].includes(def.api.grant ?? '');
+      if (!def.loginUrl && oauthOnly) def = { ...def, loginUrl: (def.api as RoleApi).authorizeUrl ?? (def.api as RoleApi).tokenUrl };
       if (!def.loginUrl) throw new EzTestError(`Role ${name}: loginUrl is required`, 'IDENTITY_CONFIG');
       if (def.username === undefined) throw new EzTestError(`Role ${name}: username is required`, 'IDENTITY_CONFIG');
       if (def.password === undefined) throw new EzTestError(`Role ${name}: password is required`, 'IDENTITY_CONFIG');
@@ -249,9 +283,28 @@ export class IdentityVault {
       return { role, reused: true, url: page.url(), sessionFile: this.sessionFile(role) };
     }
     if (r.def.login?.type === 'entra') return this.entraSignIn(page, role, r, base, r.def.login);
-    const f = r.def.fields ?? {};
     await page.goto(this.url(r.def.loginUrl, base));
+    await this.enterCredentials(page, role, r);
 
+    if (r.def.successUrl) {
+      const spec = r.def.successUrl;
+      try {
+        await page.waitForURL((u) => successMatches(u.toString(), spec), { timeout: this.timeoutMs });
+      } catch {
+        await this.failIfError(page, role);
+        throw new EzTestError(`Role ${role}: login did not reach ${spec} (at ${page.url()})`, 'LOGIN_FAILED');
+      }
+    }
+    await this.failIfError(page, role);
+    if (this.onLoginPage(page.url(), r, base)) throw new EzTestError(`Role ${role}: still on the login page after sign-in`, 'LOGIN_FAILED');
+    const sessionFile = await this.saveSession(page, role);
+    this.logger.info(`Role ${role}: signed in, session cached`);
+    return { role, reused: false, url: page.url(), sessionFile };
+  }
+
+  /** Fill the sign-in form on the current page: username (identifier-first too), password, submit, TOTP. */
+  private async enterCredentials(page: Page, role: string, r: ResolvedRole): Promise<void> {
+    const f = r.def.fields ?? {};
     const user = await this.findField(page, this.usernameCandidates(page, f.username), this.timeoutMs);
     if (!user) throw new EzTestError(`Role ${role}: username field not found on ${page.url()}`, 'LOGIN_FIELD');
     await user.fill(typeof r.username === 'string' ? r.username : await r.username.resolve());
@@ -277,21 +330,76 @@ export class IdentityVault {
       await otp.fill(generateTotp(await r.totp.resolve(), opts));
       await this.submit(page, this.submitCandidates(page, f.totpSubmit ?? f.submit, true));
     }
+  }
 
-    if (r.def.successUrl) {
-      const spec = r.def.successUrl;
-      try {
-        await page.waitForURL((u) => successMatches(u.toString(), spec), { timeout: this.timeoutMs });
-      } catch {
-        await this.failIfError(page, role);
-        throw new EzTestError(`Role ${role}: login did not reach ${spec} (at ${page.url()})`, 'LOGIN_FAILED');
-      }
+  // ------------------------------------------------------------- OAuth in the browser
+
+  /** A headless browser for OAuth sign-ins (EZTest's own driver), closed afterwards. */
+  private async withBrowser<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+    const launch = this.o.launchBrowser ?? (async () => {
+      const { chromium } = await import('../browser/index.js');
+      const browser = await chromium.launch({ headless: true });
+      return { newPage: async () => (await browser.newContext()).newPage(), close: () => browser.close() };
+    });
+    const b = await launch();
+    try {
+      return await fn(await b.newPage());
+    } finally {
+      await b.close().catch(() => undefined);
     }
-    await this.failIfError(page, role);
-    if (this.onLoginPage(page.url(), r, base)) throw new EzTestError(`Role ${role}: still on the login page after sign-in`, 'LOGIN_FAILED');
-    const sessionFile = await this.saveSession(page, role);
-    this.logger.info(`Role ${role}: signed in, session cached`);
-    return { role, reused: false, url: page.url(), sessionFile };
+  }
+
+  /**
+   * Authorization code + PKCE, headless: open the authorize URL, sign in as the role on the
+   * identity provider's form (username, password, TOTP), and return the URL the browser was sent
+   * back to (redirect_uri?code=...&state=...). The redirect is intercepted, so the redirect URI
+   * need not serve anything.
+   */
+  async browserAuthorize(role: string, authorizeUrl: string, redirectUri: string): Promise<string> {
+    const r = this.role(role);
+    return this.withBrowser(async (page) => {
+      let back: string | undefined;
+      await page.route((u) => u.toString().startsWith(redirectUri), async (route) => {
+        back = route.request().url();
+        await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Signed in</title><p>EZTest: signed in.</p>' });
+      });
+      await page.goto(authorizeUrl).catch((e: Error) => {
+        if (!back) throw e;
+      });
+      // A provider with a remembered session redirects at once; otherwise sign in.
+      if (!back) await this.enterCredentials(page, role, r);
+      const deadline = Date.now() + this.timeoutMs;
+      while (!back && Date.now() < deadline) {
+        await this.failIfError(page, role);
+        await sleep(100);
+      }
+      if (!back) throw new EzTestError(`Role ${role}: the identity provider did not redirect to ${redirectUri} after sign-in (at ${page.url()})`, 'LOGIN_FAILED');
+      this.logger.info(`Role ${role}: authorized in the browser (authorization code)`);
+      return back;
+    });
+  }
+
+  /**
+   * Device code approval in the browser: open the verification page (with the code in the URL
+   * when the provider gives one, else typing the code), sign in as the role and confirm.
+   */
+  async browserApproveDevice(role: string, info: { userCode: string; verificationUri: string; verificationUriComplete?: string }): Promise<void> {
+    const r = this.role(role);
+    await this.withBrowser(async (page) => {
+      await page.goto(info.verificationUriComplete ?? info.verificationUri);
+      if (!info.verificationUriComplete) {
+        const code = await this.findField(page, [page.getByLabel(/code/i), page.locator('input[name*=code i]')], this.timeoutMs);
+        if (!code) throw new EzTestError(`Role ${role}: no field for the device code on ${page.url()}`, 'LOGIN_FIELD');
+        await code.fill(info.userCode);
+        await this.submit(page, this.submitCandidates(page, undefined));
+      }
+      if (await this.findField(page, this.passwordCandidates(page, r.def.fields?.password), 1500).then(Boolean)) await this.enterCredentials(page, role, r);
+      else if (await this.findField(page, this.usernameCandidates(page, r.def.fields?.username), 1500).then(Boolean)) await this.enterCredentials(page, role, r);
+      const approve = await this.findField(page, [page.getByRole('button', { name: /approve|allow|authori[sz]e|confirm|continue|yes/i })], 3000);
+      if (approve) await approve.click();
+      await this.failIfError(page, role);
+      this.logger.info(`Role ${role}: approved device code ${info.userCode} in the browser`);
+    });
   }
 
   /**
@@ -394,19 +502,50 @@ export class IdentityVault {
     if (hit) return hit;
     const api = this.apiOnly.has(role) ? this.o.roles[role].api : this.role(role).def.api;
     if (!api) throw new EzTestError(`Role ${role} has no API credentials configured`, 'IDENTITY_NO_API');
-    const p: TokenProvider =
-      'getToken' in api
-        ? api
-        : new OAuth2TokenProvider({
-            tokenUrl: this.url(api.tokenUrl, this.o.baseUrl),
-            clientId: api.clientId,
-            clientSecret: this.registry.from(api.clientSecret, `${role}.clientSecret`),
-            scope: api.scope,
-            audience: api.audience,
-            masker: this.registry.masker,
-          });
+    const p: TokenProvider = 'getToken' in api ? api : this.oauthProvider(role, api);
     this.tokens.set(role, p);
     return p;
+  }
+
+  private oauthProvider(role: string, api: RoleApi): OAuth2TokenProvider {
+    const grant = api.grant ?? 'client_credentials';
+    const secret = (v: string | SecretHandle | undefined, label: string) => (v === undefined ? undefined : this.registry.from(v, `${role}.${label}`));
+    const browserRole = (): ResolvedRole => {
+      const r = this.roles.get(role);
+      if (!r) throw new EzTestError(`Role ${role}: the ${grant} grant signs in with the role's username and password; give it username, password and loginUrl`, 'IDENTITY_CONFIG');
+      return r;
+    };
+    const base = {
+      tokenUrl: this.url(api.tokenUrl, this.o.baseUrl), clientId: api.clientId, clientSecret: secret(api.clientSecret, 'clientSecret'),
+      scope: api.scope, audience: api.audience, masker: this.registry.masker, grant, ...(api.skewSeconds !== undefined ? { skewSeconds: api.skewSeconds } : {}),
+      ...(api.clientAuth ? { clientAuth: api.clientAuth } : {}),
+      ...(api.clientKey ? { clientKey: { privateKey: secret(api.clientKey.privateKey, 'clientKey')!, alg: api.clientKey.alg, kid: api.clientKey.kid } } : {}),
+    };
+    switch (grant) {
+      case 'password': {
+        const r = browserRole();
+        return new OAuth2TokenProvider({ ...base, username: typeof r.username === 'string' ? r.username : r.username, password: r.password });
+      }
+      case 'authorization_code': {
+        browserRole();
+        if (!api.authorizeUrl || !api.redirectUri) throw new EzTestError(`Role ${role}: the authorization_code grant needs authorizeUrl and redirectUri`, 'IDENTITY_CONFIG');
+        return new OAuth2TokenProvider({ ...base, authorizationCode: { authorizeUrl: this.url(api.authorizeUrl, this.o.baseUrl), redirectUri: api.redirectUri, signIn: (url, redirect) => this.browserAuthorize(role, url, redirect) } });
+      }
+      case 'device_code': {
+        browserRole();
+        if (!api.deviceAuthorizationUrl) throw new EzTestError(`Role ${role}: the device_code grant needs deviceAuthorizationUrl`, 'IDENTITY_CONFIG');
+        return new OAuth2TokenProvider({ ...base, deviceAuthorizationUrl: this.url(api.deviceAuthorizationUrl, this.o.baseUrl), onDeviceCode: (info) => this.browserApproveDevice(role, info) });
+      }
+      case 'jwt_bearer': {
+        if (!api.assertion) throw new EzTestError(`Role ${role}: the jwt_bearer grant needs an assertion (privateKey, subject)`, 'IDENTITY_CONFIG');
+        const a = api.assertion;
+        return new OAuth2TokenProvider({ ...base, assertion: { privateKey: secret(a.privateKey, 'assertionKey')!, subject: a.subject, issuer: a.issuer, audience: a.audience, alg: a.alg, kid: a.kid } });
+      }
+      case 'refresh_token':
+        return new OAuth2TokenProvider({ ...base, refreshToken: secret(api.refreshToken, 'refreshToken') });
+      default:
+        return new OAuth2TokenProvider(base);
+    }
   }
 
   // ------------------------------------------------------------- helpers
