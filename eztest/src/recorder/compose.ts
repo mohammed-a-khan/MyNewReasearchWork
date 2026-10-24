@@ -635,6 +635,8 @@ export class JourneyComposer {
   // ------------------------------------------------------------------ expectations
 
   private onAssert(ev: Extract<FramedPageEvent, { kind: 'assert' }>): void {
+    // The person did something on this page: a navigation after it is not a redirect of the step before.
+    this.navDraft = undefined;
     const rt = buildTarget(ev.el);
     if (ev.el.secret) {
       this.warn(`An expectation on the password field ${rt.label} was ignored: secret values are never recorded.`);

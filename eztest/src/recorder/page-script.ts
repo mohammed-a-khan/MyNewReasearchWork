@@ -288,10 +288,11 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         }
         return '';
       }
-      for (var n = el.previousSibling; n; n = n.previousSibling) {
+      var box = t === 'input' && (inputType(el) === 'checkbox' || inputType(el) === 'radio');
+      for (var n = box ? el.nextSibling : el.previousSibling; n; n = box ? n.nextSibling : n.previousSibling) {
         if (n.nodeType === 1) {
           if (LABELLABLE[lower(n)] || n.querySelector('input,select,textarea')) return '';
-          if (lower(n) === 'br') continue;
+          if (lower(n) === 'br') { if (box) return ''; continue; }
         }
         var nt = clean(n.nodeType === 3 ? n.data : n.nodeType === 1 ? controlsText(n) : '');
         if (nt) return nt.length <= 60 ? nt : '';
@@ -745,7 +746,52 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var pending = new Set();
     var lastSent = new WeakMap();
     var lastEnter = 0;
-    var mk = function (ev) { if (!ev.t) ev.t = Date.now(); ev.url = location.href; return ev; };
+    // The chain of frames this document sits in, outermost first, named as a tester names a frame (see
+    // frameChain in recorder.ts, which the Node side uses when a parent is on another origin).
+    var frameName = function (fe) {
+      var root = fe.getRootNode();
+      var frames = Array.prototype.slice.call(root.querySelectorAll('iframe,frame'));
+      var plain = function (v) { return !!v && v.length <= 80 && !/["\\\n\r]/.test(v) && v.trim() === v && !/^(?:css\s*=|[#.[]|i?frame(?:$|[\s#.[:>~+]))/i.test(v); };
+      var count = function (attr, v) { var n = 0; for (var i = 0; i < frames.length; i++) if ((attr === 'id' ? frames[i].id : frames[i].getAttribute(attr)) === v) n++; return n; };
+      var name = fe.getAttribute('name');
+      if (plain(name) && count('name', name) === 1) return name;
+      var title = fe.getAttribute('title');
+      if (plain(title) && count('title', title) === 1 && count('name', title) === 0 && count('id', title) === 0) return title;
+      if (plain(fe.id) && count('id', fe.id) === 1 && count('name', fe.id) === 0) return fe.id;
+      var src = fe.getAttribute('src') || '', path = '';
+      try { path = src && !/^(?:about|data|javascript|blob):/i.test(src) ? new URL(src, location.href).pathname : ''; } catch (e) { path = ''; }
+      if (plain(path) && path.length > 1 && count('name', path) + count('id', path) + count('title', path) === 0) {
+        var hits = 0;
+        for (var j = 0; j < frames.length; j++) if ((frames[j].getAttribute('src') || '').indexOf(path) >= 0) hits++;
+        if (hits === 1) return path;
+      }
+      var tag = lower(fe);
+      if (root.querySelectorAll(tag).length === 1) return tag;
+      var idx = 1;
+      for (var sib = fe.previousElementSibling; sib; sib = sib.previousElementSibling) if (sib.tagName === fe.tagName) idx++;
+      var sel = tag + ':nth-of-type(' + idx + ')';
+      if (root.querySelectorAll(sel).length === 1) return sel;
+      var p = fe.parentElement;
+      var scoped = p && p.id && /^[A-Za-z][\w-]*$/.test(p.id) ? '#' + p.id + ' > ' + sel : '';
+      return scoped && root.querySelectorAll(scoped).length === 1 ? scoped : 'css=' + sel;
+    };
+    var frameChainHere = function () {
+      var out = [];
+      try {
+        for (var w = W; w !== w.top; w = w.parent) {
+          var fe = w.frameElement;
+          if (!fe) return null;
+          out.unshift(frameName(fe));
+        }
+      } catch (e) { return null; }
+      return out;
+    };
+    var mk = function (ev) {
+      if (!ev.t) ev.t = Date.now();
+      ev.url = location.href;
+      if (W !== W.top) { var fc = frameChainHere(); if (fc) ev.frameChain = fc; }
+      return ev;
+    };
     var send = function (ev) {
       if (!R.binding || typeof W[R.binding] !== 'function') return;
       try { var p = W[R.binding](mk(ev)); if (p && p.catch) p.catch(function () {}); } catch (e) { /* page is going away */ }

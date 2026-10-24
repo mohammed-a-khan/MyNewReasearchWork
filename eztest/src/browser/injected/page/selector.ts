@@ -232,10 +232,15 @@ export function visualLabel(el: Element): string {
     }
     return '';
   }
-  for (let n: Node | null = el.previousSibling; n; n = n.previousSibling) {
+  // A checkbox or radio button is followed by its words ("[x] Remember me"), a field preceded by them.
+  const box = tag === 'input' && /^(?:checkbox|radio)$/i.test((el as HTMLInputElement).type);
+  for (let n: Node | null = box ? el.nextSibling : el.previousSibling; n; n = box ? n.nextSibling : n.previousSibling) {
     if (isElement(n)) {
       if (VISUAL_LABEL_TAGS.has(lowerTag(n)) || n.querySelector('input,select,textarea')) return '';
-      if (lowerTag(n) === 'br') continue;
+      if (lowerTag(n) === 'br') {
+        if (box) return '';
+        continue;
+      }
     }
     const t = clean(n.nodeType === 3 ? (n as Text).data : isElement(n) ? textWithoutControls(n) : '');
     if (t) return t.length <= 60 ? t : '';

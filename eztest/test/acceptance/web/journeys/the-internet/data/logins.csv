@@ -1,0 +1,4 @@
+username,password,outcome
+tomsmith,SuperSecretPassword!,You logged into a secure area!
+tomsmith,wrong-password,Your password is invalid!
+nobody,SuperSecretPassword!,Your username is invalid!

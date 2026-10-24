@@ -1,0 +1,23 @@
+Journey: Form login, a wrong password and basic auth
+Tags: @the-internet @auth
+Base URL: https://the-internet.herokuapp.com
+HTTP credentials: admin / ${basicPassword}
+Variables: basicPassword=admin, password=SuperSecretPassword!
+
+Open /login
+Type "tomsmith" into the Username field
+Type "wrong" into the Password field
+Click the "Login" button
+  Expect the page contains "Your password is invalid!"
+  Expect the URL contains "/login"
+Type "tomsmith" into the Username field
+Type "${password}" into the Password field
+Click the "Login" button
+  Expect the URL contains "/secure"
+  Expect I see "You logged into a secure area!"
+Click the "Logout" link
+  Expect user is redirected to "/login"
+  Expect the page contains "You logged out of the secure area!"
+
+Open /basic_auth
+Expect the page contains "Congratulations! You must have the proper credentials."

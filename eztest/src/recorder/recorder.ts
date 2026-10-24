@@ -4,6 +4,7 @@
  * every document and frame) and turn it into a Journey and an `.ez` script.
  */
 import { randomBytes } from 'node:crypto';
+import { isAbsolute, relative, sep } from 'node:path';
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type DialogClosed, type Download, type Frame, type Page, type Request } from '../browser/index.js';
 import { NotSupportedError, sleep } from '../core/index.js';
 import { parseCondition } from '../intent/index.js';
@@ -99,6 +100,45 @@ async function frameChain(frame: Frame): Promise<string[]> {
 }
 
 
+/**
+ * The files a person chose in a file input, as paths (relative to the working directory when inside it). The page
+ * only sees file names; Chromium's DevTools protocol knows where each file came from. Undefined when the browser
+ * cannot say (Firefox), so the recording keeps the names and says to edit them.
+ */
+async function chosenFilePaths(context: BrowserContext, page: Page, css: string, count: number): Promise<string[] | undefined> {
+  if (css.includes('>>')) return undefined;
+  let cdp: Awaited<ReturnType<BrowserContext['newCDPSession']>> | undefined;
+  try {
+    cdp = await context.newCDPSession(page);
+    const out: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const { result } = (await cdp.send('Runtime.evaluate', { expression: `(document.querySelector(${JSON.stringify(css)}) || {}).files?.[${i}]` })) as { result: { objectId?: string } };
+      if (!result.objectId) return undefined;
+      const { path } = (await cdp.send('DOM.getFileInfo', { objectId: result.objectId })) as { path?: string };
+      if (!path) return undefined;
+      const rel = relative(process.cwd(), path);
+      out.push((rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : path).split(sep).join('/'));
+    }
+    return out;
+  } catch {
+    return undefined;
+  } finally {
+    await cdp?.detach().catch(() => undefined);
+  }
+}
+
+/** frameChain, asked again shortly when the browser does not know the frame yet (a frameset still loading). */
+async function frameChainWithRetry(frame: Frame): Promise<string[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await frameChain(frame);
+    } catch (e) {
+      if (attempt >= 3) throw e;
+      await sleep(250);
+    }
+  }
+}
+
 const FLUSH_EXPR = 'window.__ezRecorder && window.__ezRecorder.flush ? window.__ezRecorder.flush() : []';
 const DETACH_EXPR = 'window.__ezRecorder ? (window.__ezRecorder.binding = null, true) : false';
 
@@ -124,7 +164,11 @@ export class Recorder {
     if (this.stopped || this.stopping || this.tabs.has(p)) return;
     const tab = this.track(p);
     this.touch(tab);
-    this.enqueue({ kind: 'tab', op: 'open', tab, t: Date.now() });
+    const t = Date.now();
+    this.enqueue({ kind: 'tab', op: 'open', tab, t });
+    // A popup can have loaded its address before we started watching it.
+    const url = p.url();
+    if (/^(?:https?|file):/i.test(url)) this.enqueue({ kind: 'navigate', url, t: t + 1, byPage: true, tab });
   };
 
   /** Watch one page: its navigations, dialogs, downloads and closing. */
@@ -210,13 +254,19 @@ export class Recorder {
     this.touch(tab);
     const p = (async () => {
       const framed: FramedPageEvent = { ...ev, tab };
+      const inPage = (ev as { frameChain?: unknown }).frameChain;
+      delete (framed as { frameChain?: unknown }).frameChain;
       if (source.frame !== source.page.mainFrame()) {
         try {
-          framed.frames = await frameChain(source.frame);
+          // Named by the page itself when every parent is on the same origin; else asked of the browser.
+          framed.frames = Array.isArray(inPage) && inPage.every((x) => typeof x === 'string') ? (inPage as string[]) : await frameChainWithRetry(source.frame);
         } catch (e) {
           this.composer.warn(`An action inside a frame was dropped: its frame could not be identified (${(e as Error).message}).`);
           return;
         }
+      } else if (framed.kind === 'upload' && framed.files.length) {
+        const paths = await chosenFilePaths(this.context, source.page, framed.el.css, framed.files.length);
+        if (paths) framed.files = paths;
       }
       this.enqueue(framed);
     })();

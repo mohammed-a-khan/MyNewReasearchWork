@@ -93,6 +93,14 @@ describe('FINDING (parabank.parasoft.com): "the First Name field" in a form laid
     expect((await describeElement(page.locator('[id="customer.firstName"]'))).descriptions[0]).toBe('the First Name field');
     expect((await describeElement(page.locator('#amount'))).descriptions[0]).toBe('the Amount field');
   });
+
+  it('reads a checkbox by the words after it (the-internet checkboxes)', async () => {
+    await page.setContent(`<!doctype html><form id="checkboxes"><input type="checkbox"> checkbox 1<br><input type="checkbox" checked> checkbox 2</form>`);
+    const r = await resolveTarget(page, describeTarget('the checkbox 2 checkbox'), {}, 500);
+    expect(r.locator, r.notes.join('; ')).toBeDefined();
+    expect(await r.locator!.evaluate((e) => (e as HTMLInputElement).checked)).toBe(true);
+    expect((await describeElement(page.locator('#checkboxes input').first())).descriptions[0]).toBe('the checkbox 1 checkbox');
+  });
 });
 
 describe('FINDING (the-internet nested frames): a frame named "frame-top" was taken for a CSS selector', () => {

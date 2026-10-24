@@ -1,0 +1,47 @@
+Journey: demoqa modal, select menu, slider, date picker, web tables and files
+Tags: @demoqa
+Base URL: https://demoqa.com
+
+Open /modal-dialogs
+Click the "Small modal" button
+  Expect the "Small Modal" dialog to be open
+  Expect the page contains "This is a small modal. It has very less content"
+Click the "Close" button
+  Expect the "Small Modal" dialog to be closed
+
+Open /select-menu
+Select "Green" from #oldSelectMenu
+  Expect the value of #oldSelectMenu is "2"
+
+Open /slider
+Set the slider to 70
+  Expect the slider to be 70
+  Expect the value of #sliderValue is "70"
+
+Open /date-picker
+Clear #datePickerMonthYearInput
+Type "03/15/2027" into #datePickerMonthYearInput
+Press Enter
+  Expect the value of #datePickerMonthYearInput is "03/15/2027"
+
+Open /webtables
+Click the "Add" button
+  Expect the "Registration Form" dialog to be open
+Type "Ada" into the First Name field
+Type "Lovelace" into the Last Name field
+Type "ada@example.com" into the name@example.com field
+Type "36" into the Age field
+Type "5000" into the Salary field
+Type "Computing" into the Department field
+Click the "Submit" button
+  Expect the page contains "ada@example.com"
+Type "Lovelace" into the Type to search field
+  Expect the page contains "Computing"
+  Expect the page does not contain "Cierra"
+
+Open /upload-download
+Upload "journeys/data/upload-me.txt" to #uploadFile
+  Expect #uploadedFilePath contains "upload-me.txt"
+Download the "Download" link as sample
+  Expect the download sample exists
+  Expect the download sample is named "sampleFile.jpeg"

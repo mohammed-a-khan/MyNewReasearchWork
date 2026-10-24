@@ -315,7 +315,8 @@ export const DIALOG_DIALECTS: Array<DialectEntry<DialogDialect>> = [
 
 /** Every dialog selector, for the document-level stack. */
 export const ALL_DIALOGS = DIALOG_DIALECTS.map((d) => d.dialect.dialog).join(', ');
-export const ALL_DIALOG_TITLES = [...DIALOG_DIALECTS.map((d) => d.dialect.title).filter(Boolean), 'h1', 'h2', 'h3', '[role=heading]'].join(', ');
+// Headings, and the title element of a Bootstrap / React-Bootstrap / jQuery UI dialog (often a plain div, demoqa.com).
+export const ALL_DIALOG_TITLES = [...DIALOG_DIALECTS.map((d) => d.dialect.title).filter(Boolean), 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', '[role=heading]', '.modal-title', '.ui-dialog-title', '[class*="dialog-title"]', '[class*="modal-title"]'].join(', ');
 export const ALL_DIALOG_CLOSE = [...DIALOG_DIALECTS.map((d) => d.dialect.close).filter(Boolean), '[aria-label="Close" i]', '[title="Close" i]'].join(', ');
 
 export const TOAST_SELECTORS: Array<{ library: string; selector: string }> = [

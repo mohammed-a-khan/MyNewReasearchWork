@@ -1,0 +1,15 @@
+Journey: Upload and download files
+Tags: @the-internet @files
+Base URL: https://the-internet.herokuapp.com
+
+Open /upload
+Upload "journeys/data/upload-me.txt" to #file-upload
+Click the "Upload" button
+  Expect the page contains "File Uploaded!"
+  Expect #uploaded-files contains "upload-me.txt"
+
+Open /download
+Capture the text of the 1st link inside #content as firstFile
+Download the 1st link inside #content as firstDownload
+  Expect the download firstDownload exists
+Expect the download firstDownload is named "${firstFile}"

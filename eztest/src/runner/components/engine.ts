@@ -801,7 +801,8 @@ function dialogTitle(dl, d) {
   var lb = dl.getAttribute('aria-labelledby');
   if (lb) { var s = lb.split(/\s+/).map(function (id) { var x = document.getElementById(id); return x ? text(x) : ''; }).join(' '); if (norm(s)) return norm(s); }
   if (dl.getAttribute('aria-label')) return norm(dl.getAttribute('aria-label'));
-  var t = q1(dl, d.title || 'h1, h2, h3, [role=heading]');
+  // A heading, or the title element of a Bootstrap / Material / jQuery UI dialog (often a plain div).
+  var t = q1(dl, d.title || 'h1, h2, h3, h4, h5, h6, [role=heading], .modal-title, .mat-dialog-title, .mdc-dialog__title, .ui-dialog-title, [class*="dialog-title"], [class*="modal-title"]');
   return t ? text(t) : '';
 }
 E.dialogs = function (el, a) {

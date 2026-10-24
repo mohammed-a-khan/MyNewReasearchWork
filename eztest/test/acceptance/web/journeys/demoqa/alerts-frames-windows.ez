@@ -1,0 +1,41 @@
+Journey: demoqa alerts, frames and windows
+Tags: @demoqa
+Base URL: https://demoqa.com
+
+Open /alerts
+Accept the next dialog
+Click the "Click me" button right of "Click Button to see alert"
+  Expect an alert saying "You clicked a button"
+Accept the next alert
+Click the "Click me" button right of "On button click, alert will appear after 5 seconds"
+  Expect an alert saying "This alert appeared after 5 seconds"
+Accept the next confirm dialog
+Click the "Click me" button right of "On button click, confirm box will appear"
+  Expect the page contains "You selected Ok"
+Answer the next prompt with "Ada Lovelace"
+Click the "Click me" button right of "On button click, prompt box will appear"
+  Expect the page contains "You entered Ada Lovelace"
+
+Open /frames
+In frame "frame1"
+  Expect the "This is a sample page" heading is visible
+End
+In frame "frame2": expect the page contains "This is a sample page"
+
+Open /nestedframes
+In frame "frame1"
+  Expect the page contains "Parent frame"
+End
+In frame "frame1" > iframe
+  Expect the page contains "Child Iframe"
+End
+
+Open /browser-windows
+Click the "New Tab" button and switch to the new tab
+  Expect the URL contains "/sample"
+  Expect the page contains "This is a sample page"
+Switch back to the main tab
+Click the "New Window" button and switch to the new window
+  Expect the "This is a sample page" heading is visible
+Close the window
+Expect the page contains "Browser Windows"

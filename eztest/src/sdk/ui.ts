@@ -11,6 +11,7 @@ import { describe, literal, literalDeep, run, show, target, tempKey, type Action
 import { currentHost } from './runtime.js';
 import type { TargetInput } from './screen.js';
 import { componentStepToText, widgetTarget, type ComponentWidget } from '../intent/rules-components.js';
+import { parseIntent } from '../intent/parse.js';
 import { toConditions, type Where } from '../runner/components/index.js';
 
 export type { ActionOptions };
@@ -109,6 +110,47 @@ export const ui = {
   /** Press a key (Enter, Tab, Control+A ...), on an element or the page. */
   async press(key: string, t?: TargetInput, o: ActionOptions = {}): Promise<void> {
     await run({ intent: `Press ${key}${t ? ` in ${describe(t)}` : ''}`, action: 'press', value: literal(key), ...(t ? { target: target(t) } : {}) }, o);
+  },
+  /** Drag an element onto another (HTML5 drag and drop for draggable elements, else a stepwise mouse drag). */
+  async drag(from: TargetInput, to: TargetInput, o: ActionOptions = {}): Promise<void> {
+    await run({ intent: `Drag ${describe(from)} to ${describe(to)}`, action: 'drag', target: target(from), to: target(to) }, o);
+  },
+  // ------------------------------------------------------------ tabs, windows and frames
+  /**
+   * Make another tab, window or popup the one the journey works on: `'new'` (the one that opened last and has
+   * not been used yet; waited for), `'main'`, `'previous'`, a 1-based number, `{ title }` or `{ url }` (a part of it).
+   */
+  async switchToTab(which: 'new' | 'main' | 'previous' | number | { title: string } | { url: string }, o: ActionOptions = {}): Promise<void> {
+    const args = typeof which === 'number' ? { by: 'index', value: String(which) }
+      : typeof which === 'string' ? { by: which }
+        : 'title' in which ? { by: 'title', value: literal(which.title) } : { by: 'url', value: literal(which.url) };
+    const words = typeof which === 'number' ? `tab ${which}` : typeof which === 'string' ? `the ${which} tab` : 'title' in which ? `the tab titled ${show(which.title)}` : `the tab with URL ${show(which.url)}`;
+    await run({ intent: `Switch to ${words}`, action: 'tab', args: { op: 'switch', ...args } }, o);
+  },
+  /** Close the current tab; the journey goes back to the tab it came from. */
+  async closeTab(o: ActionOptions = {}): Promise<void> {
+    await run({ intent: 'Close the tab', action: 'tab', args: { op: 'close' } }, o);
+  },
+  /**
+   * Run `fn` inside a frame (outermost first for nested frames: `['outer', 'inner']`), found by name, id, title,
+   * address or selector as in `.ez`; the journey is back in the page afterwards, also when `fn` throws.
+   */
+  async inFrame<T>(frames: string | string[], fn: () => Promise<T>): Promise<T> {
+    const path = Array.isArray(frames) ? frames : [frames];
+    await run({ intent: `Switch to frame ${path.map((f) => show(f)).join(' > ')}`, action: 'frame', args: { op: 'enter', path: path.map(literal) } });
+    try {
+      return await fn();
+    } finally {
+      for (let i = 0; i < path.length; i++) await run({ intent: 'Switch to the parent frame', action: 'frame', args: { op: 'parent' } });
+    }
+  },
+  /**
+   * Run one plain-English `.ez` step, exactly as it would run in an `.ez` file (`'Accept the next confirm dialog'`,
+   * `'Scroll down until the "Item 50" text is visible'`). `${...}` in it is the journey's variables.
+   */
+  async perform(line: string, o: ActionOptions = {}): Promise<void> {
+    const { id: _id, ...step } = parseIntent(line);
+    await run(step, o);
   },
   /** Attach files (paths relative to the project) to a file input. */
   async upload(t: TargetInput, files: string | string[], o: ActionOptions = {}): Promise<void> {

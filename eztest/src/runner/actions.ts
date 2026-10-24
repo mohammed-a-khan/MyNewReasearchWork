@@ -143,12 +143,13 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       const [download] = await Promise.all([page.waitForEvent('download', { timeout }), need().click({ timeout })]);
       const failure = await download.failure();
       if (failure) throw new EzTestError(`Download failed: ${failure}`, 'DOWNLOAD_FAILED');
-      const filename = safeName(download.suggestedFilename());
-      const relPath = ctx.evidence.reserve(`downloads/${safeName(ctx.journey.id)}/${safeName(step.id)}-${filename}`);
+      // The name the server gave the file is what "is named" checks; only the file kept on disk gets a safe, short name.
+      const filename = download.suggestedFilename() || 'download';
+      const relPath = ctx.evidence.reserve(`downloads/${safeName(ctx.journey.id)}/${safeName(step.id)}-${safeDiskName(filename)}`);
       const abs = join(ctx.runDir, relPath);
       await mkdir(join(ctx.runDir, 'downloads', safeName(ctx.journey.id)), { recursive: true });
       await download.saveAs(abs);
-      const ref = await ctx.evidence.recordFile('download', abs, { journeyId: ctx.journey.id, stepId: step.id, description: `download ${filename}` });
+      const ref = await ctx.evidence.recordFile('download', abs, { journeyId: ctx.journey.id, stepId: step.id, description: `download ${safeDiskName(filename)}` });
       const rec: DownloadRecord = { path: abs, relPath: ref.path, filename, evidenceId: ref.id, sha256: ref.sha256, size: (await stat(abs)).size };
       const k = key(step, 'download');
       ctx.ledger.set(k, rec);
@@ -318,3 +319,10 @@ export async function implicitCheck(step: Step, loc: Locator, ctx: StepContext, 
   }
 }
 
+/** A file name safe on every file system that keeps its extension when long names are shortened. */
+function safeDiskName(name: string): string {
+  const safe = name.replace(/[^A-Za-z0-9._-]+/g, '_') || 'x';
+  if (safe.length <= 100) return safe;
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(safe)?.[0] ?? '';
+  return safe.slice(0, 100 - ext.length) + ext;
+}

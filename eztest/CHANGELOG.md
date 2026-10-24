@@ -6,6 +6,12 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Fixed: real websites
 
+- Code journeys can switch tabs and frames and drag: `ui.switchToTab('new' | 'main' | n | { title } | { url })`, `ui.closeTab()`, `ui.inFrame(['outer', 'inner'], fn)`, `ui.drag(from, to)`, and `ui.perform('<any .ez step>')` for everything else in plain English ([docs/sdk.md](docs/sdk.md)). Before, a code journey could not follow a popup or read a frame without the raw page.
+- `Expect the download x is named "…"` compared with a name cut to 100 characters with spaces replaced; it now compares with the name the server gave the file (the saved copy still gets a safe name).
+- `Expect the "Registration Form" dialog to be open` did not see the title of Bootstrap, React-Bootstrap and jQuery UI dialogs (a `div.modal-title`, not a heading); those titles are read now (demoqa.com).
+- `Expect user is redirected to "/login"` checked the page text for "/login"; an address after "lands on", "is redirected to", "is on" is now checked against the URL.
+- Recorder: a checkbox or radio button without a `<label>` is named by the words after it (`the checkbox 1 checkbox`); a navigation right after an Alt+Click check is no longer taken for a redirect of the page opened before it; a popup that loaded before the recorder saw it still gets its `Expect URL contains …`; frames are named in the page itself when every parent is on the same origin, so a click in a frameset that is still loading is not dropped.
+
 - Fields of forms laid out as tables without `<label>` (`First Name:` in one cell, the field in the next; parabank.parasoft.com and many older business apps) were not `the First Name field`. A field with no label of its own is now found by the words a person reads before it (the cell before it, or the text right before it; a trailing `:` or `*` left out), and the recorder names it that way.
 - `Set the slider to 70` looked for a slider named "slider"; a widget named only by its kind (`the slider`, `the editor`, `the grid`) is now the one widget of that kind on the page (demoqa.com).
 
