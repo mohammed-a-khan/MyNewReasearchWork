@@ -47,10 +47,14 @@ function openSqlite(file: string): DatabaseSync {
 
 /** How long a statement waits for another connection's (or process's) write lock. */
 export const SQLITE_BUSY_TIMEOUT_MS = 5000;
+import { createRequire } from 'node:module';
+import { resolve as resolvePath } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { EzTestError, NotSupportedError } from '../core/index.js';
-import type { SqlDialect } from './db-sql.js';
+import { namedToPositional, type SqlDialect } from './db-sql.js';
 import { caseInsensitiveRow } from './db-rows.js';
 import type { OracleOptions } from './db-oracle.js';
+import { mergeMssqlSettings, mssqlDriverConfig, type EntraTokenDeps, type MssqlSettings } from './db-mssql.js';
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array | Date;
 export type SqlParams = SqlValue[] | Record<string, SqlValue>;
@@ -235,9 +239,31 @@ export class SqliteDbClient implements DbClient {
 
 // ----------------------------------------------------------------- optional drivers
 
+/**
+ * Environment variables that point a driver at an installation outside this project
+ * (a shared drivers folder, a CI image): the package directory, e.g.
+ * EZTEST_PG_DRIVER=/opt/drivers/node_modules/pg.
+ */
+export const DRIVER_PATH_ENV: Record<string, string> = {
+  pg: 'EZTEST_PG_DRIVER', mssql: 'EZTEST_MSSQL_DRIVER', oracledb: 'EZTEST_ORACLEDB_DRIVER', kafkajs: 'EZTEST_KAFKAJS_DRIVER', protobufjs: 'EZTEST_PROTOBUFJS_DRIVER',
+};
+
+/** The import specifier of a driver: its package name, or the entry file in the directory its EZTEST_*_DRIVER variable names. */
+export function driverSpecifier(pkg: string, env: Record<string, string | undefined> = process.env): string {
+  // "mssql/msnodesqlv8": the package "mssql", entry "msnodesqlv8" inside it.
+  const [base, ...sub] = pkg.startsWith('@') ? [pkg.split('/').slice(0, 2).join('/'), ...pkg.split('/').slice(2)] : pkg.split('/');
+  const dir = DRIVER_PATH_ENV[base] ? env[DRIVER_PATH_ENV[base]] : undefined;
+  if (!dir) return pkg;
+  try {
+    return pathToFileURL(createRequire(import.meta.url).resolve(resolvePath(dir, ...sub))).href;
+  } catch (e) {
+    throw new DbError(`${DRIVER_PATH_ENV[base]}=${dir} does not hold the "${pkg}" package: ${(e as Error).message.split('\n')[0]}`, 'DB_DRIVER_LOAD', { driver: pkg });
+  }
+}
+
 /** Load an optional driver package, with an install hint when it is missing. */
 export async function loadDriver(pkg: string, what: string): Promise<any> {
-  const spec: string = pkg; // a variable keeps TypeScript from requiring the optional package's types
+  const spec: string = driverSpecifier(pkg); // a variable keeps TypeScript from requiring the optional package's types
   try {
     const mod = await import(spec);
     return mod.default ?? mod;
@@ -296,19 +322,32 @@ export class PostgresDbClient implements DbClient {
     return new PostgresDbClient(o.name ?? 'postgres', pool);
   }
 
-  private static params(p?: SqlParams): unknown[] {
-    if (!p) return [];
-    if (!Array.isArray(p)) throw new NotSupportedError('named parameters for PostgreSQL (use $1..$n with an array)');
-    return p;
+  /**
+   * The text and values pg sends: an array binds $1..$n as is; an object binds `:name` markers,
+   * rewritten to $1..$n (string literals, quoted identifiers, comments and `::` casts are left alone).
+   */
+  static bind(sql: string, p?: SqlParams): { text: string; values: unknown[] } {
+    if (!p) return { text: sql, values: [] };
+    if (Array.isArray(p)) return { text: sql, values: p };
+    const values: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(p)) values[k.replace(/^[:@$]/, '')] = v;
+    try {
+      const r = namedToPositional(sql, values, 'postgres');
+      return { text: r.sql, values: r.params };
+    } catch (e) {
+      throw new DbError(`PostgreSQL named binds: ${(e as Error).message} (binds given: ${Object.keys(values).join(', ') || 'none'})`, 'DB_BIND');
+    }
   }
 
   private async on(target: any, sql: string, p?: SqlParams) {
     checkSql(sql);
+    const { text, values } = PostgresDbClient.bind(sql, p);
     try {
-      return await target.query(sql, PostgresDbClient.params(p));
+      return await target.query(text, values);
     } catch (e) {
-      if (e instanceof NotSupportedError) throw e;
-      throw new DbError(`[${this.name}] ${(e as Error).message}`, 'DB_QUERY');
+      const pe = e as { message?: string; code?: string; detail?: string; hint?: string };
+      const extra = [pe.code ? `SQLSTATE ${pe.code}` : '', pe.detail ? `detail: ${pe.detail}` : '', pe.hint ? `hint: ${pe.hint}` : ''].filter(Boolean).join('; ');
+      throw new DbError(`[${this.name}] ${pe.message ?? String(e)}${extra ? ` (${extra})` : ''}`, 'DB_QUERY', pe.code ? { sqlState: pe.code } : undefined);
     }
   }
 
@@ -350,18 +389,12 @@ export class PostgresDbClient implements DbClient {
   }
 }
 
-export interface MssqlOptions {
+export interface MssqlOptions extends MssqlSettings {
   name?: string;
-  server: string;
-  port?: number;
-  database?: string;
-  user?: string;
-  password?: string;
-  /** TLS on and certificates verified by default. */
-  encrypt?: boolean;
-  trustServerCertificate?: boolean;
   /** The loaded `mssql` module (tests and bundlers); normally loaded on demand. */
   driverModule?: unknown;
+  /** HTTP client and authority for `tokenSource: eztest` Entra tokens (tests). */
+  entra?: EntraTokenDeps;
 }
 
 export class MssqlDbClient implements DbClient {
@@ -377,17 +410,19 @@ export class MssqlDbClient implements DbClient {
   }
 
   static async connect(o: MssqlOptions): Promise<MssqlDbClient> {
-    const mssql = (o.driverModule as any) ?? (await loadDriver('mssql', 'SQL Server'));
-    const pool = new mssql.ConnectionPool({
-      server: o.server,
-      port: o.port,
-      database: o.database,
-      user: o.user,
-      password: o.password,
-      options: { encrypt: o.encrypt ?? true, trustServerCertificate: o.trustServerCertificate ?? false },
-    });
-    await pool.connect();
-    return new MssqlDbClient(o.name ?? 'mssql', mssql, pool);
+    const { name, driverModule, entra, ...settings } = o;
+    const merged = mergeMssqlSettings(settings);
+    const { module, config } = mssqlDriverConfig(merged, entra);
+    const mssql = (driverModule as any) ?? (await loadDriver(module, module === 'mssql' ? 'SQL Server' : 'SQL Server integrated (Kerberos) authentication'));
+    const pool = new mssql.ConnectionPool(config);
+    try {
+      await pool.connect();
+    } catch (e) {
+      const err = e as Error & { code?: string; originalError?: { message?: string; errors?: Array<{ message?: string }> } };
+      const inner = [err.originalError?.message, ...(err.originalError?.errors ?? []).map((x) => x.message)].filter((m): m is string => !!m && m !== err.message);
+      throw new DbError(`[${name ?? 'mssql'}] cannot connect to SQL Server ${String(config.server)}: ${[err.message, ...inner].join('; ')}`, 'DB_CONNECT', { auth: (merged.authentication ?? { type: 'sql' }).type,...(err.code ? { driverCode: err.code } : {}) });
+    }
+    return new MssqlDbClient(name ?? 'mssql', mssql, pool);
   }
 
   private async on(target: any, sqlText: string, p?: SqlParams) {
@@ -472,16 +507,44 @@ export interface DbRegistryOptions {
 }
 
 const SECRET_FIELDS = ['password', 'walletPassword', 'connectionString', 'user'] as const;
+/** Secret-bearing fields of a SQL Server `authentication` block. */
+const AUTH_SECRET_FIELDS = ['clientSecret', 'token', 'clientId', 'tenantId'] as const;
+/** secret://store/key inside a connection string (ADO.NET "Password=secret://vault/PW;" or a URL query value). */
+const EMBEDDED_SECRET = /secret:\/\/[A-Za-z0-9_.-]+\/[^;&'"{}\s]+/g;
 
-/** A connection spec with secret:// references in password-like fields resolved. */
+/** A connection spec with secret:// references in password-like fields (and inside a connection string) resolved. */
 export async function resolveSpecSecrets(spec: DbConnectionSpec, resolveSecret?: (ref: string) => Promise<string>): Promise<DbConnectionSpec> {
   const out: Record<string, unknown> = { ...spec };
+  const resolve = async (ref: string, field: string): Promise<string> => {
+    if (!resolveSecret) throw new DbError(`Connection field "${field}" is a secret reference but no secret store is configured`, 'DB_CONFIG');
+    return resolveSecret(ref);
+  };
   for (const f of SECRET_FIELDS) {
     const v = out[f];
-    if (typeof v === 'string' && v.startsWith('secret://')) {
-      if (!resolveSecret) throw new DbError(`Connection field "${f}" is a secret reference but no secret store is configured`, 'DB_CONFIG');
-      out[f] = await resolveSecret(v);
+    if (typeof v === 'string' && v.startsWith('secret://') && !(f === 'connectionString' && /[;=?]/.test(v))) out[f] = await resolve(v, f);
+  }
+  const cs = out.connectionString;
+  if (typeof cs === 'string' && EMBEDDED_SECRET.test(cs)) {
+    EMBEDDED_SECRET.lastIndex = 0;
+    const url = /^(?:mssql|sqlserver|postgres|postgresql):\/\//i.test(cs);
+    let text = '';
+    let at = 0;
+    for (const m of cs.matchAll(EMBEDDED_SECRET)) {
+      const value = await resolve(m[0], 'connectionString');
+      // Keep the string parseable: URL values are percent-encoded, ADO.NET values with ; or quotes are braced.
+      text += cs.slice(at, m.index) + (url ? encodeURIComponent(value) : /[;'"{}]|^\s|\s$/.test(value) ? `{${value.replace(/}/g, '}}')}}` : value);
+      at = (m.index ?? 0) + m[0].length;
     }
+    out.connectionString = text + cs.slice(at);
+  }
+  const auth = out.authentication;
+  if (auth && typeof auth === 'object') {
+    const a: Record<string, unknown> = { ...(auth as Record<string, unknown>) };
+    for (const f of AUTH_SECRET_FIELDS) {
+      const v = a[f];
+      if (typeof v === 'string' && v.startsWith('secret://')) a[f] = await resolve(v, `authentication.${f}`);
+    }
+    out.authentication = a;
   }
   return out as DbConnectionSpec;
 }

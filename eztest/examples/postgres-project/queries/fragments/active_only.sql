@@ -1,0 +1,1 @@
+AND c.status = 'ACTIVE'
