@@ -185,6 +185,10 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
       while (i + 1 < lines.length && /^\s*\|/.test(lines[i + 1])) rows.push(tableCells(lines[++i]));
       if (rows.length < 2) fail(where, line, lineNumber, 'Examples: needs a header row and at least one data row ("| user | password |")');
       const [head, ...body] = rows;
+      head.forEach((h, k) => {
+        const first = head.indexOf(h);
+        if (first !== k) fail(where, line, lineNumber, `Examples: the column "${h}" appears twice in the header (columns ${first + 1} and ${k + 1}); give every column its own name`);
+      });
       j.examples = body.map((r, n) => {
         if (r.length !== head.length) fail(`${src}line ${lineNumber + n + 2}`, line, lineNumber + n + 2, `row has ${r.length} cells, header has ${head.length}`);
         return Object.fromEntries(head.map((h, k) => [h, r[k]]));

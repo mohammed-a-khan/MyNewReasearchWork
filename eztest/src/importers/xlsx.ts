@@ -30,11 +30,29 @@ export interface XlsxTable {
   rows: XlsxRow[];
 }
 
-/** Flatten an exceljs cell value to text. */
-export function cellText(v: unknown): string {
+/**
+ * A number as the cell shows it: rounded to the decimals of its number format (`0.00`, `#,##0.0`,
+ * `0.0%` ...), else to Excel's 15 significant digits, so binary floating-point noise such as
+ * 0.1 + 0.2 = 0.30000000000000004 never reaches the data.
+ */
+export function numberText(v: number, numFmt?: string): string {
+  if (!Number.isFinite(v)) return String(v);
+  const fmt = (numFmt ?? '').split(';')[0].replace(/"[^"]*"|\\.|\[[^\]]*\]/g, '');
+  const sig = Number(v.toPrecision(15));
+  if (fmt && !/General|E[+-]|@/i.test(fmt) && /[0#?]/.test(fmt)) {
+    const decimals = (/\.([0#?]+)/.exec(fmt)?.[1].length ?? 0) + (fmt.includes('%') ? 2 : 0);
+    // Decimal rounding on the digits (1.005 with "0.00" shows 1.01, as in Excel), not on the binary value.
+    const rounded = String(sig).includes('e') ? Number(sig.toFixed(decimals)) : Number(`${Math.round(Number(`${sig}e${decimals}`))}e-${decimals}`);
+    return String(Number.isFinite(rounded) ? rounded : sig);
+  }
+  return String(sig);
+}
+
+/** Flatten an exceljs cell value to text (`numFmt`: the cell's number format, for numbers). */
+export function cellText(v: unknown, numFmt?: string): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'string') return v;
-  if (typeof v === 'number') return String(v);
+  if (typeof v === 'number') return numberText(v, numFmt);
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
   if (v instanceof Date) {
     const iso = v.toISOString();
@@ -43,7 +61,7 @@ export function cellText(v: unknown): string {
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
     if (Array.isArray(o.richText)) return (o.richText as Array<{ text?: string }>).map((r) => r.text ?? '').join('');
-    if ('formula' in o || 'sharedFormula' in o) return cellText(o.result);
+    if ('formula' in o || 'sharedFormula' in o) return cellText(o.result, numFmt);
     if ('error' in o) return String(o.error);
     if ('text' in o) return cellText(o.text);
     if ('hyperlink' in o) return String(o.hyperlink);
@@ -69,7 +87,7 @@ export async function readXlsxTable(input: string | Uint8Array | ArrayBuffer, op
     throw new Error(`readXlsx: worksheet ${JSON.stringify(opts.sheet ?? 1)} not found (have: ${wb.worksheets.map((w) => w.name).join(', ')})`);
   }
   const width = ws.columnCount;
-  const textAt = (r: number, c: number) => cellText(ws.getCell(r, c).value).trim();
+  const textAt = (r: number, c: number) => { const cell = ws.getCell(r, c); return cellText(cell.value, cell.numFmt).trim(); };
   let headerRow = opts.headerRow;
   if (!headerRow) {
     for (let r = 1; r <= ws.rowCount; r++) {
@@ -102,7 +120,8 @@ export async function readXlsxTable(input: string | Uint8Array | ArrayBuffer, op
     const merged: Record<string, MergePosition> = {};
     let any = false;
     for (let c = 1; c <= width; c++) {
-      const v = cellText(ws.getCell(r, c).value);
+      const cell = ws.getCell(r, c);
+      const v = cellText(cell.value, cell.numFmt);
       values[headers[c - 1]] = v;
       if (v.trim()) any = true;
       const m = masterOf(r, c);

@@ -25,7 +25,7 @@ export {
   importManualCsv, importManualXlsx, importManualRows, parseCsv, DEFAULT_MANUAL_COLUMNS,
   type ManualOptions, type ManualColumns, type ManualRow,
 } from './manual.js';
-export { readXlsx, readXlsxTable, cellText, type ReadXlsxOptions, type XlsxRow, type XlsxTable, type MergePosition } from './xlsx.js';
+export { readXlsx, readXlsxTable, cellText, numberText, type ReadXlsxOptions, type XlsxRow, type XlsxTable, type MergePosition } from './xlsx.js';
 export { importTaskRecorder, type TaskRecorderOptions } from './task-recorder.js';
 export {
   verifyImported, coverageEquivalence, verifiedRunOf,
