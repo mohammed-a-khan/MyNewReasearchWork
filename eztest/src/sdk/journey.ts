@@ -2,6 +2,7 @@
  * `journey()`, `step()`, `run()`, `soft()` and `codeStep()`.
  */
 import { api } from './api.js';
+import { graphql } from './graphql.js';
 import { callSite } from './callsite.js';
 import { data } from './data.js';
 import { dates } from './dates.js';
@@ -84,4 +85,4 @@ export function todo(reason: string, where?: string): any {
 }
 
 /** The context object every journey and code step receives. */
-export const sdk: SdkContext = { ui, api, db, data, files, dates, identity, vars, log, expect, step, run, soft, actors };
+export const sdk: SdkContext = { ui, api, graphql, db, data, files, dates, identity, vars, log, expect, step, run, soft, actors };

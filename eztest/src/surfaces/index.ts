@@ -4,6 +4,8 @@ export * from './proxy.js';
 export * from './jsonpath.js';
 export * from './assertions.js';
 export * from './graphql.js';
+export * from './graphql-schema.js';
+export * from './graphql-ws.js';
 export * from './soap.js';
 export * from './ws.js';
 export * from './db.js';
