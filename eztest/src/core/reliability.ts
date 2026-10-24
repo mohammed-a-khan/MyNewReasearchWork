@@ -14,6 +14,8 @@ export interface StepReliability {
   waits: Array<{ cause: FlakeCause; ms: number; detail?: string }>;
   /** Problems the step recovered from (re-resolved a re-rendered element, re-typed a lost value, re-logged in...). */
   recovered: Array<{ cause: FlakeCause; detail: string }>;
+  /** Deadlines extended because the machine was under load (src/runner/reliability/load.ts): what, from, to, why. */
+  extended?: Array<{ what: string; baseMs: number; ms: number; reason: string }>;
 }
 
 export interface FlakeClassification {

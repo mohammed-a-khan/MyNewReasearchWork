@@ -42,6 +42,7 @@ import { runCodeJourney } from './code-host.js';
 import { bddRecord } from './bdd-run.js';
 import { applyJourneyClock, clockVars, usesClock } from './clock.js';
 import { manualSummary } from './manual.js';
+import { adaptiveTimeout, startLoadSampling, type Probeable } from './reliability/load.js';
 
 export interface JourneyRunEnv extends StepRuntime {
   runId: string;
@@ -180,6 +181,8 @@ export function withJourneyLenses(journey: Journey, env: JourneyRunEnv): Journey
 }
 
 export async function runJourneyAttempt(journey: Journey, attempt: number, runEnv: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult> {
+  // Load measurement for adaptive deadlines starts with the first journey (reliability/load.ts).
+  startLoadSampling();
   const env = withJourneyLenses(journey, runEnv);
   const { opts, evidence } = env;
   const started = Date.now();
@@ -405,8 +408,9 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
       // Args are the journey's own variables (Examples rows and the Variables header), not run-level variables.
       const storyArgs: Record<string, unknown> = { ...journey.variables };
       const url = opts.storyHarness.urlFor(journey.story.id, storyArgs);
-      await session.page.goto(url, { timeout: env.stepTimeoutMs });
-      await session.page.locator('#ez-root[data-ez-story-ready], #ez-root[data-ez-story-error]').first().waitFor({ timeout: env.stepTimeoutMs }).catch(() => undefined);
+      const t = await adaptiveTimeout(env.stepTimeoutMs, { what: `open story ${journey.story.id}`, probe: session.page as unknown as Probeable, onExtend: (e) => env.logger.warn('deadline extended under load', { journeyId: jid, ...e }) });
+      await session.page.goto(url, { timeout: t });
+      await session.page.locator('#ez-root[data-ez-story-ready], #ez-root[data-ez-story-error]').first().waitFor({ timeout: t }).catch(() => undefined);
       const err = await session.page.locator('#ez-root').getAttribute('data-ez-story-error').catch(() => null);
       if (err) throw new Error(`story "${journey.story.id}" failed to mount: ${err}`);
     }

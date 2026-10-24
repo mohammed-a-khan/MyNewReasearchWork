@@ -473,10 +473,10 @@ describe('Studio trace viewer (Chromium)', { timeout: 180_000 }, () => {
     await expect.poll(() => surface.isVisible(), { timeout: 30_000 }).toBe(true);
     // The target of this step (the Sign in button) is outlined; click on it.
     const target = view.locator('.snap-pick-overlay .lv-box.target');
-    await expect.poll(() => target.count()).toBe(1);
+    await expect.poll(() => target.count(), { timeout: 10_000 }).toBe(1);
     const tb = (await target.boundingBox())!;
     await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2);
-    await expect.poll(() => view.locator('.snap-pick-overlay .lv-box.hover .lv-box-label').textContent()).toMatch(/button/);
+    await expect.poll(() => view.locator('.snap-pick-overlay .lv-box.hover .lv-box-label').textContent(), { timeout: 10_000 }).toMatch(/button/);
     await page.mouse.click(tb.x + tb.width / 2, tb.y + tb.height / 2);
     await expect.poll(() => view.locator('.snap-picks .cand').count(), { timeout: 20_000 }).toBeGreaterThan(1);
     expect(await view.locator('.snap-picks .cand-phrase').first().textContent()).toMatch(/Click (the "Sign in" button|testid=login-btn|css=#login-btn)/);

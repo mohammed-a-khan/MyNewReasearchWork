@@ -11,6 +11,7 @@ import { describeCandidate, rootFor, targetLocators } from './locate.js';
 import { evaluateAdvancedCondition, framesOf } from './conditions-advanced.js';
 import type { BrowserSession } from './session.js';
 import { activeSurface } from './surface.js';
+import { AdaptiveDeadline, type Extension, type Probeable } from './reliability/load.js';
 
 export interface ConditionEnv {
   page: Page;
@@ -195,8 +196,9 @@ export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Pr
 }
 
 /** Evaluate all conditions, polling until every one holds or `timeoutMs` elapses. */
-export async function evaluateConditions(conds: Condition[], env: ConditionEnv, timeoutMs: number): Promise<ConditionResult[]> {
-  const deadline = Date.now() + timeoutMs;
+export async function evaluateConditions(conds: Condition[], env: ConditionEnv, timeoutMs: number, onExtend?: (e: Extension) => void): Promise<ConditionResult[]> {
+  // Extended in proportion to the load measured while it polls (reliability/load.ts).
+  const deadline = new AdaptiveDeadline(timeoutMs, { what: 'post-conditions', ...(env.page ? { probe: env.page as Probeable } : {}), ...(onExtend ? { onExtend } : {}) });
   for (;;) {
     const results: ConditionResult[] = [];
     for (const c of conds) {
@@ -206,7 +208,7 @@ export async function evaluateConditions(conds: Condition[], env: ConditionEnv, 
         results.push(fail(c, `error evaluating ${c.type}: ${(e as Error).message.split('\n')[0]}`));
       }
     }
-    if (results.every((r) => r.passed) || Date.now() >= deadline) return results;
-    await sleep(Math.min(150, Math.max(10, deadline - Date.now())));
+    if (results.every((r) => r.passed) || (await deadline.reached())) return results;
+    await sleep(Math.min(150, Math.max(10, deadline.remaining())));
   }
 }

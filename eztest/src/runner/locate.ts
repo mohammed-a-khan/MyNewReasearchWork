@@ -6,6 +6,7 @@
 import type { FrameLocator, Locator, Page } from '../browser/index.js';
 import { NotSupportedError, interpolate, sleep, type LocatorCandidate, type Target, type TargetScope } from '../core/index.js';
 import { fillXPath } from './reliability/xpath.js';
+import { AdaptiveDeadline, type Extension, type Probeable } from './reliability/load.js';
 
 /** Where locators are built from: the page, a (nested) frame, or a container element (scoped targets). */
 export type LocatorRoot = Page | FrameLocator | Locator;
@@ -189,8 +190,10 @@ export async function resolveTarget(
   target: Target,
   vars: Record<string, unknown>,
   timeoutMs: number,
+  /** Adaptive deadline (reliability/load.ts): the page to probe, and who to tell when the wait was extended. */
+  adapt?: { probe?: Probeable; onExtend?: (e: Extension) => void },
 ): Promise<Resolution> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = new AdaptiveDeadline(timeoutMs, { what: `locate ${target.description}`, ...adapt });
   let notes: string[] = [];
   let ambiguous = false;
   let tried: NonNullable<Resolution['tried']> = [];
@@ -207,8 +210,8 @@ export async function resolveTarget(
     if (scoped) {
       scope = await resolveScope(root, target, vars);
       if (!scope.ok) {
-        if (Date.now() >= deadline) return { notes: scope.notes, ambiguous: scope.ambiguous, tried, scope };
-        await sleep(Math.min(200, Math.max(10, deadline - Date.now())));
+        if (await deadline.reached()) return { notes: scope.notes, ambiguous: scope.ambiguous, tried, scope };
+        await sleep(Math.min(200, Math.max(10, deadline.remaining())));
         continue;
       }
     }
@@ -229,8 +232,8 @@ export async function resolveTarget(
       if (n > 1) ambiguous = true;
       notes.push(n === 0 ? `${describeCandidate(c)}: no match` : `${describeCandidate(c)}: ${n} matches (ambiguous, skipped)`);
     }
-    if (Date.now() >= deadline) return { notes, ambiguous, tried, ...(scope ? { scope } : {}) };
-    await sleep(Math.min(200, Math.max(10, deadline - Date.now())));
+    if (await deadline.reached()) return { notes, ambiguous, tried, ...(scope ? { scope } : {}) };
+    await sleep(Math.min(200, Math.max(10, deadline.remaining())));
   }
 }
 
