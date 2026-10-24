@@ -195,6 +195,24 @@ export interface JourneyResult {
   manual?: JourneyManualSummary;
   /** Present for Gherkin scenarios (`.feature` files): feature, rule, scenario and Examples row. */
   bdd?: JourneyBddRecord;
+  /** Every attempt when the journey was retried (the result itself is the last one); reports diff them. */
+  attempts?: AttemptSummary[];
+  /**
+   * Where the test sits in a suite tree, outermost first (e.g. BDD feature, rule, scenario outline).
+   * Reports group by it; without it they group by the journey file's folders.
+   */
+  suitePath?: Array<{ kind: string; name: string }>;
+}
+
+/** One attempt of a retried journey. */
+export interface AttemptSummary {
+  attempt: number;
+  status: JourneyStatus;
+  startedAt: string;
+  durationMs: number;
+  failedStepId?: string;
+  error?: string;
+  steps: Array<{ stepId: string; intent: string; status: StepStatus; durationMs: number }>;
 }
 
 export interface RunSummary {

@@ -42,6 +42,17 @@ identity:
 readiness:
   policyPath: readiness-policy.yaml
 
+# The HTML report (docs/reports.md). Default title and name: this folder's name.
+report:
+  # title: Shop web - regression
+  # name: Contoso Shop               # shown above the title
+  # logo: branding/logo.svg          # .svg/.png/.jpg/.gif/.webp under 512 KiB, embedded in the report
+  # brandColor: "#0b5cad"            # header mark and accents
+  baseline: previous                 # compare each run with the previous one
+
+# Video per journey attempt for the report's player: off, on or retain-on-failure.
+video: retain-on-failure
+
 # Team results server (eztest server): publish runs, share heal decisions, quarantine and history.
 # server:
 #   url: https://eztest.example.com

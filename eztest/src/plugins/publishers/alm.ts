@@ -42,10 +42,10 @@ async function publishJira(ctx: PublishContext): Promise<PublishResult> {
   for (const j of ctx.run.journeys.filter((x) => x.status === 'failed' || x.status === 'error')) {
     const v = verdicts.get(j.journeyId);
     if (v && !categories.includes(v.category)) continue;
-    results.push(await fileJiraBug({
+    results.push({ journeyId: j.journeyId, ...(await fileJiraBug({
       client, projectKey: need(o, 'projectKey', 'jira'), run: ctx.run, runDir: ctx.runDir, journeyId: j.journeyId, evidence, runUrl: ctx.runUrl,
       classification: v ? { category: v.category, confidence: v.confidence, reasons: v.reasons } : undefined, issueType: str(o, 'issueType'), dryRun: dry(ctx),
-    }));
+    })) });
   }
   const created = results.filter((r) => r.action === 'created').length;
   const commented = results.filter((r) => r.action === 'commented').length;

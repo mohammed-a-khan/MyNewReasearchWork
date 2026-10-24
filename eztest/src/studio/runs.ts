@@ -17,6 +17,7 @@ import { loadJourneys, filterJourneys, bddOptionsFrom, defaultJourneyPaths } fro
 import { expandBrowserMatrix } from '../runner/browsers.js';
 import { HistoryStore, scoreHistory, loadRunArtifacts, triageRun, readEvidenceManifest } from '../insights/index.js';
 import type { ReportFormat } from '../report/index.js';
+import { reportOptionsFromConfig } from '../engine/analyze.js';
 import { HttpError } from './http.js';
 import type { EventHub, StudioEvent } from './events.js';
 
@@ -280,6 +281,7 @@ export class RunManager {
         formats: formats.length ? (formats.includes('html') ? formats : [...formats, 'html']) : ['html', 'json'],
         ...(cfg.vcs.branchScope.history && result.environment?.gitBranch ? { historyBranch: result.environment.gitBranch } : {}),
         journeys, uiCoverage: cfg.coverage.ui, a11yScopes: cfg.accessibility.scopes,
+        ...reportOptionsFromConfig(cfg, this.ctx.cwd),
       });
     } catch (e) {
       this.emit(run, 'warning', { message: `Analysis failed: ${(e as Error).message}` }, masker);

@@ -2,11 +2,15 @@
  * After-run analysis pipeline: history -> flaky scores -> triage -> readiness
  * -> reports. Used by `eztest run` and `eztest analyze <runDir>`.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadRunArtifacts, HistoryStore, scoreHistory, failureSignature, triageRun, loadReadinessPolicy, evaluateReadiness, loadQuarantine, quarantineStatus, readinessByBrowser } from '../insights/index.js';
 import type { FlakyScore, TriageReport, ReadinessResult, QuarantineStatus } from '../insights/index.js';
-import { writeReports, type ReportFormat } from '../report/index.js';
+import { writeReports, journeyFilesAndOwners, loadLogo, type ReportFormat, type ReportModelInput } from '../report/index.js';
+import { readFile } from 'node:fs/promises';
+import type { RunResult } from '../core/index.js';
+import type { EzTestConfig } from '../config/index.js';
+import { adoSettings } from '../alm-ado/config.js';
 import { contractReadinessInputs } from '../contracts/readiness.js';
 import { a11yReadinessInputs } from '../a11y/readiness.js';
 import { docsReadinessInputs } from '../docs/readiness.js';
@@ -16,7 +20,7 @@ import { failureTags, type JourneyFailureTags, type UiCoverageGateInput } from '
 import { recordUiCoverage, a11yIssuesOfRun, a11yTrend, type UiCoverageOptions, type UiCoverageReport, type A11yScope } from '../analytics/index.js';
 import type { Journey } from '../core/index.js';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 export interface AnalyzeOptions {
   /** History file shared across runs (default <outputDir>/../.eztest/history.json). */
@@ -37,6 +41,48 @@ export interface AnalyzeOptions {
   uiCoverage?: UiCoverageOptions | false;
   /** Accessibility scopes (config accessibility.scopes) for the new-issue comparison. */
   a11yScopes?: A11yScope[];
+  /** Report branding and options (config report.*). */
+  report?: { title?: string; name?: string; logo?: string; trendRuns?: number; baseline?: string; studioUrl?: string; brandColor?: string; videoPolicy?: string };
+  /** Azure DevOps settings for test case / work item links (config ado.*). */
+  ado?: ReportModelInput['ado'];
+  /** Jira base URL for issue links. */
+  jira?: ReportModelInput['jira'];
+  /** Project directory (journey files, CODEOWNERS, .eztest/requirements-ado.json). Default: two levels above the run directory. */
+  cwd?: string;
+  /** Environment for the run context (default process.env). */
+  env?: Record<string, string | undefined>;
+}
+
+/** The project's name for the report: package.json "name", else the folder name, as words ("shop-project" -> "Shop project"). */
+export function projectName(cwd: string): string {
+  let raw = basename(resolve(cwd));
+  try {
+    const pkg = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as { name?: string };
+    if (pkg.name) raw = pkg.name.replace(/^@[^/]+\//, '');
+  } catch {
+    // no package.json
+  }
+  const words = raw.replace(/[-_.]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'EZTest';
+}
+
+/** The run in the same output directory that started last before `run` (the comparison baseline). */
+async function previousRun(runDir: string, run: RunResult): Promise<RunResult | undefined> {
+  const out = resolve(runDir, '..');
+  let best: RunResult | undefined;
+  const names = (await readdir(out).catch(() => [] as string[])).filter((n) => n !== run.runId).sort().reverse().slice(0, 40);
+  for (const name of names) {
+    const p = join(out, name, 'run.json');
+    if (name === run.runId || !existsSync(p)) continue;
+    try {
+      const r = JSON.parse(await readFile(p, 'utf8')) as RunResult;
+      if (!Array.isArray(r.journeys) || !r.startedAt || r.startedAt >= run.startedAt) continue;
+      if (!best || r.startedAt > best.startedAt) best = r;
+    } catch {
+      // not a run
+    }
+  }
+  return best;
 }
 
 export interface AnalyzeResult {
@@ -52,6 +98,18 @@ export interface AnalyzeResult {
   uiCoverage?: UiCoverageReport;
   /** New-failure / always-failing / regressed / flaky tags of the run's failing journeys. */
   failureTags: JourneyFailureTags[];
+}
+
+/** Report options from the project configuration: report.*, ado.* (links) and the Jira publisher's base URL. */
+export function reportOptionsFromConfig(cfg: EzTestConfig, cwd: string, env: Record<string, string | undefined> = process.env): Pick<AnalyzeOptions, 'report' | 'ado' | 'jira' | 'cwd'> {
+  const s = adoSettings(cfg, env);
+  const jira = (cfg.publishers as Array<{ use?: string; baseUrl?: unknown }>).find((p) => p.use === 'jira' && typeof p.baseUrl === 'string');
+  return {
+    cwd,
+    report: { ...cfg.report, videoPolicy: cfg.video },
+    ...(s.collectionUrl && s.project ? { ado: { collectionUrl: s.collectionUrl, project: s.project, ...(cfg.ado.testPlanId ? { testPlanId: cfg.ado.testPlanId } : {}), ...(cfg.ado.testSuiteId ? { testSuiteId: cfg.ado.testSuiteId } : {}) } } : {}),
+    ...(jira ? { jira: { baseUrl: String(jira.baseUrl) } } : {}),
+  };
 }
 
 export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Promise<AnalyzeResult> {
@@ -145,14 +203,56 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
     }
   }
 
+  if (readiness && opts.recordHistory !== false && store.annotate(run.runId, { readiness: readiness.decision, readinessScore: readiness.score })) await store.save();
+  const cwd = opts.cwd ?? resolve(runDir, '..', '..');
+  const rep = opts.report ?? {};
+  let baseline: RunResult | undefined;
+  try {
+    if (rep.baseline && rep.baseline !== 'none' && rep.baseline !== 'previous') baseline = JSON.parse(await readFile(join(resolve(cwd, rep.baseline), 'run.json'), 'utf8')) as RunResult;
+    else if (rep.baseline !== 'none') baseline = await previousRun(runDir, run);
+  } catch (e) {
+    warnings.push(`report baseline not loaded: ${(e as Error).message}`);
+  }
+  let logo: string | undefined;
+  if (rep.logo) {
+    try {
+      logo = await loadLogo(resolve(cwd, rep.logo));
+    } catch (e) {
+      warnings.push((e as Error).message);
+    }
+  }
+  const fo = opts.journeys?.length ? await journeyFilesAndOwners(opts.journeys, cwd).catch(() => undefined) : undefined;
+  let requirementsCatalog: ReportModelInput['requirementsCatalog'];
+  const reqFile = join(cwd, '.eztest', 'requirements-ado.json');
+  if (existsSync(reqFile)) {
+    try {
+      const r = JSON.parse(await readFile(reqFile, 'utf8')) as { requirements?: Array<{ id: number | string; title?: string; url?: string }> };
+      requirementsCatalog = (r.requirements ?? []).map((x) => ({ id: String(x.id), ...(x.title ? { title: x.title } : {}), ...(x.url ? { url: x.url } : {}) }));
+    } catch {
+      // ignore an unreadable requirements list
+    }
+  }
   const reports = await writeReports(runDir, run, {
     formats: opts.formats ?? ['html', 'json', 'junit'],
-    title: opts.title,
+    title: opts.title ?? rep.title ?? `${rep.name ?? projectName(cwd)} test report`,
     triage,
     flaky,
     readiness,
     evidence,
     ...(contractInputs.apiCoverage ? { apiCoverage: contractInputs.apiCoverage.map((c) => c.report) } : {}),
+    history: scoped.runs,
+    failureTags: tags,
+    ...(baseline ? { baseline } : {}),
+    brand: { name: rep.name ?? projectName(cwd), ...(logo ? { logo } : {}), ...(rep.brandColor ? { color: rep.brandColor } : {}) },
+    ...(rep.videoPolicy ? { videoPolicy: rep.videoPolicy } : {}),
+    ...(rep.trendRuns ? { trendRuns: rep.trendRuns } : {}),
+    ...(rep.studioUrl ? { studioUrl: rep.studioUrl } : {}),
+    ...(fo ? { files: fo.files, owners: fo.owners } : {}),
+    ...(opts.ado ? { ado: opts.ado } : {}),
+    ...(opts.jira ? { jira: opts.jira } : {}),
+    ...(requirementsCatalog ? { requirementsCatalog } : {}),
+    ...(ui ? { uiCoverage: { percent: ui.report.totals.percent, tested: ui.report.totals.tested, elements: ui.report.totals.elements, pages: ui.report.totals.pages } } : {}),
+    ...(opts.env ? { env: opts.env } : {}),
   });
   return { runDir, triage, flaky, readiness, reports, warnings, quarantine: { ...qStatus, ignoredFailures }, ...(ui ? { uiCoverage: ui.report } : {}), failureTags: tags };
 }

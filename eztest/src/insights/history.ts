@@ -27,6 +27,11 @@ export interface RunHistoryEntry {
   branch?: string;
   /** Branch the entry was recorded on before `promote` relabelled it (promote-on-merge). */
   promotedFrom?: string;
+  /** Wall-clock duration of the run (reports: duration trend). */
+  durationMs?: number;
+  /** Readiness decision of the run, when one was made (reports: readiness history). */
+  readiness?: string;
+  readinessScore?: number;
 }
 
 export interface HistoryFile {
@@ -119,6 +124,7 @@ export class HistoryStore {
       runId: run.runId,
       startedAt: run.startedAt,
       ...(branch ? { branch } : {}),
+      ...(Number.isFinite(run.durationMs) ? { durationMs: run.durationMs } : {}),
       outcomes: run.journeys.map((j) => ({
         journeyId: j.journeyId,
         status: j.status,
@@ -172,6 +178,16 @@ export class HistoryStore {
       n++;
     }
     return n;
+  }
+
+  /** Record the readiness decision of a run already in history (no-op when the run is not there). */
+  annotate(runId: string, a: { readiness?: string; readinessScore?: number }): boolean {
+    this.assertLoaded();
+    const r = this.data.runs.find((x) => x.runId === runId);
+    if (!r) return false;
+    if (a.readiness) r.readiness = a.readiness;
+    if (a.readinessScore !== undefined) r.readinessScore = a.readinessScore;
+    return true;
   }
 
   journeyIds(): string[] {

@@ -878,6 +878,25 @@ export const EzTestConfigSchema = z.object({
       minPassRate: z.number().min(0).max(1).optional(),
     })
     .prefault({}),
+  /** The HTML report (docs/reports.md): branding, the trend window, the comparison baseline and the Studio link. */
+  report: z
+    .object({
+      /** Report title (default "<name> test report"). */
+      title: z.string().min(1).optional(),
+      /** Project or product name in the report header (default "EZTest"). */
+      name: z.string().min(1).optional(),
+      /** Logo file (.svg, .png, .jpg, .gif, .webp; < 512 KiB), embedded into the report. */
+      logo: z.string().min(1).optional(),
+      /** Runs in the pass-rate and duration trends. */
+      trendRuns: z.number().int().min(2).max(200).default(20),
+      /** Comparison baseline: the previous run in the output directory, none, or a run directory. */
+      baseline: z.string().min(1).default('previous'),
+      /** EZTest Studio URL for "open trace in Studio" links. */
+      studioUrl: z.string().url().optional(),
+      /** Brand colour (#rrggbb) for the report header mark and accents. */
+      brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').optional(),
+    })
+    .prefault({}),
   /** Results server for publishing runs, shared team state and cross-machine locks. */
   server: ServerClientSchema.optional(),
   locks: LocksSchema.prefault({}),

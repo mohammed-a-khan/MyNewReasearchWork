@@ -122,10 +122,12 @@ End
     expect(j.ledger.second).toBe('yes');
     const depths = flattenStepResults(j.steps).map((r) => r.depth);
     expect(Math.max(...depths)).toBe(3);
-    // The HTML report lists nested steps indented.
+    // The report keeps nested steps nested (the HTML report renders them indented under their block).
     const paths = await writeReports(join(out, run.runId), run, { formats: ['html'] });
-    const html = await readFile(paths.html!, 'utf8');
-    expect(html).toContain('data-depth="3"');
+    const model = JSON.parse(await readFile(join(out, run.runId, 'report-model.json'), 'utf8'));
+    const depth = (steps: Array<{ ch?: unknown[] }>, d = 0): number => Math.max(d, ...steps.map((s) => (s.ch ? depth(s.ch as Array<{ ch?: unknown[] }>, d + 1) : d)));
+    expect(depth(model.tests[0].steps)).toBe(3);
+    expect(await readFile(paths.html!, 'utf8')).toContain('"ch":[');
   });
 
   it('runs sub-journeys with parameters and return values, and hooks before/after each journey and all journeys', async () => {

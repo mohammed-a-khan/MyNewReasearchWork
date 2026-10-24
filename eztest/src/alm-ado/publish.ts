@@ -660,3 +660,25 @@ function commonPrefix(ids: string[]): string {
   for (const id of ids) while (!id.startsWith(p)) p = p.slice(0, -1);
   return p.replace(/-+$/, '') || ids[0];
 }
+
+/**
+ * Attach files to an existing test run (e.g. the HTML report rendered again with the run's links after
+ * publishing). A file already attached under the same name is replaced only when `replace` is set;
+ * ADO keeps attachments, so a re-attach adds a new one.
+ */
+export async function attachRunFiles(c: AdoClient, runId: number, files: Array<{ path: string; comment?: string }>, o: { maxBytes?: number } = {}): Promise<Array<{ fileName: string; action: 'uploaded' | 'skipped'; reason?: string }>> {
+  const out: Array<{ fileName: string; action: 'uploaded' | 'skipped'; reason?: string }> = [];
+  const max = o.maxBytes ?? 25 * 1024 * 1024;
+  for (const f of files) {
+    const fileName = basename(f.path);
+    const size = (await stat(f.path)).size;
+    if (size > max) {
+      out.push({ fileName, action: 'skipped', reason: `${size} bytes exceeds ${max}` });
+      continue;
+    }
+    const stream = (await readFile(f.path)).toString('base64');
+    await c.request('POST', `/_apis/test/Runs/${runId}/attachments`, { body: { stream, fileName, attachmentType: 'GeneralAttachment', comment: f.comment } });
+    out.push({ fileName, action: 'uploaded' });
+  }
+  return out;
+}

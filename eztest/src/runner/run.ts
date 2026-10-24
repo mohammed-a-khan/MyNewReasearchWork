@@ -349,6 +349,17 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   const finalize = async (j: Journey, attempts: JourneyResult[], summary?: Array<{ journeyId: string; status: string; handoff: string[] }>): Promise<JourneyResult> => {
     const r = attempts[attempts.length - 1];
     if (summary) (r.reliability ??= {}).dependsOn = summary;
+    // Reports show each attempt of a retried journey and the difference between them.
+    if (attempts.length > 1) {
+      r.attempts = attempts.map((a) => {
+        const bad = a.steps.find((s) => s.status === 'failed' || s.status === 'blocked');
+        return {
+          attempt: a.attempt, status: a.status, startedAt: a.startedAt, durationMs: a.durationMs,
+          ...(bad ? { failedStepId: bad.stepId } : {}), ...((bad?.error ?? a.error) ? { error: (bad?.error ?? a.error)!.message.slice(0, 1000) } : {}),
+          steps: a.steps.map((s) => ({ stepId: s.stepId, intent: s.intent, status: s.status, durationMs: s.durationMs })),
+        };
+      });
+    }
     const failed = attempts.slice(0, -1).filter((a) => !passed(a));
     const last = failed[failed.length - 1];
     if (last && passed(r)) {
