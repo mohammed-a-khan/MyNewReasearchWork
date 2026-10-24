@@ -92,7 +92,10 @@ const PROBE = String.raw`(el, opts) => new Promise(function (resolve) {
       var x = r2.left + r2.width / 2, y = r2.top + r2.height / 2;
       var root = el.getRootNode && el.getRootNode();
       var hit = root && root.elementFromPoint ? root.elementFromPoint(x, y) : document.elementFromPoint(x, y);
-      var mine = !hit || hit === el || el.contains(hit) || (hit.control && hit.control === el) || (el.labels && Array.prototype.indexOf.call(el.labels, hit) >= 0) || (hit.contains && hit.contains(el) && hit.tagName === 'LABEL');
+      // A custom checkbox or radio draws a span over its hidden input inside the same <label>: a click there is
+      // a click on the label, which checks the input, so the decoration is part of the control, not an overlay.
+      var hitLabel = hit && hit.closest ? hit.closest('label') : null;
+      var mine = !hit || hit === el || el.contains(hit) || (hit.control && hit.control === el) || (el.labels && Array.prototype.indexOf.call(el.labels, hit) >= 0) || (hit.contains && hit.contains(el) && hit.tagName === 'LABEL') || (hitLabel && hitLabel.control === el);
       if (!mine) {
         var layer = looksOverlay(hit);
         out.obscuredBy = describe(layer || hit);

@@ -1,0 +1,35 @@
+Journey: New hire from the CSV is created through the UI and stored correctly
+Tags: @orangehrm @ui @db @data
+Role: admin
+Variables: empId=${tag}${key}, lastName=${last}${tag}
+
+Log in
+Open /web/index.php/pim/addEmployee
+Type "${first}" into the "First Name" field
+Type "${middle}" into the "Middle Name" field
+Type "${lastName}" into the "Last Name" field
+Clear the "Employee Id" field
+Type "${empId}" into the "Employee Id" field
+Watch for toasts
+Click the "Save" button
+Expect a toast containing "Successfully Saved"
+Expect the URL contains "/pim/viewPersonalDetails/empNumber/"
+
+Choose "${nationality}" in the Nationality select box
+Choose "${marital}" in the "Marital Status" select box
+Pick ${birthday} in the "Date of Birth" date picker
+Check the "${gender}" radio button
+Click the "Save" button in the "Personal Details" section
+Expect a toast containing "Successfully Updated"
+
+Wait until query "SELECT 1 FROM hs_hr_employee WHERE employee_id = '${empId}' AND emp_birthday IS NOT NULL" on hr returns 1 row within 15 seconds
+Run query "SELECT e.emp_firstname AS first, e.emp_middle_name AS middle, e.emp_lastname AS lastName, e.emp_marital_status AS marital, n.name AS nationality, e.emp_birthday AS birthday, CASE e.emp_gender WHEN 1 THEN 'Male' WHEN 2 THEN 'Female' END AS gender FROM hs_hr_employee e LEFT JOIN ohrm_nationality n ON n.id = e.nation_code WHERE e.employee_id = '${empId}'" on hr as stored
+Expect ${stored.0.first} equals "${first}"
+Expect ${stored.0.middle} equals "${middle}"
+Expect ${stored.0.lastName} equals "${lastName}"
+Expect ${stored.0.marital} equals "${marital}"
+Expect ${stored.0.nationality} equals "${nationality}"
+Expect ${stored.0.birthday} equals "${birthday}"
+Expect ${stored.0.gender} equals "${gender}"
+
+Examples: from data "data/new-hires.csv" where runFlag = Yes

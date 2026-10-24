@@ -1,0 +1,37 @@
+Journey: Add an employee through the UI and find the row in hs_hr_employee
+Tags: @orangehrm @ui @db
+Role: admin
+Variables: first=Mira, last=Okafor${tag}, empId=${tag}1
+
+Log in
+Open /web/index.php/pim/addEmployee
+Type "${first}" into the "First Name" field
+Type "${last}" into the "Last Name" field
+Clear the "Employee Id" field
+Type "${empId}" into the "Employee Id" field
+Upload "files/photo.png" to the "profile picture"
+Watch for toasts
+Click the "Save" button
+Expect a toast containing "Successfully Saved"
+Expect the URL contains "/pim/viewPersonalDetails/empNumber/"
+
+Wait until query "SELECT emp_number FROM hs_hr_employee WHERE employee_id = '${empId}'" on hr returns 1 row within 15 seconds
+Get the first row of query "SELECT emp_number, emp_firstname, emp_lastname, employee_id FROM hs_hr_employee WHERE employee_id = '${empId}'" on hr as emp
+Expect ${emp.emp_firstname} equals "${first}"
+Expect ${emp.emp_lastname} equals "${last}"
+Get the value of query "SELECT LENGTH(epic_picture) AS bytes FROM hs_hr_emp_picture WHERE emp_number = ${emp.emp_number}" on hr as photoBytes
+Expect ${photoBytes} > 1000
+
+# Personal details: Vue oxd select dropdowns, a date input, radio buttons; two forms on the page have a Save button
+Choose "Nigerian" in the Nationality select box
+Choose "Married" in the "Marital Status" select box
+Pick 1990-04-15 in the "Date of Birth" date picker
+Check the "Female" radio button
+Click the "Save" button in the "Personal Details" section
+Expect a toast containing "Successfully Updated"
+Wait until query "SELECT emp_number FROM hs_hr_employee WHERE emp_number = ${emp.emp_number} AND emp_birthday IS NOT NULL" on hr returns 1 row within 15 seconds
+Get the first row of query "SELECT e.emp_birthday, e.emp_marital_status, e.emp_gender, n.name AS nationality FROM hs_hr_employee e LEFT JOIN ohrm_nationality n ON n.id = e.nation_code WHERE e.emp_number = ${emp.emp_number}" on hr as details
+Expect ${details.emp_birthday} equals "1990-04-15"
+Expect ${details.emp_marital_status} equals "Married"
+Expect ${details.emp_gender} equals 2
+Expect ${details.nationality} equals "Nigerian"

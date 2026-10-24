@@ -100,9 +100,13 @@ export const QUERY_RULES: IntentRule[] = category([
     re: new RegExp(String.raw`^(?:expect|verify|assert|ensure|confirm|check\s+that)\s+(?:that\s+)?(?:the\s+)?(?:named\s+)?query\s+(${Q})${CONN}(?:\s+with\s+(.+?))?\s+returns?\s+${COUNT}$`, 'i'),
     build: (m, q): StepBody | undefined => {
       const name = queryName(m[1], q);
-      if (!name) return undefined;
-      const key = ledgerKey(name);
       const c = counted(m, 4);
+      if (!name) {
+        // Inline SQL: `Expect query "SELECT ..." on hr returns 3 rows` (its ${var} values are bound at run time).
+        if (!m[2] || m[3]) return undefined;
+        return { action: 'db', db: { connection: m[2], sql: literal(m[1], q) }, captureAs: 'query_rows', postconditions: [countCondition('query_rows', c.kind, c.n)] };
+      }
+      const key = ledgerKey(name);
       return { action: 'db', db: db(name, m[2], parseQueryArgs(m[3], q)), captureAs: key, postconditions: [countCondition(key, c.kind, c.n)] };
     } },
   { name: 'named-query-wait', keywords: ['wait', 'poll'], example: 'Wait until query "INVOICE_POSTED" on ledger with invoice_no=${no} returns 1 row within 30 seconds',
@@ -210,9 +214,9 @@ export function querySugarIntent(s: Record<string, unknown>): string | undefined
 }
 
 /**
- * True for "Expect query "NAME" ... returns N rows" with a catalogue NAME: in
- * .ez files such a line is a step of its own (it runs the query), not a
- * post-condition of the previous step.
+ * True for "Expect query "NAME" ... returns N rows" with a catalogue NAME, or with inline SQL and a connection
+ * ("Expect query "SELECT ..." on hr returns 3 rows"): in .ez files such a line is a step of its own (it runs the
+ * query), not a post-condition of the previous step.
  */
 export function isNamedQueryExpectation(line: string): boolean {
   const { text, quotes } = protectQuotes(line.trim().replace(/[.;]+$/, ''));

@@ -5,6 +5,7 @@
  *   mssql    -> `mssql` (optional dependency, loaded on demand); placeholders `@p1..@pn` or `@name`
  *   oracle   -> `oracledb` Thin mode (optional dependency, loaded on demand); placeholders `:1..:n` or `:name`
  *               (see db-oracle.ts)
+ *   mysql    -> EZTest's own MySQL/MariaDB protocol client (no package); placeholders `?` or `:name` (see db-mysql.ts)
  *
  * Rows from postgres, mssql and oracle are case-insensitive for lookups (db-rows.ts).
  */
@@ -54,6 +55,7 @@ import { EzTestError, NotSupportedError } from '../core/index.js';
 import { namedToPositional, type SqlDialect } from './db-sql.js';
 import { caseInsensitiveRow } from './db-rows.js';
 import type { OracleOptions } from './db-oracle.js';
+import type { MysqlOptions } from './db-mysql.js';
 import { mergeMssqlSettings, mssqlDriverConfig, type EntraTokenDeps, type MssqlSettings } from './db-mssql.js';
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array | Date;
@@ -481,7 +483,8 @@ export type DbConnectionSpec =
   | { driver: 'sqlite'; file: string }
   | ({ driver: 'postgres' } & Omit<PostgresOptions, 'name'>)
   | ({ driver: 'mssql' } & Omit<MssqlOptions, 'name'>)
-  | ({ driver: 'oracle' } & Omit<OracleOptions, 'name'>);
+  | ({ driver: 'oracle' } & Omit<OracleOptions, 'name'>)
+  | ({ driver: 'mysql' } & Omit<MysqlOptions, 'name'>);
 
 export async function connectDb(name: string, spec: DbConnectionSpec): Promise<DbClient> {
   switch (spec.driver) {
@@ -494,6 +497,10 @@ export async function connectDb(name: string, spec: DbConnectionSpec): Promise<D
     case 'oracle': {
       const { OracleDbClient } = await import('./db-oracle.js');
       return OracleDbClient.connect({ ...spec, name });
+    }
+    case 'mysql': {
+      const { MysqlDbClient } = await import('./db-mysql.js');
+      return MysqlDbClient.connect({ ...spec, name });
     }
     default:
       throw new NotSupportedError(`database driver "${(spec as { driver: string }).driver}"`);
@@ -526,7 +533,7 @@ export async function resolveSpecSecrets(spec: DbConnectionSpec, resolveSecret?:
   const cs = out.connectionString;
   if (typeof cs === 'string' && EMBEDDED_SECRET.test(cs)) {
     EMBEDDED_SECRET.lastIndex = 0;
-    const url = /^(?:mssql|sqlserver|postgres|postgresql):\/\//i.test(cs);
+    const url = /^(?:mssql|sqlserver|postgres|postgresql|mysql|mariadb):\/\//i.test(cs);
     let text = '';
     let at = 0;
     for (const m of cs.matchAll(EMBEDDED_SECRET)) {
@@ -613,6 +620,7 @@ const VERSION_SQL: Record<SqlDialect, string> = {
   postgres: 'SELECT version() AS version',
   mssql: 'SELECT @@VERSION AS version',
   oracle: "SELECT banner_full AS version FROM v$version WHERE ROWNUM = 1",
+  mysql: 'SELECT VERSION() AS version',
 };
 
 /** Connect (if needed), run a trivial query and report the server version and latency. Never throws. */
@@ -625,7 +633,9 @@ export async function checkDbHealth(name: string, open: () => Promise<DbClient>,
     if (c.ping) {
       const p = await c.ping();
       const pool = c.poolStatus?.();
-      return { name, dialect: client.dialect, ok: true, latencyMs: Date.now() - t, version: p.version, detail: `${p.thin === false ? 'thick' : 'thin'} mode${pool ? `, pool ${pool.open}/${pool.max}` : ''}` };
+      const mode = p.thin === undefined ? undefined : `${p.thin === false ? 'thick' : 'thin'} mode`;
+      const detail = [mode, pool ? `pool ${pool.open}/${pool.max}` : undefined].filter(Boolean).join(', ');
+      return { name, dialect: client.dialect, ok: true, latencyMs: Date.now() - t, version: p.version, ...(detail ? { detail } : {}) };
     }
     let version: string | undefined;
     try {

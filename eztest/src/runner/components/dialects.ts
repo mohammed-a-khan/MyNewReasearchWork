@@ -201,6 +201,15 @@ export const COMBO_DIALECTS: Array<DialectEntry<ComboDialect>> = [
     id: 'lightning-combobox', root: 'lightning-combobox, lightning-base-combobox', input: 'input, button[role=combobox]',
     popup: '[role=listbox]', option: 'lightning-base-combobox-item[role=option]', closeAfter: true,
   }),
+  e('combobox', 'orangehrm-oxd', 'OrangeHRM oxd-select', 'real', {
+    id: 'oxd-select', root: '.oxd-select-wrapper', input: 'ezc-none', openClick: '.oxd-select-text',
+    popup: '.oxd-select-dropdown', option: '.oxd-select-option[role=option]', valueText: '.oxd-select-text-input', closeAfter: true,
+  }),
+  e('combobox', 'orangehrm-oxd', 'OrangeHRM oxd-autocomplete', 'real', {
+    id: 'oxd-autocomplete', root: '.oxd-autocomplete-wrapper', input: 'input',
+    popup: '.oxd-autocomplete-dropdown', option: '.oxd-autocomplete-option[role=option]:not(.--loading)', loading: '.oxd-autocomplete-option.--loading',
+    chips: '.oxd-chip', closeAfter: true,
+  }),
   e('combobox', 'aria', 'WAI-ARIA combobox / native select', 'aria', {
     id: 'aria-combobox', root: 'select, [role=combobox]', input: 'input',
     option: '[role=option]', valueText: '[data-value-text]', loading: '[aria-busy=true], .loading', closeAfter: true,
@@ -210,6 +219,11 @@ export const COMBO_DIALECTS: Array<DialectEntry<ComboDialect>> = [
 // ------------------------------------------------------------------ date pickers
 
 export const DATE_DIALECTS: Array<DialectEntry<DateDialect>> = [
+  e('datepicker', 'orangehrm-oxd', 'OrangeHRM oxd-date-input', 'real', {
+    id: 'oxd-date-input', root: '.oxd-date-wrapper', input: '.oxd-date-input input', toggle: '.oxd-date-input-icon',
+    popup: '.oxd-date-input-calendar', title: '.oxd-calendar-selector', prev: '.oxd-calendar-header > button:first-of-type', next: '.oxd-calendar-header > button:last-of-type',
+    day: '.oxd-calendar-date',
+  }),
   e('datepicker', 'mui', 'MUI X DatePicker', 'real', {
     id: 'mui-date-picker', root: '.MuiPickersTextField-root, .MuiFormControl-root:has(.MuiPickersSectionList-root)',
     sections: '.MuiPickersSectionList-sectionContent', sectionsRoot: '.MuiPickersSectionList-root', hiddenValue: 'input.MuiPickersInputBase-input',
@@ -328,6 +342,7 @@ export const TOAST_SELECTORS: Array<{ library: string; selector: string }> = [
   { library: 'oracle-jet', selector: '.oj-message-summary' },
   { library: 'salesforce', selector: '.forceToastMessage, .slds-notify_toast' },
   { library: 'toastify', selector: '.Toastify__toast-body' },
+  { library: 'orangehrm-oxd', selector: '.oxd-toast' },
   { library: 'aria', selector: '[role=status]:not(:empty), [role=alert]:not(:empty), .toast' },
 ];
 export const ALL_TOASTS = TOAST_SELECTORS.map((t) => t.selector).join(', ');

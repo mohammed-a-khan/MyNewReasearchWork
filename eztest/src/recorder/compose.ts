@@ -70,6 +70,11 @@ interface Draft {
 const NAV_WINDOW_MS = 5000;
 /** A second navigation this soon after the first is a redirect of the same action. */
 const REDIRECT_WINDOW_MS = 1500;
+/** The run-time variable a recorded one-time code step reads its TOTP secret (base32) from. */
+export const TOTP_VARIABLE = 'totpSecret';
+/** Internal marker of a recorded one-time code (never a real value). */
+const TOTP_VALUE = '\u0000totp';
+
 const SECRET_PARAM = /pass|pwd|secret|token|otp|code|auth|key/i;
 
 /** Deterministic JSON with sorted keys, for structural comparison. */
@@ -196,6 +201,11 @@ export class JourneyComposer {
         const coalesce = last && (last.step.action === 'fill' || last.step.action === 'clear') && last.elKey === ev.el.key;
         if (coalesce) this.drafts.pop();
         if (!ev.secret && value === '') return this.action('clear', ev, undefined, coalesce ? last.t : undefined);
+        if (ev.otp || ev.el.otp) {
+          // The code typed now is useless on replay: the step computes a fresh one from the TOTP secret.
+          this.secrets.add(TOTP_VARIABLE);
+          return this.action('fill', ev, TOTP_VALUE, coalesce ? last.t : undefined);
+        }
         return this.action('fill', ev, ev.secret ? this.secretRef(ev.el) : literalValue(value ?? ''), coalesce ? last.t : undefined);
       }
       case 'select': {
@@ -278,7 +288,7 @@ export class JourneyComposer {
       case 'click': return `Click ${d}`;
       case 'rightclick': return `Right-click ${d}`;
       case 'dblclick': return `Double-click ${d}`;
-      case 'fill': return q && `Type ${q} into ${d}`;
+      case 'fill': return value === TOTP_VALUE ? `Type the one-time code from \${${TOTP_VARIABLE}} into ${d}` : q && `Type ${q} into ${d}`;
       case 'clear': return `Clear ${d}`;
       case 'select': return q && `Select ${q} from ${d}`;
       case 'check': return `Check ${d}`;
@@ -302,7 +312,9 @@ export class JourneyComposer {
       } catch {
         continue;
       }
-      if (step.action !== action || (step.value ?? undefined) !== value) continue;
+      if (value === TOTP_VALUE) {
+        if (step.action !== 'fill' || step.args?.totp !== `\${${TOTP_VARIABLE}}`) continue;
+      } else if (step.action !== action || (step.value ?? undefined) !== value) continue;
       if (kind === 'rightclick' && step.args?.button !== 'right') continue;
       if (rt) {
         const want = describeTarget(d);

@@ -34,7 +34,7 @@ The in-page half of the layer is one static script (never user input) installed 
 | Tree | expand, collapse or select a path (`Europe > Germany > Berlin`), waiting for lazily loaded children; check a node | `expand` `collapse` `select` `expect` |
 | Tabs, accordion | select a tab (and see its panel), expand or collapse a section | `select` `expect`, `expand` `collapse` |
 | Dialog | click a control in a named or the top dialog, close a dialog, check that a dialog is open or closed, count open dialogs | `click` `close` `expectOpen` `expectClosed` `expectCount` |
-| Toast | watch for toasts (records every toast from then on, also after navigation), expect a toast, expect none | `watch` `expect` `expectNone` |
+| Toast | watch for toasts (records every toast from then on, also after navigation: a toast shown just before the app loads the next page is kept for a minute in the tab's sessionStorage), expect a toast, expect none | `watch` `expect` `expectNone` |
 | Rich text | replace, append, clear, check (contenteditable, Quill, CKEditor, TinyMCE inside its iframe) | `replace` `append` `clear` `expect` |
 | Slider | set one handle or both handles of a range slider (keyboard, or the range input), check | `set` `expect` |
 | Masked input | type keystroke by keystroke, verify the unmasked characters | `type` |
@@ -61,6 +61,7 @@ What each adapter was tested against. **Real** means the real library from npm r
 | SAP UI5 (sap.m) | emulated: sap.m.Table with growing "More" trigger, SearchField, MultiSelect checkboxes (no built-in sort UI) | emulated: sap.m.Select | emulated: sap.m.DatePicker (en-US "MMM d, y", de-DE) | emulated: sap.m.Tree | emulated: IconTabBar | emulated: sap.m.Dialog, MessageToast | |
 | Salesforce Lightning | reused: lightning-datatable inside its shadow root (Salesforce mock) | lightning-combobox: dialect only | | | | | |
 | Dynamics 365 | reused: UCI view grid (D365 mock) | | | | | | |
+| OrangeHRM oxd (Vue) | the div-based `role=table` list read with `Capture the rows of the table` | **real**: oxd-select, oxd-autocomplete (OrangeHRM 5.7) | **real**: oxd-date-input (`yyyy-mm-dd`) | | | | **real**: oxd toasts |
 | WAI-ARIA / native | ARIA: 10,000-row virtualized grid with aria-rowindex/colindex, column reorder, filter row, edit, sort; native `<table>` | ARIA: combobox with list autocomplete (async); native `<select>` | ARIA: APG date picker dialog (en-US, de-DE); native `<input type=date>` | ARIA: tree | ARIA: tabs | ARIA: dialog, `role=status` toasts | ARIA: accordion, slider, feed, generic drop zone, contenteditable |
 
 Rich text, sliders, inputs and charts:

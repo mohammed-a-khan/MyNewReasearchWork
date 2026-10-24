@@ -17,6 +17,8 @@ import { dropFiles } from './inpage.js';
 import { rememberApiRequest } from '../contracts/condition-rules.js';
 import { normalizeModifiers, pressKey } from './input.js';
 import { selectValue, selectedValue } from './custom-select.js';
+import { NEAR_FILE_INPUT } from './locate.js';
+import { freshTotp } from '../identity/totp.js';
 
 const MIME_BY_EXT: Record<string, string> = { '.pdf': 'application/pdf', '.csv': 'text/csv', '.json': 'application/json', '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.xml': 'application/xml', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 const mimeOf = (f: string) => MIME_BY_EXT[extname(f).toLowerCase()] ?? 'application/octet-stream';
@@ -25,6 +27,25 @@ const mimeOf = (f: string) => MIME_BY_EXT[extname(f).toLowerCase()] ?? 'applicat
 export const TARGET_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>([
   'click', 'dblclick', 'fill', 'clear', 'select', 'check', 'uncheck', 'hover', 'upload', 'download', 'capture',
 ]);
+
+/**
+ * The file input an upload goes to. Apps hide the real `<input type=file>` behind a picture, a "+" button or a
+ * drop area, so the step names what the person sees ("the profile picture"); the input is the one that element
+ * holds, or the one in the nearest enclosing group. Several inputs there are ambiguous and fail.
+ */
+async function fileInputFor(target: Locator, step: Step): Promise<Locator> {
+  const isFile = await target.evaluate((el) => el instanceof HTMLInputElement && el.type === 'file').catch(() => false);
+  if (isFile) return target;
+  const near = target.locator(NEAR_FILE_INPUT);
+  const n = await near.count();
+  if (n === 1) return near;
+  throw new EzTestError(
+    n === 0
+      ? `Step "${step.intent}": ${step.target?.description ?? 'the target'} is not a file input and has none near it`
+      : `Step "${step.intent}": ${n} file inputs are near ${step.target?.description ?? 'the target'}; name the one to use`,
+    'UPLOAD_TARGET',
+  );
+}
 
 /** True when this step needs its target resolved before acting. */
 export function needsTarget(step: Step): boolean {
@@ -117,7 +138,20 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       return {};
     }
     case 'dblclick': await need().dblclick({ timeout }); return {};
-    case 'fill': await need().fill(requireValue(step, ctx), { timeout }); return {};
+    case 'fill': {
+      if (step.args?.totp !== undefined) {
+        // "Type the one-time code from ${totpSecret} into ...": a fresh TOTP code from the (base32) secret.
+        const seedText = String(step.args.totp);
+        const missing = unresolvedNames(seedText, ctx.vars());
+        if (missing.length) throw missingVariables(missing);
+        const seed = ctx.interpolate(seedText).trim();
+        if (!seed || seed === seedText && /\$\{/.test(seedText)) throw new EzTestError(`Step "${step.intent}": no TOTP secret`, 'MISSING_VALUE');
+        await need().fill(await freshTotp(seed), { timeout });
+        return {};
+      }
+      await need().fill(requireValue(step, ctx), { timeout });
+      return {};
+    }
     case 'clear': await need().clear({ timeout }); return {};
     case 'select': await selectValue(need(), requireValue(step, ctx), timeout); return {};
     case 'check': await need().check({ timeout }); return {};
@@ -137,7 +171,7 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
         await need().evaluate(dropFiles, payload, { timeout });
         return {};
       }
-      await need().setInputFiles(files.length === 1 ? files[0] : files, { timeout });
+      await (await fileInputFor(need(), step)).setInputFiles(files.length === 1 ? files[0] : files, { timeout });
       return {};
     }
     case 'download': {

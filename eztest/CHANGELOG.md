@@ -17,6 +17,41 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 - **Azure DevOps**: the PDF, the Excel workbook and the e-mail summary are attached to the test run with the HTML report; a failed result also carries the failure's video and console log, the category and next step in its comment, and `New Issue` or `Known Issue` as its failure type.
 - The report fits a phone without sideways scrolling (wide selects are bounded).
 
+### Real enterprise apps: sign-in through a corporate SSO gateway
+
+Found by acceptance tests on oauth2-proxy (the gateway) and Keycloak (the identity provider) on two hosts in front of an app (`test/acceptance/enterprise/gateway-sso.test.ts`, `env/sso.sh`), each fixed in EZTest:
+
+- `Log in` failed with "still on the login page after sign-in" whenever the login URL was the app itself (`loginUrl: /` behind a gateway): the check compared only the URL path with the login URL. The login page is now the page the credentials were typed on (origin and path), which may be the identity provider's.
+- A cached session was trusted when the gateway sent the browser to the identity provider (only the path was compared). Opening `verifyUrl` must now stay on the app's origin, and a visible password field also means the session ended.
+- On Keycloak's one-time code page EZTest pressed "Restart login" (a button whose name contains "login") instead of "Sign In", so MFA sign-ins never finished. The submit button is now the one of the form that holds the field just filled, and buttons that leave the flow (restart, forgot password, try another way) are never pressed.
+- Parallel workers each signed in (4 workers: 4 logins at the identity provider). Sign-ins are now serialised per role with a lock file next to the cached session; the others wait and reuse it. 20 journeys on 4 workers: one LOGIN event at Keycloak.
+- A cached session whose gateway session had ended was "renewed" by every journey through single sign-on (20 journeys: 20 logins at the identity provider). The first check of a cached session no longer follows a redirect to another host; one worker, under the role's lock, follows it and caches the renewed session for the others.
+- Terms of use (and similar pages) between the credentials and the app stopped the sign-in. A role's `interstitials` buttons (default Accept, I accept, I agree, Agree, Continue) answer them while the browser is on the identity provider.
+- A wrong password was reported after the whole timeout as "did not reach ...": Keycloak's error text was not recognised. The sign-in now stops at once with the provider's message.
+- A one-time code was typed again within its 30-second window (a second sign-in, a parallel worker, a replay right after recording), which identity providers refuse as reused. Codes are never reused across EZTest processes on a machine; the step waits for the next window.
+- New step `Type the one-time code from ${totpSecret} into the "One-time code" field` for hand-written and recorded journeys; the recorder writes it for one-time code fields (`autocomplete=one-time-code`, `otp`, `otc`) instead of the code typed, and asks for `totpSecret` at run time like a password.
+- The recorder wrote `Open <url>` for the redirect chain of a sign-in (a form post to the identity provider and back to the app), because identity providers send `Referrer-Policy: no-referrer`: on replay the one-time URL of the one-time code page was opened directly. Navigations started by a form post, or right after a click or key press, are now the page's.
+- The recorder wrote `Type ... into #date` for a field whose unquoted description reads as another phrasing inside the line (`the Date field`); the quoted form is now tried before ids and CSS paths.
+
+### Real enterprise apps: OrangeHRM UI and database together
+
+Found by acceptance tests on a real OrangeHRM 5.7 and its MariaDB (`test/acceptance/enterprise/orangehrm-ui-db.test.ts`), each fixed in EZTest:
+
+- Fields whose `<label>` sits next to the input instead of naming it (`<label>` without `for`, no control inside, as Vue/React kits such as OrangeHRM's oxd render forms) were not found by `Type ... into the "Employee Id" field`. Such a label now names the one field of its small group, when nothing is labelled the standard way; groups with several fields stay ambiguous.
+- `Upload "photo.png" to the "profile picture"` failed: uploads only worked on a visible `<input type=file>`. The step now uses the file input the named element holds or sits next to (the nearest group, a few levels up), and a name that matches several elements (the header avatar and the form picture) resolves to the one next to a file input. Images are found by their `alt` text.
+- A toast shown right before the app navigates ("Successfully Saved", then the details page loads) was never seen: the recorded toasts lived in the page that unloaded. They are now kept in the tab's sessionStorage for a minute. OrangeHRM's `.oxd-toast` is recognised.
+- `Variables: last=Okafor${tag}` typed `Okafor${tag}` literally: journey variables were not resolved against run, config and each other. They are now (a few passes deep; unknown names still stop the step that uses them).
+- Custom radio buttons and checkboxes (a styled span over a hidden input inside the same `<label>`) were treated as covered by an overlay, so `Check the "Female" radio button` waited out the whole timeout before the driver clicked. A decoration inside the control's own label is now part of the control.
+- `Capture the rows of the table` returned nothing for div-based ARIA tables (`role=table` / `row` / `columnheader` / `cell`); they are read by role now, with hidden header text (sort menus) left out.
+- `Expect query "SELECT ..." on hr returns 3 rows` with inline SQL was read as a post-condition of the previous step and failed to parse; it is now a step of its own, like the catalogue form.
+- OrangeHRM adapters: oxd-select and oxd-autocomplete (`Choose "Nigerian" in the Nationality select box`, `Choose "Bruno K Seeded" in the "Employee Name" combobox`) and the oxd date input (`Pick 1990-04-15 in the "Date of Birth" date picker`).
+
+### MySQL and MariaDB
+
+- **MySQL and MariaDB databases** (`driver: mysql` or `driver: mariadb` under `db.connections`) on EZTest's own implementation of the MySQL protocol: no driver package. Handshake v10, TLS with the certificate verified, `mysql_native_password`, `caching_sha2_password` (fast path; full authentication over TLS or with the server's RSA key, configured or fetched with `allowPublicKeyRetrieval`), `sha256_password`, auth switches; text protocol for SQL without values (several statements, several results), prepared statements in the binary protocol for SQL with values, cached per connection; DECIMAL, BIGINT, DATETIME(6), DATE, TIME, BLOB, BIT, JSON, utf8mb4 and NULL decoded the same way in both protocols; payloads over 16 MB; a pool per connection; read-only transactions; `queries check` by server-side prepare; `doctor`; the load test's database monitor; the results server's store. Proven against MariaDB 10.11 and MySQL 8.4 ([docs/databases.md](docs/databases.md#mysql-and-mariadb)).
+- The `${var}` binder and the query catalogue read MySQL SQL with MySQL's string rules: a backslash escapes the next character, so `'it\'s :x'` is one literal and holds no bind.
+- A failed dataset comparison names the first differing cells and the missing and extra keys (`[3] SALARY: expected "3000.00", found 3000.01 (numbers differ by 0.01)`) instead of only counting them.
+
 ### Fixed: record, then run
 
 - An expectation typed in Studio while the last field was still being typed was attached to the step before it; pending typing is now recorded first.

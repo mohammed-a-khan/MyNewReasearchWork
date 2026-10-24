@@ -456,7 +456,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
   const vault = identityVaultFromConfig(config, { cwd, masker: loaded.masker, logger, env: { ...process.env, ...loaded.variables } });
   const dbs = dbRegistryFromConfig(config, vault);
   let catalogue: Promise<QueryCatalogue> | undefined;
-  const queries = () => (catalogue ??= QueryCatalogue.fromConfig(config.db.queries, cwd));
+  const queries = () => (catalogue ??= QueryCatalogue.fromConfig(config.db.queries, cwd, config.db.connections));
 
   const db: DbHandler = {
     query: async (connection, sql, params) => (await dbs.get(connection)).query(sql, params ?? []),

@@ -1,0 +1,38 @@
+Journey: Submit an expense behind the SSO gateway
+Tags: @gateway @sso
+Role: employee
+Variables: what=Taxi to the airport ${n}
+
+Log in
+Open /expenses/new
+Expect the page contains "Signed in as ada@corp.test"
+Type "${what}" into the "Description" field
+Type "42.50" into the "Amount" field
+Select "Travel" from the "Category" dropdown
+Type "2026-10-01" into the "Date" field
+Click the "Submit expense" button
+Expect the page contains "${what}"
+Expect the URL contains "/expenses"
+
+Examples:
+  | n  |
+  | 1  |
+  | 2  |
+  | 3  |
+  | 4  |
+  | 5  |
+  | 6  |
+  | 7  |
+  | 8  |
+  | 9  |
+  | 10 |
+  | 11 |
+  | 12 |
+  | 13 |
+  | 14 |
+  | 15 |
+  | 16 |
+  | 17 |
+  | 18 |
+  | 19 |
+  | 20 |

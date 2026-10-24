@@ -62,7 +62,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (373 phrasings)
+## Actions (374 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -71,7 +71,8 @@ Each phrasing accepts natural variants (articles, "I"/"the user", third person, 
 | Purpose | Examples |
 |---|---|
 | Navigate | `Open /login` · `Go to /orders/new` · `Start at /login` · `Reload the page` · `Go back` · `Go forward` |
-| Log in | `Log in as manager` · `Log in` (uses the journey's `Role:`) |
+| Log in | `Log in as manager` · `Log in` (uses the journey's `Role:`; the role signs in once per run and every journey reuses its session, see [configuration.md](configuration.md#roles-and-single-sign-on)) |
+| One-time codes (MFA) | `Type the one-time code from ${totpSecret} into the "One-time code" field` (a fresh TOTP code from a base32 secret, never one already typed in this window; the recorder writes this step for one-time code fields) |
 | Click | `Click the "Sign in" button` · `Press the Save button` · `Follow the Orders link` · `Submit with the "Place order" button` · `Double-click the Order row` · `Right-click the Order row` · `Open the Orders tab` |
 | Type | `Type "bob" into the Username field` · `Fill the Quantity field with 2` · `Fill "2" into the Quantity field` · `Put "2" in the Quantity field` · `Set the Quantity field to 2` · `Clear the Search field` |
 | Choose | `Select "Gadget" from the Product dropdown` · `Set the Product dropdown to "Widget"` · `Check the Remember me checkbox` · `Uncheck the Newsletter checkbox` · `Turn on the Dark mode switch` · `Select the Express radio button` |
@@ -229,6 +230,7 @@ Times read as `YYYY-MM-DD[ HH:mm[:ss]]` in the journey's `Timezone:`, else the r
 
 | Purpose | Examples |
 |---|---|
+| Upload | `Upload "fixtures/photo.png" to the "profile picture"` (the file input the named element holds, or the one in its group: apps hide it behind a picture or a "+" button; when the name matches several elements, the one next to a file input) |
 | Several files | `Upload "a.pdf" and "b.pdf" to the Attachments field` · `Attach "a.pdf", "b.pdf", "c.pdf" to the Attachments field` |
 | Drag to upload | `Drop file "a.pdf" onto the Drop zone` · `Drag files "a.pdf", "b.pdf" to the Drop zone` |
 | Downloads as data | `Read the download export as rows into rows` (CSV, TSV or XLSX; the delimiter is detected) · `Read the download book sheet "Lines" as rows into rows` · `... with delimiter ";"` |
@@ -261,7 +263,7 @@ Times read as `YYYY-MM-DD[ HH:mm[:ss]]` in the journey's `Timezone:`, else the r
 | Named-query checks | `Expect query "OPEN_INVOICES" on ledger with customer_id=7 returns 2 rows` · `... returns at least 1 row` · `... returns no rows` · `Wait until query "INVOICE_POSTED" with invoice_no=${no} returns 1 row within 30 seconds every 2 seconds` |
 | Compare | `Compare ${dbRows} with ${uiRows} by id` · `Compare rows dbRows to apiRows by id, name ignoring case and store the result as diff` |
 | Rows vs a named query | `Expect rows rows equal query "INVOICE_LINES" on ledger by key "Id" ignoring columns "Updated" with tolerance 0.01` · `... with params "OPEN", ${orderKey} ...` · `... on ledger with status="OPEN", region=${region} by key ...` (named binds) · `Expect rows uiRows equal rows dbRows by key "Id"` (a step of its own; column names match case-insensitively) |
-| Check | `Expect query rows returns 2 rows` · `Expect the query rows returns more than 2 rows` · `Expect ${rows.0.status} equals "Open"` |
+| Check | `Expect query "SELECT id FROM orders WHERE status = '${status}'" on shop returns 3 rows` (inline SQL; a step of its own) · `Expect query rows returns 2 rows` · `Expect the query rows returns more than 2 rows` · `Expect ${rows.0.status} equals "Open"` |
 
 **SQL is never built from values.** Every `${var}` in SQL (and every quoted literal that contains one, such as `'%${name}%'`) becomes a bound parameter in the connection's placeholder style (`?`, `$n`, `@pN`, `:n` on Oracle). A captured value like `EU' OR '1'='1` stays a value.
 
@@ -552,6 +554,8 @@ A description like `the "Sign in" button` becomes an ordered list of locators: r
 1. **T0 cache:** the last locator that worked and was verified. A step with a cached verified heal looks for its original element for one second only; when it is still missing and the cached heal matches exactly one element, the step heals at once instead of waiting out the locate timeout.
 2. **T1 fingerprint:** compares a stored element fingerprint (role, name, text, id, classes, label, position and more) against the current page, with an ambiguity margin.
 3. **T2 semantic:** matches the description words against accessible names and labels.
+
+**Labels next to their field.** A field is found by its label when the label names it the standard way (`<label for>`, a wrapping `<label>`, `aria-label`, `aria-labelledby`). Component libraries often put a bare `<label>` beside the input instead (OrangeHRM's oxd forms: `<div><label>Employee Id</label></div><div><input></div>`). When no element is labelled the standard way, a `<label>` with no `for` and no control inside names the one field of the small group it sits in; a group with several fields or several such labels names none of them, so `Type "0042" into the "Employee Id" field` stays strict. Images are found by their `alt` text too (`the "profile picture"`).
 
 You can also give an exact selector: `#id`, `css=…`, `xpath=…`, `testid=…`, `text=…` or `role=button[name="Save"]`; on native apps also `accessibility id=…` (or `~…`), `id=…` (resource id), `class=…` and `predicate=…` (iOS). Targets resolve in the current tab and frame; healing searches there too.
 

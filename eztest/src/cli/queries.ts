@@ -34,7 +34,7 @@ export function registerQueryCommands(program: Command, io: IO, load: Load): voi
     .option('--json', 'machine-readable output')
     .action(async (o: { config?: string; env?: string; connection?: string; fragments?: boolean; json?: boolean }) => {
       const loaded = await load(o);
-      const cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd);
+      const cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd, loaded.config.db.connections);
       const rows = cat
         .all()
         .filter((q) => o.fragments || !q.fragment)
@@ -66,7 +66,7 @@ export function registerQueryCommands(program: Command, io: IO, load: Load): voi
       const loaded = await load(o);
       let cat: QueryCatalogue;
       try {
-        cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd);
+        cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd, loaded.config.db.connections);
       } catch (e) {
         io.err(`error  ${(e as Error).message}`);
         process.exitCode = 1;
@@ -118,7 +118,7 @@ export async function doctorDatabases(loaded: LoadedConfig, io: IO): Promise<boo
     }
   }
   try {
-    const cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd);
+    const cat = await QueryCatalogue.fromConfig(loaded.config.db.queries, io.cwd, loaded.config.db.connections);
     const all = cat.all();
     if (all.length) io.out(`queries     ${all.filter((q) => !q.fragment).length} queries, ${all.filter((q) => q.fragment).length} fragments`);
   } catch (e) {
@@ -134,7 +134,7 @@ export async function validateJourneyQueries(journeys: Array<{ file: string; jou
   if (!using.length) return [];
   let cat: QueryCatalogue;
   try {
-    cat = await QueryCatalogue.fromConfig(loaded?.config.db.queries, cwd);
+    cat = await QueryCatalogue.fromConfig(loaded?.config.db.queries, cwd, loaded?.config.db.connections);
   } catch (e) {
     return [{ file: 'db.queries', message: (e as Error).message }];
   }

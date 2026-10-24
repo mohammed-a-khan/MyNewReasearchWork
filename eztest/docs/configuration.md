@@ -97,6 +97,7 @@ db:
     shop: { driver: sqlite, file: ./shop.db }
     erp:  { driver: postgres, connectionString: "${ERP_DB_URL}" }   # needs the `pg` package
     crm:  { driver: mssql, server: sql.test, database: crm, user: qa, password: secret://env/CRM_PW }  # needs `mssql`
+    hr:   { driver: mariadb, host: hr-db.test, database: hr, user: qa, password: secret://env/HR_PW, ssl: { ca: certs/hr-ca.pem } }  # MySQL/MariaDB: built in
     # SQL Server from a connection string, Windows (NTLM) or Entra ID authentication: docs/databases.md
     hr:   { driver: mssql, connectionString: "Server=tcp:hr.corp,1433;Database=hr;User ID=CORP\\qa;Password=secret://env/HR_PW;Integrated Security=true" }
     ledger:                                   # needs `oracledb` (Thin mode: no Oracle Client install)
@@ -460,6 +461,54 @@ identity:
 - Device code: polled as RFC 8628 says (`authorization_pending`, `slow_down` adds 5 s); the verification page is opened in the browser and signed in as the role.
 - Tokens are cached per role until 60 s (`skewSeconds`) before they expire; concurrent steps share one request. A refresh token in a response is used (and rotated) when the token expires; if the refresh is refused, the grant runs again.
 - A role used only for tokens with `password`, `authorization_code` or `device_code` needs no `loginUrl`.
+
+## Roles and single sign-on
+
+A role signs in once per run and environment; every later `Log in` (in any journey, worker or process) reuses
+its session: the browser state (cookies of every host involved, local storage) is cached in
+`identity.sessionDir` for `sessionMaxAgeMinutes`, and each reuse is checked first by opening `verifyUrl`.
+
+Apps behind a corporate front door (Citrix NetScaler, F5, an SSO gateway such as oauth2-proxy, an identity
+provider such as Keycloak, Okta or ADFS) work the same way. The login URL is the app itself; it redirects the
+browser to the identity provider on another host, where the role's username, password and one-time code are
+entered, and back to the app:
+
+```yaml
+identity:
+  roles:
+    employee:
+      loginUrl: /                                  # the app: the gateway sends the browser to the identity provider
+      username: ada
+      password: secret://vault/ada
+      totp: secret://vault/ada-totp                # optional: the one-time code page
+      successUrl: https://expenses.corp.test/      # back at the app (absolute: the provider's URLs carry it encoded)
+      verifyUrl: /api/me                           # opened to check a cached session
+      interstitials: [Accept]                      # optional: buttons that answer the provider's in-between pages
+```
+
+- **One sign-in for the run.** Parallel workers wait for the one that signs in (a lock file next to the cached
+  session) and reuse its session, so a run of any size signs in once per role: identity providers count logins,
+  ask for MFA every time and may limit concurrent sessions.
+- **Cached sessions are checked, not trusted.** Opening `verifyUrl` must stay on the app: being sent to the
+  identity provider, landing on the login page or seeing a password field means the session ended (sign-out,
+  a gateway time-out). One worker then follows the redirect: when the identity provider still knows the user
+  (single sign-on), the renewed gateway session is cached for the others; otherwise the role signs in again.
+- **The form.** The username, password and one-time code fields are found as on any login page; the submit
+  button pressed is the one of the form that holds the field just filled, never a "Restart login", "Forgot
+  password?" or "Try another way" button next to it. A one-time code already typed in the current 30-second
+  window (by any EZTest process on the machine) is never typed again: the step waits for the next window,
+  because identity providers refuse reused codes.
+- **In-between pages.** Terms of use and similar pages before the app are answered with the role's
+  `interstitials` buttons (default `Accept`, `I accept`, `I agree`, `Agree`, `Continue`), only while the browser
+  is still on the identity provider's host; `[]` turns this off.
+- **Errors.** A wrong password stops at once with the provider's own message (`Role employee: login failed:
+  Invalid username or password.`), and counts towards `identity.lockout`.
+- **Mid-journey expiry.** With `reliability.sessionExpiry` (for example `text: ["Sign in to your account"]`), a
+  step that lands on the identity provider's sign-in page signs the role in again and runs the step again,
+  once, with the re-login recorded on the journey (`reliability.relogins`).
+
+`test/acceptance/enterprise/gateway-sso.test.ts` runs all of this against oauth2-proxy and Keycloak on two hosts
+(`test/acceptance/enterprise/env/sso.sh up`).
 
 ## Identity: Microsoft Entra ID and password rotation
 

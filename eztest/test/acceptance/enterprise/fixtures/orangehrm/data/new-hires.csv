@@ -1,0 +1,5 @@
+key,first,middle,last,marital,nationality,birthday,gender,runFlag
+H1,Amara,,Nwosu,Single,Nigerian,1992-07-01,Female,Yes
+H2,Diego,Luis,Fernández,Married,Mexican,1985-11-23,Male,Yes
+H3,Siobhán,,O'Neill,Other,Irish,2000-02-29,Female,Yes
+H4,Skipped,,Person,Single,Irish,1990-01-01,Male,No

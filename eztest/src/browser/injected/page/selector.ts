@@ -201,7 +201,7 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
     const tag = lowerTag(el);
     if (tag === 'label') {
       // A label linked to nothing (no `for`, no control inside), as in many UI kits: its field is the one control of its form group.
-      if (!(el as HTMLLabelElement).control && match(rawText(el))) loose.push(el);
+      if (!(el as HTMLLabelElement).control && match(elementText(el))) loose.push(el);
       continue;
     }
     if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length) continue;
@@ -216,10 +216,10 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
 }
 
 const CONTROL_SELECTOR = [
-  'input:not([type=hidden])', 'textarea', 'select', '[contenteditable=""]', '[contenteditable=true]',
+  'input:not([type=hidden]):not([type=button]):not([type=submit]):not([type=reset]):not([type=image])', 'textarea', 'select', '[contenteditable=""]', '[contenteditable=true]',
   '[role=combobox]', '[role=textbox]', '[role=searchbox]', '[role=listbox]', '[role=spinbutton]', '[role=slider]', '[role=switch]', '[role=checkbox]', '[role=radiogroup]',
   // Custom selects: a focusable box that is not a link or a button.
-  '[tabindex]:not([tabindex="-1"]):not(a):not(button):not([role=button]):not([role=link]):not([role=tab]):not([role=option])',
+  '[tabindex]:not([tabindex="-1"]):not(a):not(button):not(label):not([role=button]):not([role=link]):not([role=tab]):not([role=option])',
 ].join(',');
 
 /**

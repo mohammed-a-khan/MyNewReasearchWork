@@ -130,6 +130,8 @@ export const RoleSchema = z
     fields: RoleFieldsSchema.optional(),
     successUrl: z.string().optional(),
     verifyUrl: z.string().optional(),
+    /** Buttons that answer an identity provider's pages between sign-in and the app (terms, notices); [] presses none. */
+    interstitials: z.array(z.string().min(1)).optional(),
     api: RoleApiSchema.optional(),
   })
   .superRefine((r, ctx) => {
@@ -317,9 +319,39 @@ const DbConnectionUnion = z.discriminatedUnion('driver', [
     fetchAsString: z.array(z.enum(['NUMBER', 'DATE', 'TIMESTAMP', 'CLOB', 'NCLOB', 'JSON', 'RAW'])).optional(),
     callTimeoutMs: z.number().int().positive().optional(),
   }),
+  z.object({
+    /** MySQL and MariaDB (driver: mariadb is the same): EZTest's own protocol client, no package to install. */
+    driver: z.literal('mysql'),
+    /** mysql://user:pass@host:3306/db?ssl=true (or mariadb://); the fields below win over it. */
+    connectionString: z.string().min(1).optional(),
+    host: z.string().optional(),
+    port: dbPort,
+    database: z.string().optional(),
+    user: z.string().optional(),
+    /** Secret reference (secret://store/key) or ENC(...) value. */
+    password: z.string().optional(),
+    /** TLS: true (certificate verified), or the settings (ca/cert/key: PEM text or file paths). */
+    ssl: z.union([z.boolean(), z.object({
+      rejectUnauthorized: z.boolean().default(true),
+      ca: z.string().optional(),
+      cert: z.string().optional(),
+      key: z.string().optional(),
+      servername: z.string().optional(),
+    })]).optional(),
+    /** caching_sha2_password without TLS: the server's RSA public key (PEM text or file path). */
+    serverPublicKey: z.string().optional(),
+    /** Without TLS or serverPublicKey: fetch the server's RSA public key (off by default). */
+    allowPublicKeyRetrieval: z.boolean().optional(),
+    pool: z.object({ max: z.number().int().min(1).max(100).default(4) }).optional(),
+    /** Time zone of DATETIME/TIMESTAMP values: local (default), Z or +02:00. */
+    timezone: z.string().regex(/^(local|Z|UTC|[+-]\d{2}:?\d{2})$/i, "timezone: 'local', 'Z' or like '+02:00'").optional(),
+    dateStrings: z.boolean().optional(),
+    connectTimeoutMs: z.number().int().positive().optional(),
+    queryTimeoutMs: z.number().int().positive().optional(),
+  }),
 ]);
 
-const DRIVER_ALIASES: Record<string, string> = { postgresql: 'postgres', pg: 'postgres', sqlserver: 'mssql', 'sql-server': 'mssql', oracledb: 'oracle' };
+const DRIVER_ALIASES: Record<string, string> = { postgresql: 'postgres', pg: 'postgres', sqlserver: 'mssql', 'sql-server': 'mssql', oracledb: 'oracle', mariadb: 'mysql' };
 
 /** A database connection. `type:` is accepted as an alias of `driver:` (and postgresql/sqlserver as driver aliases). */
 export const DbConnectionSchema = z.preprocess((v) => {

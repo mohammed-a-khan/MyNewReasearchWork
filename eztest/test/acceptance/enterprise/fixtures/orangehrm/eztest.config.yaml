@@ -1,0 +1,32 @@
+# OrangeHRM 5.7 (a real install) and its MariaDB, for the UI + DB acceptance tests
+# (test/acceptance/enterprise/orangehrm-ui-db.test.ts). Fictional employees only: every employee the journeys
+# create carries the run's tag in its Employee Id and last name, and the test removes them afterwards.
+baseUrl: ${OHRM_URL:-http://127.0.0.1:18080}
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [json]
+healing:
+  enabled: false
+vars:
+  tag: ${RUN_TAG:-ezqa}
+identity:
+  secretStores:
+    - type: env
+      prefix: OHRM_
+  roles:
+    admin:
+      loginUrl: /web/index.php/auth/login
+      username: Admin
+      password: secret://env/ADMIN_PASSWORD
+      successUrl: /dashboard/index
+db:
+  connections:
+    hr:
+      driver: mariadb
+      host: ${OHRM_DB_HOST:-127.0.0.1}
+      port: ${OHRM_DB_PORT:-3306}
+      database: ${OHRM_DB_NAME:-orangehrm_app}
+      user: ${OHRM_DB_USER:-root}
+      password: secret://env/DB_PASSWORD
+  queries:
+    dir: queries

@@ -6,7 +6,7 @@
  * comments (--, /* *\/), PostgreSQL casts (::) and PL/SQL assignments (:=).
  */
 
-export type SqlDialect = 'sqlite' | 'postgres' | 'mssql' | 'oracle';
+export type SqlDialect = 'sqlite' | 'postgres' | 'mssql' | 'oracle' | 'mysql';
 
 export type SqlToken =
   | { kind: 'named'; name: string; start: number; end: number }
@@ -15,10 +15,17 @@ export type SqlToken =
 
 const Q_CLOSE: Record<string, string> = { '[': ']', '{': '}', '(': ')', '<': '>' };
 
-/** End index (exclusive) of the quoted run starting at `i` (sql[i] is the opening quote). */
-function skipQuoted(sql: string, i: number, quote: string): number {
+/**
+ * End index (exclusive) of the quoted run starting at `i` (sql[i] is the opening quote). With `backslash`
+ * (MySQL and MariaDB string literals), a backslash escapes the next character, so 'it\'s' is one literal.
+ */
+function skipQuoted(sql: string, i: number, quote: string, backslash = false): number {
   let j = i + 1;
   while (j < sql.length) {
+    if (backslash && sql[j] === '\\') {
+      j += 2;
+      continue;
+    }
     if (sql[j] === quote) {
       if (sql[j + 1] === quote) {
         j += 2;
@@ -37,8 +44,9 @@ function skipQuoted(sql: string, i: number, quote: string): number {
  * `literals: 'vars'`, a quoted literal containing `${...}` is reported as one
  * `var` token spanning the whole literal (name = the literal's inner text).
  */
-export function scanSql(sql: string, o: { named?: boolean; positional?: boolean; vars?: boolean; literalVars?: boolean } = {}): SqlToken[] {
+export function scanSql(sql: string, o: { named?: boolean; positional?: boolean; vars?: boolean; literalVars?: boolean; backslashEscapes?: boolean } = {}): SqlToken[] {
   const named = o.named ?? true;
+  const bs = o.backslashEscapes ?? false;
   const positional = o.positional ?? true;
   const vars = o.vars ?? false;
   const out: SqlToken[] = [];
@@ -66,7 +74,7 @@ export function scanSql(sql: string, o: { named?: boolean; positional?: boolean;
       continue;
     }
     if (c === "'") {
-      const end = skipQuoted(sql, i, "'");
+      const end = skipQuoted(sql, i, "'", bs);
       if (o.literalVars && sql.slice(i, end).includes('${')) {
         out.push({ kind: 'var', name: sql.slice(i + 1, end - 1).replace(/''/g, "'"), start: i, end });
       }
@@ -74,7 +82,7 @@ export function scanSql(sql: string, o: { named?: boolean; positional?: boolean;
       continue;
     }
     if (c === '"' || c === '`') {
-      i = skipQuoted(sql, i, c);
+      i = skipQuoted(sql, i, c, bs && c === '"');
       continue;
     }
     if (c === '$' && n === '{') {
@@ -145,7 +153,7 @@ export function oracleStatement(sql: string): string {
  * appearance, so a repeated name is bound once per occurrence everywhere).
  */
 export function namedToPositional(sql: string, values: Record<string, unknown>, dialect: SqlDialect, startAt = 0): { sql: string; params: unknown[]; names: string[] } {
-  const tokens = scanSql(sql, { named: true, positional: false });
+  const tokens = scanSql(sql, { named: true, positional: false, backslashEscapes: dialect === 'mysql' });
   const params: unknown[] = [];
   const names: string[] = [];
   let text = '';

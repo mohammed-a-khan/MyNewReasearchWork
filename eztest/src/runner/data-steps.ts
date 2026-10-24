@@ -13,7 +13,7 @@ import {
 } from '../core/index.js';
 import { parseCsv } from '../docs/csv.js';
 import { readXlsxTable } from '../importers/xlsx.js';
-import { ApiClient, buildSoapEnvelope, caseInsensitiveRow, compareRows, formatGraphQLErrors, getPath, GraphQLClient, GraphQLWsClient, parseSoapResponse, placeholder, scanSql, selectClientCertificate, validateGraphQL, WsClient, type CompareOptions, type GraphQLEvent, type GraphQLSubscription, type SqlDialect } from '../surfaces/index.js';
+import { ApiClient, buildSoapEnvelope, caseInsensitiveRow, compareRows, describeDifferences, formatGraphQLErrors, getPath, GraphQLClient, GraphQLWsClient, parseSoapResponse, placeholder, scanSql, selectClientCertificate, validateGraphQL, WsClient, type CompareOptions, type GraphQLEvent, type GraphQLSubscription, type SqlDialect } from '../surfaces/index.js';
 import type { ActionOutcome } from './actions.js';
 import { regex } from './conditions-advanced.js';
 import { maskDeep } from './dom.js';
@@ -164,9 +164,9 @@ function sqlParam(v: unknown, name: string): BindValue {
  */
 export function bindSql(sql: string, params: BindValue[], vars: Vars, dialect: Dialect): { sql: string; params: BindValue[] } {
   if (!sql.includes('${')) return { sql, params };
-  // sqlite ("?") and oracle (":1", bound by position of appearance) need values in text order.
-  const ordered = dialect === 'sqlite' || dialect === 'oracle';
-  const tokens = scanSql(sql, { named: dialect === 'oracle', positional: ordered, vars: true, literalVars: true });
+  // sqlite and mysql ("?") and oracle (":1", bound by position of appearance) need values in text order.
+  const ordered = dialect === 'sqlite' || dialect === 'oracle' || dialect === 'mysql';
+  const tokens = scanSql(sql, { named: dialect === 'oracle', positional: ordered, vars: true, literalVars: true, backslashEscapes: dialect === 'mysql' });
   const out: BindValue[] = [];
   const tail = [...params];
   let given = 0;
@@ -209,6 +209,7 @@ export function procedureSql(name: string, n: number, dialect: Dialect): string 
   if (dialect === 'sqlite') throw new NotSupportedError('stored procedures on SQLite');
   if (dialect === 'postgres') return `CALL ${name}(${Array.from({ length: n }, (_, i) => `$${i + 1}`).join(', ')})`;
   if (dialect === 'oracle') return `BEGIN ${name}(${Array.from({ length: n }, (_, i) => `:${i + 1}`).join(', ')}); END;`;
+  if (dialect === 'mysql') return `CALL ${name}(${Array.from({ length: n }, () => '?').join(', ')})`;
   return `EXEC ${name}${n ? ' ' + Array.from({ length: n }, (_, i) => `@p${i + 1}`).join(', ') : ''}`;
 }
 
@@ -510,7 +511,10 @@ export async function compareDataAction(step: Step, ctx: StepContext, opts: RunO
   const ref = await ctx.evidence.store('data', `compare/${safeName(ctx.journey.id)}/${safeName(step.id)}.json`, JSON.stringify(r, null, 2),
     { journeyId: ctx.journey.id, stepId: step.id, description: 'dataset comparison' });
   if (step.captureAs) ctx.ledger.set(step.captureAs, r);
-  if (!r.passed) throw new EzTestError(`Data comparison failed: ${r.summary}`, 'COMPARE_FAILED', { details: r });
+  if (!r.passed) {
+    const diff = describeDifferences(r, 5, ctx.session?.mask);
+    throw new EzTestError(`Data comparison failed: ${r.summary}${diff ? ` - ${diff}` : ''}`, 'COMPARE_FAILED', { details: r });
+  }
   return { captured: step.captureAs ? { [step.captureAs]: r } : undefined, evidence: [ref.id] };
 }
 

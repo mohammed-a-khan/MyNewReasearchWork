@@ -1,0 +1,38 @@
+# The Expenses app behind a corporate SSO gateway (oauth2-proxy + Keycloak, test/acceptance/enterprise/env/sso.sh).
+# Opening the app sends the browser to the identity provider on another host; after sign-in it comes back to the
+# app with the gateway's session cookie. Roles sign in once per run and every journey reuses the session.
+baseUrl: ${GATEWAY_APP_URL:-http://app.ez.test:14180}
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [json]
+healing:
+  enabled: false
+identity:
+  sessionDir: .eztest/sessions
+  sessionMaxAgeMinutes: 30
+  secretStores:
+    - type: env
+      prefix: SSO_
+  roles:
+    employee:
+      loginUrl: /
+      username: ada
+      password: secret://env/ADA_PASSWORD
+      successUrl: ${GATEWAY_APP_URL:-http://app.ez.test:14180}/
+      verifyUrl: /api/me
+    approver:
+      loginUrl: /expenses
+      username: grace
+      password: secret://env/GRACE_PASSWORD
+      totp: secret://env/GRACE_TOTP
+      successUrl: ${GATEWAY_APP_URL:-http://app.ez.test:14180}/expenses
+      verifyUrl: /api/me
+    contractor:
+      loginUrl: /
+      username: linus
+      password: secret://env/LINUS_PASSWORD
+      successUrl: ${GATEWAY_APP_URL:-http://app.ez.test:14180}/
+      verifyUrl: /api/me
+reliability:
+  sessionExpiry:
+    text: ["Sign in to your account"]

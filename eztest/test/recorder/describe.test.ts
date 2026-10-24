@@ -121,7 +121,8 @@ describe('element description (in-page computation)', () => {
       key: 'k', tag: 'select', role: 'combobox', name: 'Ship to', label: 'Ship to', classes: [], css: 'select#ship', id: 'ship',
       field: false, secret: false, counts: { roleName: 1, label: 1, placeholder: 0, placeholderAsLabel: 0, text: 0, testId: 0, id: 1 },
     };
-    expect(buildTarget(info).descriptions).toEqual(['the Ship to dropdown', '#ship', 'css=select#ship']);
+    // The quoted form follows the unquoted one: inside a whole line the unquoted words can read as another phrasing.
+    expect(buildTarget(info).descriptions).toEqual(['the Ship to dropdown', 'the "Ship to" dropdown', '#ship', 'css=select#ship']);
     expect(buildTarget({ ...info, counts: { ...info.counts, label: 2 } })).toMatchObject({ ambiguous: true, descriptions: ['#ship', 'css=select#ship'] });
   });
 });

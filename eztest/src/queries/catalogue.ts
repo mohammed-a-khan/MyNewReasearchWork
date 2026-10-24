@@ -110,6 +110,11 @@ export interface CatalogueOptions {
   dir?: string;
   files?: string[];
   inline?: Record<string, string>;
+  /**
+   * The configured connections (`db.connections`): queries on a MySQL/MariaDB connection are read with MySQL's
+   * string rules (a backslash escapes the next character, so 'it\'s :x' holds no bind).
+   */
+  connections?: Record<string, { driver?: string }>;
 }
 
 function walk(dir: string): string[] {
@@ -141,6 +146,9 @@ export interface QueryCall {
 
 export class QueryCatalogue {
   private readonly byName = new Map<string, CatalogueQuery>();
+  /** Connections whose SQL follows MySQL's string rules (backslash escapes). */
+  private mysqlConnections = new Set<string>();
+  private allMysql = false;
 
   constructor(queries: CatalogueQuery[] = []) {
     for (const q of queries) this.add(q);
@@ -149,6 +157,9 @@ export class QueryCatalogue {
   /** Load from `dir` (recursively, *.sql), `files` and `inline`. A missing default dir is an empty catalogue. */
   static async load(o: CatalogueOptions): Promise<QueryCatalogue> {
     const cat = new QueryCatalogue();
+    const conns = Object.entries(o.connections ?? {});
+    cat.mysqlConnections = new Set(conns.filter(([, c]) => c?.driver === 'mysql').map(([n]) => n));
+    cat.allMysql = conns.length > 0 && cat.mysqlConnections.size === conns.length;
     const abs = (p: string) => (isAbsolute(p) ? p : resolve(o.cwd, p));
     const rel = (p: string) => relative(o.cwd, p).split('\\').join('/');
     const files: string[] = [];
@@ -172,9 +183,15 @@ export class QueryCatalogue {
     return cat;
   }
 
-  /** From config `db.queries` (dir relative to cwd). */
-  static fromConfig(queries: { dir?: string; files?: string[]; inline?: Record<string, string> } | undefined, cwd: string): Promise<QueryCatalogue> {
-    return QueryCatalogue.load({ cwd, dir: queries?.dir, files: queries?.files, inline: queries?.inline });
+  /** From config `db.queries` (dir relative to cwd) and `db.connections`. */
+  static fromConfig(queries: { dir?: string; files?: string[]; inline?: Record<string, string> } | undefined, cwd: string, connections?: Record<string, { driver?: string }>): Promise<QueryCatalogue> {
+    return QueryCatalogue.load({ cwd, dir: queries?.dir, files: queries?.files, inline: queries?.inline, connections });
+  }
+
+  /** True when a query's SQL is read with MySQL's backslash escapes (its connection, or every connection, is MySQL). */
+  private backslashes(name: string): boolean {
+    const c = this.byName.get(name)?.connection;
+    return c ? this.mysqlConnections.has(c) : this.allMysql;
   }
 
   add(q: CatalogueQuery): void {
@@ -229,7 +246,7 @@ export class QueryCatalogue {
     const sql = this.expand(name);
     const named: string[] = [];
     let positional = 0;
-    for (const t of scanSql(sql, { named: true, positional: true })) {
+    for (const t of scanSql(sql, { named: true, positional: true, backslashEscapes: this.backslashes(name) })) {
       if (t.kind === 'named' && !named.includes(t.name)) named.push(t.name);
       if (t.kind === 'positional') positional++;
     }
@@ -330,7 +347,7 @@ export class QueryCatalogue {
     let at = 0;
     let n = 0;
     let pos = 0;
-    for (const t of scanSql(text, { named: true, positional: true })) {
+    for (const t of scanSql(text, { named: true, positional: true, backslashEscapes: dialect === 'mysql' })) {
       if (t.kind === 'var') continue;
       sql += text.slice(at, t.start) + placeholder(dialect, ++n);
       params.push(t.kind === 'named' ? valueOf(t.name) : coerce(call.params?.[pos++] ?? null, 'any', `${name}[${pos}]`));

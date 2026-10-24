@@ -1,0 +1,26 @@
+Journey: Employees seeded with SQL show up in the PIM search table
+Tags: @orangehrm @ui @db
+Role: admin
+Variables: lastName=Seeded${tag}
+
+# Seed three employees straight into the database (values are bound, never spliced)
+Run query "INSERT INTO hs_hr_employee (employee_id, emp_firstname, emp_middle_name, emp_lastname) VALUES ('${tag}S1', 'Anika', '', '${lastName}'), ('${tag}S2', 'Bruno', 'K', '${lastName}'), ('${tag}S3', 'Chen', '', '${lastName}')" on hr as seeded
+Expect query "SELECT 1 FROM hs_hr_employee WHERE emp_lastname = '${lastName}'" on hr returns 3 rows
+
+Log in
+Open /web/index.php/pim/viewEmployeeList
+# Typed without picking a hint, the name box filters by part of a name
+Type "${lastName}" into the "Employee Name" field
+Click the "Search" button
+Expect the page contains "(3) Records Found"
+Capture the rows of the table as uiRows
+
+# The UI table against the SQL result set, row by row and cell by cell
+Run query "SELECT employee_id AS Id, TRIM(CONCAT(emp_firstname, ' ', emp_middle_name)) AS `First (& Middle) Name`, emp_lastname AS `Last Name` FROM hs_hr_employee WHERE emp_lastname = '${lastName}' ORDER BY employee_id" on hr as dbRows
+Expect rows uiRows equal rows dbRows by key "Id"
+
+# The autocomplete: type part of a name, pick the hint, search
+Open /web/index.php/pim/viewEmployeeList
+Choose "Bruno K ${lastName}" in the "Employee Name" combobox
+Click the "Search" button
+Expect the page contains "(1) Record Found"

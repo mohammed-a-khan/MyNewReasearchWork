@@ -56,7 +56,7 @@ export type ApiHandler = (call: ApiCall, ctx: StepContext) => Promise<ApiRespons
 export type ApiAuthProvider = (role: string, ctx: StepContext) => Promise<Record<string, string>>;
 /** Values bound to a statement (never spliced into SQL). */
 export type DbQueryParams = DbQuery['params'];
-export type DbDialectName = 'sqlite' | 'postgres' | 'mssql' | 'oracle';
+export type DbDialectName = 'sqlite' | 'postgres' | 'mssql' | 'oracle' | 'mysql';
 export interface DbHandler {
   query(connection: string, sql: string, params: DbQueryParams): Promise<Array<Record<string, unknown>>>;
   /** SQL dialect of a connection, used to emit the right placeholders (default sqlite-style "?"). */

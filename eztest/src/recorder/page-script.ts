@@ -56,8 +56,10 @@ export interface ElementInfo {
   css: string;
   /** True for text-entry controls (input/textarea, not buttons/checkboxes). */
   field: boolean;
-  /** True for password inputs: their value is never reported. */
+  /** True for password inputs (and one-time code fields): their value is never reported. */
   secret: boolean;
+  /** True for a one-time code (TOTP / MFA) field. */
+  otp?: boolean;
   /** For custom role=checkbox/switch elements: aria-checked before the click. */
   ariaChecked?: string;
   box?: { x: number; y: number; width: number; height: number };
@@ -79,7 +81,7 @@ export interface ElementInfo {
 export type PageEvent =
   | { kind: 'click'; el: ElementInfo; button?: 'left' | 'right'; t: number; url: string; picked?: string }
   | { kind: 'dblclick'; el: ElementInfo; t: number; url: string }
-  | { kind: 'fill'; el: ElementInfo; value?: string; secret: boolean; t: number; url: string }
+  | { kind: 'fill'; el: ElementInfo; value?: string; secret: boolean; otp?: boolean; t: number; url: string }
   | { kind: 'select'; el: ElementInfo; labels: string[]; t: number; url: string }
   | { kind: 'check' | 'uncheck'; el: ElementInfo; t: number; url: string }
   | { kind: 'press'; el?: ElementInfo; key: string; t: number; url: string }
@@ -475,6 +477,13 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return 0;
     };
+    // A one-time code field (TOTP / MFA): autocomplete=one-time-code, or named like one (Keycloak otp, Entra otc).
+    var isOtp = function (el) {
+      if (lower(el) !== 'input') return false;
+      if (/one-time-code/i.test(el.getAttribute('autocomplete') || '')) return true;
+      var n = ((el.getAttribute('name') || '') + ' ' + (el.id || '')).toLowerCase();
+      return /(^|[^a-z])(otp|totp|otc|one-?time-?code|mfa-?code|totp-?code|otp-?code)([^a-z]|$)/.test(n);
+    };
     var info = function (el) {
       el = meaningful(el);
       var tag = lower(el);
@@ -490,13 +499,14 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       var placeholder = norm(el.getAttribute('placeholder'));
       var field = isField(el);
-      var secret = tag === 'input' && inputType(el) === 'password';
+      var otp = isOtp(el);
+      var secret = (tag === 'input' && inputType(el) === 'password') || otp;
       var text = (field || tag === 'select' || customSelect) ? '' : norm(el.innerText != null ? el.innerText : el.textContent);
       if (text.length > 200) text = text.slice(0, 200);
       var testId = el.getAttribute('data-testid') || '';
       var r = el.getBoundingClientRect();
       var out = {
-        key: keyOf(el), tag: tag, classes: classesOf(el), css: cssPath(el), field: field, secret: secret,
+        key: keyOf(el), tag: tag, classes: classesOf(el), css: cssPath(el), field: field, secret: secret, otp: otp,
         counts: {
           roleName: role && name ? countRoleName(role, name) : 0,
           label: label ? countLabel(label) : 0,
@@ -556,8 +566,10 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       var v = el.value;
       if (lastSent.get(el) === v) return null;
       lastSent.set(el, v);
-      var secret = lower(el) === 'input' && inputType(el) === 'password';
-      var ev = { kind: 'fill', el: info(el), secret: secret };
+      // A one-time code is never reported either: it is useless on replay (a fresh one is computed then).
+      var otp = isOtp(el);
+      var secret = (lower(el) === 'input' && inputType(el) === 'password') || otp;
+      var ev = { kind: 'fill', el: info(el), secret: secret, otp: otp };
       if (!secret) ev.value = v;
       return ev;
     };
