@@ -25,7 +25,7 @@ const ns = (v: unknown) => checkStoreName('namespace', v, NS);
 
 function encodeValue(b: { value?: unknown; sealed?: unknown; secret?: unknown }): { text: string; secret: boolean } {
   const secret = b.secret === true;
-  if (secret && !isSealed(b.sealed)) throw new ServiceError(400, 'A secret value must be sealed by the client (EZS1:...); the server never stores plain secrets');
+  if (secret && !isSealed(b.sealed)) throw new ServiceError(400, 'A secret value must be sealed by the client (EZS2:... or EZS1:...); the server never stores plain secrets');
   const text = secret ? String(b.sealed) : JSON.stringify(b.value ?? null);
   if (text.length > MAX_VALUE) throw new ServiceError(413, `Value too large (max ${MAX_VALUE / 1024} KB)`);
   return { text, secret };

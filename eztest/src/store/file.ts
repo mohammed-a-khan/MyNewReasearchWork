@@ -5,14 +5,15 @@
  *   <dir>/<namespace>/pools/<pool>.json      the items of one data pool
  *
  * Every change is a read-modify-write under an exclusive lock file (O_EXCL
- * create, stale locks of crashed processes are broken after 30 s) and is
+ * create, touched every 5 s while held; locks of crashed processes are broken
+ * after 30 s, and a lock is only ever removed by its holder) and is
  * written to a temporary file that is renamed over the old one, so parallel
  * workers, parallel processes and machines that share the directory never
  * lose a write or claim the same pool item twice.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, open, readdir, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { EzTestError, sleep } from '../core/index.js';
@@ -21,37 +22,95 @@ import { isExpired, type NewPoolItem, type PoolItem, type PoolSummary, type Stor
 const STALE_LOCK_MS = 30_000;
 const LOCK_WAIT_MS = 20_000;
 
-/** Run `fn` holding an exclusive lock on `file` (cross-process). */
-export async function withFileLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+/** How often a held lock is touched, so a long operation is never taken for a crashed holder. */
+const HEARTBEAT_MS = 5_000;
+
+/** The holder line of a lock file: host, pid, time and a random token only the holder knows. */
+function lockLine(token: string): string {
+  return `${hostname()}:${process.pid}:${Date.now()}:${token}`;
+}
+
+/**
+ * Break a stale lock without ever removing a fresh one: the lock file is renamed aside, and only
+ * removed when it is still the stale one that was looked at; a fresh lock that slipped in is put back.
+ */
+async function breakStaleLock(lock: string, seen: string): Promise<void> {
+  const aside = `${lock}.${randomBytes(6).toString('hex')}.broken`;
+  try {
+    await rename(lock, aside);
+  } catch {
+    return; // released or broken by someone else meanwhile
+  }
+  const got = await readFile(aside, 'utf8').catch(() => '');
+  if (got === seen) {
+    await unlink(aside).catch(() => undefined);
+    return;
+  }
+  // Not the stale lock any more: someone took it in between. Give it back (unless yet another holder exists).
+  try {
+    await link(aside, lock);
+  } catch {
+    /* another holder exists now; theirs stands */
+  }
+  await unlink(aside).catch(() => undefined);
+}
+
+/**
+ * Run `fn` holding an exclusive lock on `file` (cross-process). The lock is touched every few
+ * seconds while held (heartbeat), so only locks of crashed processes go stale; it is released only
+ * when it is still ours (a lock we do not own is never removed), and losing it while `fn` ran is an
+ * error, not a silent overwrite.
+ */
+export async function withFileLock<T>(file: string, fn: () => Promise<T>, o: { staleMs?: number; heartbeatMs?: number; waitMs?: number } = {}): Promise<T> {
+  const staleMs = o.staleMs ?? STALE_LOCK_MS;
+  const waitMs = o.waitMs ?? LOCK_WAIT_MS;
   const lock = `${file}.lock`;
   await mkdir(dirname(lock), { recursive: true });
-  const deadline = Date.now() + LOCK_WAIT_MS;
+  const deadline = Date.now() + waitMs;
+  const token = randomBytes(12).toString('hex');
   let delay = 5;
   for (;;) {
     try {
       const h = await open(lock, 'wx');
-      await h.writeFile(`${hostname()}:${process.pid}:${Date.now()}`);
+      await h.writeFile(lockLine(token));
       await h.close();
       break;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
       try {
-        if (Date.now() - (await stat(lock)).mtimeMs > STALE_LOCK_MS) {
-          await unlink(lock).catch(() => undefined);
+        const st = await stat(lock);
+        if (Date.now() - st.mtimeMs > staleMs) {
+          await breakStaleLock(lock, await readFile(lock, 'utf8'));
           continue;
         }
       } catch {
         continue; // released meanwhile
       }
-      if (Date.now() > deadline) throw new EzTestError(`Shared store: could not lock ${file} within ${LOCK_WAIT_MS / 1000} s (remove ${lock} if no EZTest process is running)`, 'STORE_LOCK');
+      if (Date.now() > deadline) throw new EzTestError(`Shared store: could not lock ${file} within ${waitMs / 1000} s (remove ${lock} if no EZTest process is running)`, 'STORE_LOCK');
       await sleep(delay + Math.floor(Math.random() * delay));
       delay = Math.min(100, delay * 2);
     }
   }
+  const ours = async () => (await readFile(lock, 'utf8').catch(() => '')).endsWith(`:${token}`);
+  let lost = false;
+  const beat = setInterval(() => {
+    void (async () => {
+      if (!(await ours())) {
+        lost = true;
+        return;
+      }
+      const now = new Date();
+      await utimes(lock, now, now).catch(() => undefined);
+    })();
+  }, o.heartbeatMs ?? HEARTBEAT_MS);
+  beat.unref();
   try {
-    return await fn();
+    const out = await fn();
+    if (lost || !(await ours())) throw new EzTestError(`Shared store: the lock on ${file} was taken over while this process held it; the change may have raced with another writer`, 'STORE_LOCK_LOST');
+    return out;
   } finally {
-    await unlink(lock).catch(() => undefined);
+    clearInterval(beat);
+    if (await ours()) await unlink(lock).catch(() => undefined);
   }
 }
 

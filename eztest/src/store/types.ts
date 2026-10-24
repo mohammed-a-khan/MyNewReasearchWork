@@ -13,7 +13,7 @@ export interface StoredEntry {
   key: string;
   /** The value (JSON) of a non-secret entry. */
   value?: unknown;
-  /** The encrypted value of a secret entry (EZS1:...). */
+  /** The encrypted value of a secret entry (EZS2:..., older EZS1:...). */
   sealed?: string;
   secret?: boolean;
   /** Also exported to the CI pipeline (output variables and the export artifact). */
