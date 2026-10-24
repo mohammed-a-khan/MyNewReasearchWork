@@ -191,7 +191,7 @@ export async function resolveTarget(
   vars: Record<string, unknown>,
   timeoutMs: number,
   /** Adaptive deadline (reliability/load.ts): the page to probe, and who to tell when the wait was extended. */
-  adapt?: { probe?: Probeable; onExtend?: (e: Extension) => void },
+  adapt?: { probe?: Probeable; onExtend?: (e: Extension) => void; enabled?: boolean },
 ): Promise<Resolution> {
   const deadline = new AdaptiveDeadline(timeoutMs, { what: `locate ${target.description}`, ...adapt });
   let notes: string[] = [];

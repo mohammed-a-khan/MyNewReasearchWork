@@ -32,6 +32,8 @@ describe('code journeys on the runner path', () => {
     expect(j.steps[0]).toMatchObject({ action: 'code', source: { file: FILE, line: 4 } });
   });
 
+  // Three full runs, each launching its browser (the heals of the second wait out the locate timeout of each
+  // renamed element first): more than the default 60 s per test on a slow machine or Firefox.
   it('heals a renamed button inside code steps (variant b): verified by the post-condition, T0 cache next time', async () => {
     const dir = await tempDir('sdk-heal');
     const store = join(dir, 'fp.json');
@@ -55,10 +57,14 @@ describe('code journeys on the runner path', () => {
       const tiers = flat(r3.journeys[0].steps).filter((s) => s.heal).map((s) => s.heal!.tier);
       expect(tiers.length).toBe(3);
       expect(new Set(tiers)).toEqual(new Set(['T0-cache']));
+      // With a verified heal cached, a step looks for its original element only briefly before using the heal,
+      // instead of waiting out the locate timeout as the first heal had to.
+      const healTime = (r: typeof r2) => flat(r.journeys[0].steps).filter((s) => s.heal && !s.children).reduce((t, s) => t + s.durationMs, 0);
+      expect(healTime(r3)).toBeLessThan(healTime(r2));
     } finally {
       await b.close();
     }
-  });
+  }, 120_000);
 
   it('a heal is never accepted when the outcome does not happen (variant b + silent save bug)', async () => {
     const dir = await tempDir('sdk-regress');

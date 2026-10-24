@@ -44,6 +44,9 @@ export interface StepRuntime {
   conditionTimeoutMs: number;
 }
 
+/** How long a step with a cached verified heal looks for its original element before using the heal (T0). */
+const QUICK_LOCATE_MS = 1000;
+
 type Core = Omit<StepResult, 'stepId' | 'intent' | 'startedAt' | 'durationMs' | 'evidence'> & { evidence: string[] };
 
 function conditionFailure(results: ConditionResult[]): string {
@@ -151,12 +154,24 @@ export async function executeStepCore(rawStep: Step, ctx: StepContext, rt: StepR
 
   const target = step.target;
   const root = rootFor(ctx.page, [...(ctx.session?.frames ?? []), ...(target.frames ?? [])]);
-  // Locating waits longer on a loaded machine (reliability/load.ts) instead of healing an element that is only slow to appear.
-  const res = await resolveTarget(root, target, ctx.vars(), Math.min(timeout, rt.locateTimeoutMs), adaptFor(ctx));
-  const hooks = stepHooksFor(ctx.page);
-  hooks?.located?.(res);
   // A shared repository element (unscoped) keeps one memory for every journey that uses it.
   const [memJourney, memStep] = memoryKey(ctx.journey.id, step.id, target);
+  // Locating waits longer on a loaded machine (reliability/load.ts) instead of healing an element that is only slow to appear.
+  const locateMs = Math.min(timeout, rt.locateTimeoutMs);
+  const cachedHeal = rt.opts.healer && !isScoped(target) ? rt.store.get(memJourney, memStep)?.healed : undefined;
+  let res: Awaited<ReturnType<typeof resolveTarget>>;
+  if (cachedHeal && locateMs > QUICK_LOCATE_MS) {
+    // A verified heal is cached for this step (its element was renamed in an earlier run). Look for the original
+    // briefly; when it is still missing and the cached heal matches exactly one element, heal now (T0) instead
+    // of waiting out the whole locate timeout for an element that is gone.
+    res = await resolveTarget(root, target, ctx.vars(), QUICK_LOCATE_MS, { enabled: false });
+    if (!res.locator && !res.ambiguous) {
+      const n = await toLocator(root, interpolateCandidate(cachedHeal.locator, ctx.vars())).count().catch(() => 0);
+      if (n !== 1) res = await resolveTarget(root, target, ctx.vars(), locateMs - QUICK_LOCATE_MS, adaptFor(ctx));
+    }
+  } else res = await resolveTarget(root, target, ctx.vars(), locateMs, adaptFor(ctx));
+  const hooks = stepHooksFor(ctx.page);
+  hooks?.located?.(res);
   if (res.locator && res.candidate) {
     const fp = rt.opts.fingerprints === 'missing' && rt.store.get(memJourney, memStep)?.fingerprint ? undefined : await safeFingerprint(res.locator);
     // A more robust locator for a weak target, checked against the live element before acting:
