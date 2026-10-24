@@ -134,7 +134,8 @@ describe('Browser OAuth as a vault role (EZTest\'s headless Chromium)', () => {
       const claims = tok ? idp.claims(tok) : undefined;
       if (!claims || claims.aud !== 'orders-api') {
         res.writeHead(401);
-        return res.end();
+        res.end();
+        return;
       }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ user: claims.sub, scope: claims.scope }));

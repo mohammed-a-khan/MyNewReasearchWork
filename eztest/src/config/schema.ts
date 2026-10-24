@@ -158,6 +158,54 @@ export const SecretStoreConfigSchema = z.discriminatedUnion('type', [
     clientSecret: z.string().min(1),
     authorityUrl: z.string().url().optional(),
   }),
+  /** HashiCorp Vault KV v2: secret://<name>/path/to/secret#field. Credentials may be secret:// references to earlier stores. */
+  z.object({
+    type: z.literal('hashicorp-vault'),
+    name: z.string().optional(),
+    address: z.string().url(),
+    mount: z.string().min(1).optional(),
+    namespace: z.string().min(1).optional(),
+    auth: z.discriminatedUnion('method', [
+      z.object({ method: z.literal('token'), token: z.string().min(1) }),
+      z.object({ method: z.literal('approle'), roleId: z.string().min(1), secretId: z.string().min(1), mount: z.string().min(1).optional() }),
+    ]),
+    /** Extra CA (PEM file) for a Vault with a private certificate. */
+    ca: z.string().min(1).optional(),
+  }),
+  /** AWS Secrets Manager: secret://<name>/secret-id[#jsonField]. Default credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. */
+  z.object({
+    type: z.literal('aws-secrets-manager'),
+    name: z.string().optional(),
+    region: z.string().min(1),
+    endpoint: z.string().url().optional(),
+    accessKeyId: z.string().min(1).optional(),
+    secretAccessKey: z.string().min(1).optional(),
+    sessionToken: z.string().min(1).optional(),
+    versionStage: z.string().min(1).optional(),
+  }),
+  /** GCP Secret Manager: secret://<name>/secret-name[@version]. The service-account key from a file or a secret reference. */
+  z.object({
+    type: z.literal('gcp-secret-manager'),
+    name: z.string().optional(),
+    project: z.string().min(1).optional(),
+    credentialsFile: z.string().min(1).optional(),
+    credentials: z.string().min(1).optional(),
+    endpoint: z.string().url().optional(),
+  }).refine((s) => !!s.credentialsFile !== !!s.credentials, { message: 'gcp-secret-manager needs exactly one of credentialsFile or credentials' }),
+  /** CyberArk Central Credential Provider: secret://<name>/Safe/Object (or a query Safe=..;Object=..). */
+  z.object({
+    type: z.literal('cyberark-ccp'),
+    name: z.string().optional(),
+    url: z.string().url(),
+    appId: z.string().min(1),
+    safe: z.string().min(1).optional(),
+    folder: z.string().min(1).optional(),
+    /** Client certificate and key (PEM files) for the CCP's mutual TLS; extra CA. */
+    clientCert: z.string().min(1).optional(),
+    clientKey: z.string().min(1).optional(),
+    passphrase: z.string().min(1).optional(),
+    ca: z.string().min(1).optional(),
+  }),
 ]);
 
 /** One pooled account of a role: username plus a secret reference (or ENC(...)) for its password. */
