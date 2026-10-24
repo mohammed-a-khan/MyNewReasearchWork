@@ -5,7 +5,7 @@
  */
 import { EzTestError } from '../../core/index.js';
 
-export type BusKind = 'kafka' | 'amqp' | 'mqtt' | 'ibmmq' | 'memory';
+export type BusKind = 'kafka' | 'amqp' | 'amqp10' | 'mqtt' | 'ibmmq' | 'memory';
 
 /** Where a message goes or comes from. */
 export interface BusDestination {

@@ -52,6 +52,16 @@ export const BrokerSchema = z.discriminatedUnion('type', [
     type: z.literal('ibmmq'), url: z.string().url(), queueManager: z.string().min(1), username: z.string().optional(), password: secret.optional(),
     ca: z.string().optional(), insecure: z.boolean().optional(), waitMs: z.number().int().min(0).optional(),
   }),
+  z.object({
+    /** AMQP 1.0 (RabbitMQ 4, ActiveMQ Artemis, Azure Service Bus, Solace) on EZTest's own client (docs/messaging.md). */
+    type: z.literal('amqp10'), url: z.string().min(1),
+    addressing: z.enum(['plain', 'rabbitmq', 'artemis', 'servicebus', 'solace']).optional(),
+    hostname: z.string().optional(), sasl: z.enum(['PLAIN', 'ANONYMOUS', 'EXTERNAL']).optional(),
+    username: z.string().optional(), password: secret.optional(),
+    ca: z.string().optional(), cert: z.string().optional(), key: z.string().optional(), rejectUnauthorized: z.boolean().optional(),
+    sas: z.object({ keyName: z.string().min(1), sharedAccessKey: secret, ttlSeconds: z.number().int().positive().optional() }).optional(),
+    body: z.enum(['data', 'value']).optional(), credit: z.number().int().positive().optional(), presettled: z.boolean().optional(),
+  }),
   z.object({ type: z.literal('memory') }),
 ]);
 export type BrokerConfig = z.infer<typeof BrokerSchema>;

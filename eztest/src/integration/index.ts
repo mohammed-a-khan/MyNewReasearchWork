@@ -9,6 +9,8 @@ export * from './bus/types.js';
 export { MemoryBroker, MemoryBusDriver, memoryBroker, topicMatches, routingMatches } from './bus/memory.js';
 export { KafkaBusDriver, type KafkaOptions } from './bus/kafka.js';
 export { AmqpBusDriver, type AmqpOptions } from './bus/amqp.js';
+export { Amqp10BusDriver, type Amqp10Options, type Amqp10Addressing } from './bus/amqp10.js';
+export { Amqp10Connection, createSasToken, putToken, encodeMessage, decodeMessage, type Amqp10Message } from './bus/amqp10-client.js';
 export { MqttBusDriver, type MqttOptions } from './bus/mqtt.js';
 export { IbmMqBusDriver, toCorrelId, fromCorrelId, type IbmMqOptions } from './bus/ibmmq.js';
 export { Integration, createIntegrationRuntime, createBusDriver, type IntegrationRuntimeOptions } from './runtime.js';

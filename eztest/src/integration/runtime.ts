@@ -17,6 +17,7 @@ import { safeName } from '../runner/evidence.js';
 import { resolveUrl } from '../runner/api.js';
 import type { StepContext } from '../runner/types.js';
 import { AmqpBusDriver } from './bus/amqp.js';
+import { Amqp10BusDriver } from './bus/amqp10.js';
 import { IbmMqBusDriver } from './bus/ibmmq.js';
 import { KafkaBusDriver } from './bus/kafka.js';
 import { MemoryBusDriver } from './bus/memory.js';
@@ -55,12 +56,13 @@ interface JourneyState {
   listeners: Map<string, { sub: BusSubscription; broker: string; kind: string; dest: BusDestination }>;
 }
 
-const KIND_TEXT: Record<string, string> = { kafka: 'Kafka', amqp: 'RabbitMQ', mqtt: 'MQTT', ibmmq: 'IBM MQ', memory: 'memory' };
+const KIND_TEXT: Record<string, string> = { kafka: 'Kafka', amqp: 'RabbitMQ', amqp10: 'AMQP 1.0', mqtt: 'MQTT', ibmmq: 'IBM MQ', memory: 'memory' };
 
 export function createBusDriver(name: string, c: BrokerConfig, baseDir: string): BusDriver {
   switch (c.type) {
     case 'kafka': return new KafkaBusDriver(name, c);
     case 'amqp': return new AmqpBusDriver(name, c);
+    case 'amqp10': return new Amqp10BusDriver(name, { ...c, ...(['ca', 'cert', 'key'] as const).reduce((o, k) => (c[k] ? { ...o, [k]: isAbsolute(c[k]!) ? c[k] : resolve(baseDir, c[k]!) } : o), {}) });
     case 'mqtt': return new MqttBusDriver(name, c);
     case 'ibmmq': return new IbmMqBusDriver(name, { ...c, ...(c.ca ? { ca: isAbsolute(c.ca) ? c.ca : resolve(baseDir, c.ca) } : {}) });
     case 'memory': return new MemoryBusDriver(name);
@@ -126,7 +128,10 @@ export class Integration implements IntegrationRuntime {
     const all = [...new Set([...this.drivers.keys(), ...Object.keys(configured)])];
     let pick = name;
     if (!pick) {
-      const ofKind = kind ? all.filter((n) => (this.drivers.get(n)?.kind ?? configured[n]?.type) === kind) : all;
+      // "RabbitMQ/AMQP queue" also finds an AMQP 1.0 broker when no AMQP 0-9-1 one is configured.
+      const typeOf = (n: string) => this.drivers.get(n)?.kind ?? configured[n]?.type;
+      let ofKind = kind ? all.filter((n) => typeOf(n) === kind) : all;
+      if (kind === 'amqp' && !ofKind.length) ofKind = all.filter((n) => typeOf(n) === 'amqp10');
       if (ofKind.length === 0) throw new EzTestError(`No ${kind ? `${KIND_TEXT[kind]} ` : ''}broker configured (messaging.brokers)`, 'BUS_CONFIG');
       if (ofKind.length > 1 && !kind) throw new EzTestError(`Several brokers are configured (${ofKind.join(', ')}); say which one: "... on <broker>"`, 'BUS_CONFIG');
       pick = ofKind[0];
@@ -138,7 +143,7 @@ export class Integration implements IntegrationRuntime {
       d = createBusDriver(pick, c, this.opts.baseDir);
       this.drivers.set(pick, d);
     }
-    if (kind && d.kind !== kind && d.kind !== 'memory') throw new EzTestError(`Broker "${pick}" is ${KIND_TEXT[d.kind]}, but the step says ${KIND_TEXT[kind]}`, 'BUS_CONFIG');
+    if (kind && d.kind !== kind && d.kind !== 'memory' && !(kind === 'amqp' && d.kind === 'amqp10')) throw new EzTestError(`Broker "${pick}" is ${KIND_TEXT[d.kind]}, but the step says ${KIND_TEXT[kind]}`, 'BUS_CONFIG');
     return d;
   }
 
@@ -322,7 +327,7 @@ export class Integration implements IntegrationRuntime {
           for (const [i, p] of payloads.entries()) {
             await this.opts.contracts.recordMessage(ctx.ledger, {
               description: count > 1 ? `${step.intent} (${i + 1})` : step.intent,
-              channel: { transport: driver.kind, destType: dest.type, dest: dest.name, broker: driver.name },
+              channel: { transport: driver.kind === 'amqp10' ? 'amqp' : driver.kind, destType: dest.type, dest: dest.name, broker: driver.name },
               contents: p, ...(asJson(got[i].payload) !== undefined ? { contentType: 'application/json' } : {}),
             });
           }

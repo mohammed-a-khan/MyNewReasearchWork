@@ -27,7 +27,7 @@ const KEY = String.raw`([A-Za-z_][\w.-]*)`;
 const VAR = String.raw`\$\{[\w.]+\}`;
 const NAME = String.raw`(${Q}|[A-Za-z_][\w.-]*)`;
 const DUR = String.raw`(\d+(?:\.\d+)?)\s*(milliseconds?|millis|ms|minutes?|mins?|m|seconds?|secs?|s|hours?|h)\b`;
-const KIND = String.raw`(kafka|rabbit\s*mq|amqp|mqtt|ibm\s*mq|mq|jms|memory)`;
+const KIND = String.raw`(kafka|amqp\s*1(?:\.0)?|amqp10|artemis|service\s*bus|solace|rabbit\s*mq|amqp|mqtt|ibm\s*mq|mq|jms|memory)`;
 /** [kind] (topic|queue|exchange) "name" [on broker] */
 const DEST = String.raw`(?:the\s+)?(?:${KIND}\s+)?(topic|queue|exchange)\s+(${Q})(?:\s+(?:on|via|using|at)\s+(?!sftp\b|ssh\b)([\w.-]+))?`;
 
@@ -53,8 +53,8 @@ function msText(n: number): string {
   return `${n} ms`;
 }
 
-const KIND_WORDS: Record<string, string> = { kafka: 'kafka', rabbitmq: 'amqp', amqp: 'amqp', mqtt: 'mqtt', ibmmq: 'ibmmq', mq: 'ibmmq', jms: 'ibmmq', memory: 'memory' };
-const KIND_TEXT: Record<string, string> = { kafka: 'Kafka', amqp: 'RabbitMQ', mqtt: 'MQTT', ibmmq: 'IBM MQ', memory: 'memory' };
+const KIND_WORDS: Record<string, string> = { kafka: 'kafka', 'amqp1.0': 'amqp10', amqp1: 'amqp10', amqp10: 'amqp10', artemis: 'amqp10', servicebus: 'amqp10', solace: 'amqp10', rabbitmq: 'amqp', amqp: 'amqp', mqtt: 'mqtt', ibmmq: 'ibmmq', mq: 'ibmmq', jms: 'ibmmq', memory: 'memory' };
+const KIND_TEXT: Record<string, string> = { kafka: 'Kafka', amqp: 'RabbitMQ', amqp10: 'AMQP 1.0', mqtt: 'MQTT', ibmmq: 'IBM MQ', memory: 'memory' };
 
 function kindOf(w: string | undefined): string | undefined {
   return w ? KIND_WORDS[w.toLowerCase().replace(/\s+/g, '')] : undefined;
