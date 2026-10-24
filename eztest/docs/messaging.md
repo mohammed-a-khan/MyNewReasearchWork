@@ -2,7 +2,7 @@
 
 Event-driven back ends make "click Pay, an event is emitted, the invoice is consumed" a core end-to-end check. EZTest covers this, and the other integration points batch-style systems use, as plain-English steps:
 
-- message buses: Kafka, RabbitMQ (AMQP 0-9-1), MQTT, IBM MQ, and an in-memory broker;
+- message buses: Kafka, RabbitMQ (AMQP 0-9-1), AMQP 1.0 (RabbitMQ 4, ActiveMQ Artemis, Azure Service Bus, Solace), MQTT, IBM MQ, and an in-memory broker;
 - gRPC calls and mocks;
 - SFTP and folder file drops;
 - SSH commands and batch jobs;
@@ -20,6 +20,7 @@ The client libraries are optional peer dependencies, loaded on first use like th
 | RabbitMQ / AMQP 0-9-1 | `amqplib` (MIT) | `npm install amqplib` |
 | MQTT 3.1.1 / 5 | `mqtt` (MIT) | `npm install mqtt` |
 | IBM MQ | nothing: the MQ REST messaging API (mqweb) over HTTPS | |
+| AMQP 1.0 | nothing: EZTest's own AMQP 1.0 client (see [AMQP 1.0](#amqp-10)) | |
 | gRPC | `@grpc/grpc-js`, `@grpc/proto-loader` (Apache-2.0) | `npm install @grpc/grpc-js @grpc/proto-loader` |
 | SFTP / SSH | `ssh2` (MIT) | `npm install ssh2` |
 
@@ -59,6 +60,65 @@ messaging:
 **AMQP queues.** Queues belong to the application: a missing queue is an error (`AMQP_QUEUE_MISSING`), unless the broker sets `declare: true` (then EZTest declares it, durable). A permission refusal is reported as one (`BUS_AUTH`).
 
 **Kafka topics.** A missing topic is an error (`KAFKA_TOPIC_MISSING`); with `createTopics: true` EZTest creates it (and a failure to create is an error). Consumers use one consumer group per run, never commit offsets, and the groups are deleted when the run ends.
+
+### AMQP 1.0
+
+`type: amqp10` talks AMQP 1.0 (OASIS) through EZTest's own client, written from the specification: the type system and framing, SASL (PLAIN, ANONYMOUS, EXTERNAL), TLS, connections, sessions with flow windows, sender and receiver links with link credit, multi-frame transfers, settlement and outcomes, and the message sections (properties, application properties, data, amqp-value, amqp-sequence, annotations). No AMQP library is installed or loaded.
+
+```yaml
+messaging:
+  brokers:
+    rabbit4:   { type: amqp10, url: "amqp://svc:${RABBIT_PASSWORD}@rabbit:5672", addressing: rabbitmq }
+    artemis:   { type: amqp10, url: "amqps://artemis:5671", username: svc, password: secret://env/ARTEMIS_PW, addressing: artemis, ca: certs/artemis-ca.pem }
+    servicebus:
+      type: amqp10
+      url: amqps://my-namespace.servicebus.windows.net
+      addressing: servicebus
+      sas: { keyName: RootManageSharedAccessKey, sharedAccessKey: secret://vault/sb-key }
+    solace:    { type: amqp10, url: "amqp://solace:5672", username: svc, password: secret://env/SOLACE_PW, addressing: solace }
+```
+
+The steps are the same publish, listen, wait, filter, expect-none and purge steps as for the other buses. Name the broker (`on rabbit4`), or say `AMQP 1.0 queue "orders"` (also `Artemis`, `Service Bus`, `Solace`). A step that says `RabbitMQ queue` uses an `amqp10` broker when no AMQP 0-9-1 broker is configured.
+
+```text
+Start listening on AMQP 1.0 queue "orders" on rabbit4 as events
+Publish message '{"orderId": ${orderId}}' to AMQP 1.0 queue "orders" on rabbit4 with headers "source" = "eztest" with correlation id "c-${orderId}"
+Wait for a message in events where "$.orderId" = ${orderId} and header "source" = "eztest" within 15 s as received
+```
+
+How messages map:
+
+| BusMessage | AMQP 1.0 |
+|---|---|
+| payload | the `data` section (bytes; `body: value` sends an AMQP string instead, a JMS TextMessage on Artemis); received `amqp-value` bodies are read as text or JSON |
+| headers | application properties |
+| key | `properties.subject` |
+| correlationId, messageId | `properties.correlation-id`, `properties.message-id` |
+| timestamp | `properties.creation-time` |
+| routingKey (received) | the `x-routing-key` message annotation (RabbitMQ) |
+
+**Publishing waits for the outcome.** The message is sent unsettled and the step passes only when the broker accepts it. A rejection fails with the broker's reason (`AMQP10_REJECTED`); "released" or "modified" (nothing routed it) fails with `AMQP10_NOT_DELIVERED`. `presettled: true` sends without waiting.
+
+**Waiting on a queue** settles (accepts) only the messages a step matched. The others are released when the listener closes, and go back to the queue. Waiting on a topic (Artemis, Solace) uses a private subscription, and everything it receives is accepted. `credit` (default 100) is the link credit the listener keeps topped up. `Purge` receives and accepts until the queue stays quiet for 300 ms (AMQP 1.0 has no purge operation).
+
+**Addresses.** `addressing` decides how a queue, topic or exchange name becomes an AMQP address:
+
+| addressing | queue | topic | exchange |
+|---|---|---|---|
+| `plain` (default) | the name | the name | the name |
+| `rabbitmq` (RabbitMQ 4, address format v2) | `/queues/<name>` | `/exchanges/amq.topic/<name>` | `/exchanges/<name>/<routing key>` |
+| `artemis`, `solace` | the name, capability `queue` | the name, capability `topic` | the name, capability `topic` |
+| `servicebus` | the name | the name (to send); receive from `<topic>/Subscriptions/<subscription>` as a queue | |
+
+RabbitMQ delivers AMQP 1.0 messages from queues only, so a wait on a RabbitMQ exchange is refused with that explanation. Bind a queue to the exchange and wait on the queue. With `rabbitmq`, `open.hostname` is `vhost:<path of the URL>` (`vhost:/` by default).
+
+**Errors.** A missing queue or address fails with `AMQP10_NOT_FOUND` and the broker's text. EZTest never creates queues behind your back. Refused credentials fail with `BUS_AUTH`.
+
+**TLS.** `amqps://` URLs use TLS: `ca` trusts a private CA, `cert` and `key` present a client certificate (with `sasl: EXTERNAL`), and `rejectUnauthorized: false` is for development brokers only.
+
+**Azure Service Bus.** Service Bus authorises each entity with claims-based security (CBS). With `sas`, EZTest connects with SASL ANONYMOUS, makes a Shared Access Signature token for `sb://<namespace>/<entity>`, sends it to the `$cbs` node as a `put-token` request (`type: servicebus.windows.net:sastoken`), and waits for status 200 or 202 before it attaches links. The SAS token is HMAC-SHA256 over the URL-encoded resource URI and expiry (`ttlSeconds`, default 3600). Each entity is authorised once per connection; a token is not renewed within the connection's life, so keep runs shorter than `ttlSeconds` or raise it. Use queue names, and `<topic>/Subscriptions/<name>` to receive from a topic subscription.
+
+*Test status:* the client is tested live against RabbitMQ 4.1 (plain AMQP and TLS: round trips, filters, settlement and release, a 300 KB message across 128 KB frames, 250 messages through a 100-message credit window, missing queues, wrong passwords, full journeys through the engine). The CBS and SASL flows are tested against a scripted AMQP 1.0 peer, which checks the SAS signature as Service Bus does. **ActiveMQ Artemis, Azure Service Bus and Solace have not been tested against the real products**: their `addressing` presets follow their documentation, and the live Azure path (CBS against a real namespace) has never run here. Not implemented: transactions, link recovery after a reconnect (a dropped connection fails pending steps; the next step reconnects), message-level filters (JMS selectors), Service Bus sessions and message locks, and the RabbitMQ AMQP 1.0 management API (declaring queues and bindings).
 
 **IBM MQ waits** browse the queue (MQ 9.1.5+ REST API) and consume only the message a wait matched, by its message id; other messages are never taken, held or reordered. A REST API without browse fails with `BUS_NO_BROWSE`.
 

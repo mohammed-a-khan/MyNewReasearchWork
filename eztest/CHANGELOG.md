@@ -4,6 +4,19 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Documents, SOAP and AMQP 1.0
+
+- **Scanned PDFs are read by OCR** ([docs/documents.md](docs/documents.md)). `method: 'ocr'` renders every page with pdf.js on `@napi-rs/canvas` and reads it with tesseract.js, locally. `method: 'auto'` OCRs only the pages without a text layer. The words become positioned items with their confidence, so field and table templates work on scans; values say `method: "ocr"` and carry the recogniser's confidence. Numeric template values that OCR misread get a second, digits-only look. Measured on generated noisy scans: every field at 120 dpi and above, and 98-100% of amounts. Missing packages fail with the install command (`DOCS_CANVAS_MISSING`, `DOCS_OCR_MISSING`); `vision` is refused with an explanation.
+- **`method: 'layout'`**: ruling lines from the page's drawing operators, two-column pages read column by column, and template-free tables from ruling grids and from aligned text.
+- **Visual PDF comparison**: `Expect document invoice to look like "baselines/invoice.pdf" within 0.5% ignoring page 1 400,40,150,20`. Pages are rendered and pixel-diffed (pixelmatch) with masks and a tolerance; diff images, the renderings of failing pages and an HTML report are kept as evidence.
+- **Fields printed as one run** ("Invoice No: INV-1001") are found by template-free field detection, which the PDF diff uses.
+- EZTest's own minimal PDF writer for image-only PDFs (`writeImagePdf`), used to build scanned test documents.
+- **SOAP from WSDL** ([docs/soap.md](docs/soap.md)): `soap.services` configuration and the step `Call SOAP operation "GetPolicy" on "policy" with PolicyId = "P-100"`. Requests are built from the operation's schema (named values, JSON, a body or a file), validated before sending, and responses are validated too. `eztest import wsdl <file>` writes a journey per service with request skeletons and the configuration to paste. WSDL 1.1 and 2.0, SOAP 1.1 and 1.2 bindings, imports and inline schemas.
+- **XSD validation** of the commonly used subset (sequence, choice, all, groups, any, derivation, facets, list, union, nil, xsi:type, imports); what is not supported is named, never passed silently.
+- **WS-Security**: UsernameToken (text and digest), Timestamp, and X.509 signatures over Body and Timestamp with EZTest's own XML Signature (exclusive canonicalization, SHA-256, RSA-SHA256). Signed responses are verified (covered parts, trusted signer, timestamp; signature wrapping refused). Canonicalization matches the W3C examples and libxml2; signatures verify with libxml2 and OpenSSL.
+- **MTOM/XOP**: base64 elements sent as binary MIME parts, MTOM responses reassembled.
+- **AMQP 1.0** ([docs/messaging.md](docs/messaging.md#amqp-10)): `type: amqp10` brokers on EZTest's own AMQP 1.0 client (type system, framing, SASL PLAIN/ANONYMOUS/EXTERNAL, TLS, sessions, links, credit, multi-frame transfers, outcomes, message sections), with the same publish, listen, wait and filter steps. Address presets for RabbitMQ 4, ActiveMQ Artemis, Azure Service Bus (SAS tokens over a CBS put-token) and Solace. Tested live against RabbitMQ 4 (plain and TLS); Artemis, Service Bus and Solace are not tested against the real products.
+
 ### Hardening after the first audit
 
 - **The npm package is `@mohammed-a-khan/eztest`** (the unscoped `eztest` is an unrelated package); the command is still `eztest`, and imports use the scoped name (`@mohammed-a-khan/eztest/sdk`; the bare `eztest/...` still resolves in code journeys). `publishConfig.access` is public.

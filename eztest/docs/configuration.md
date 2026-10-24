@@ -223,9 +223,14 @@ contracts:                         # EZTest contracts: files, matchers, provider
   app: shop-web                    # this application on the results server (server:)
   canRelease: { environment: production }
 
-messaging:                         # Kafka, RabbitMQ, MQTT, IBM MQ brokers (docs/messaging.md)
+messaging:                         # Kafka, RabbitMQ, AMQP 1.0, MQTT, IBM MQ brokers (docs/messaging.md)
   brokers:
     bus: { type: kafka, brokers: [localhost:9092] }
+    sb: { type: amqp10, url: amqps://ns.servicebus.windows.net, addressing: servicebus, sas: { keyName: send, sharedAccessKey: secret://env/SB_KEY } }
+
+soap:                              # SOAP services from WSDLs: validation, WS-Security, MTOM (docs/soap.md)
+  services:
+    policy: { wsdl: wsdl/policy.wsdl, endpoint: https://policy.test/ws, security: { username: svc, password: secret://env/POLICY_PW, passwordType: digest } }
 
 grpc: { services: { orders: { address: localhost:50051, proto: protos/orders.proto } } }
 files:                             # SFTP servers, SSH hosts with allow-listed commands, drop folders
