@@ -4,7 +4,7 @@
  * Firefox over WebDriver BiDi, the remote protocol built into Firefox. No
  * Safari/WebKit.
  *
- *   import { chromium, firefox } from 'eztest/browser';
+ *   import { chromium, firefox } from '@mohammed-a-khan/eztest/browser';
  *   const browser = await chromium.launch();            // or firefox.launch()
  *   const page = await (await browser.newContext()).newPage();
  *   await page.goto('https://example.com');
