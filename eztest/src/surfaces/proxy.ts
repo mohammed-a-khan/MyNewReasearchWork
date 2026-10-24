@@ -126,6 +126,16 @@ function tunnel(proxy: URL, host: string, port: number, signal?: AbortSignal | n
   });
 }
 
+/**
+ * A raw socket to host:port through the HTTP proxy (CONNECT), for protocols other than plain
+ * HTTP requests (WebSocket upgrades); TLS to the target, when wanted, runs over it.
+ */
+export function openProxyTunnel(settings: ProxySettings, host: string, port: number, signal?: AbortSignal): Promise<import('node:net').Socket> {
+  const proxy = new URL(settings.url);
+  if (proxy.protocol !== 'http:' && proxy.protocol !== 'https:') throw new EzTestError(`Proxy URL ${redact(proxy)}: use http://host:port (an HTTP CONNECT proxy)`, 'PROXY_CONFIG');
+  return tunnel(proxy, host, port, signal);
+}
+
 function decoded(res: IncomingMessage): Readable {
   const enc = String(res.headers['content-encoding'] ?? '').toLowerCase();
   if (enc === 'gzip' || enc === 'x-gzip') return res.pipe(createGunzip());

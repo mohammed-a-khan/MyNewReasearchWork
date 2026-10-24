@@ -262,7 +262,16 @@ export function advancedStepToText(s: Step): string {
       return `Get the latest SMS${a.to ? ` to ${q(a.to)}` : ''}${a.from ? ` from ${q(a.from)}` : ''}${a.contains ? ` containing ${q(a.contains)}` : ''}${a.timeoutMs ? ` within ${a.timeoutMs} ms` : ''} as ${s.captureAs ?? 'sms'}`;
     case 'ws':
       switch (a.op) {
-        case 'connect': return `Connect to websocket ${q(a.url)} as ${String(a.socket ?? 'ws')}`;
+        case 'connect': {
+          const opts = [
+            a.asRole !== undefined ? ` using role ${String(a.asRole)}` : '',
+            a.headers ? ` with headers ${Object.entries(a.headers as Record<string, string>).map(([k, v]) => `${q(k)} = ${q(v)}`).join(', ')}` : '',
+            Array.isArray(a.protocols) && a.protocols.length ? ` with protocol ${(a.protocols as string[]).map((p) => q(p)).join(', ')}` : '',
+            a.clientCertificate !== undefined ? ` with client certificate ${q(a.clientCertificate)}` : '',
+            a.pingIntervalMs !== undefined ? ` with ping every ${Number(a.pingIntervalMs) % 1000 === 0 ? `${Number(a.pingIntervalMs) / 1000} s` : `${String(a.pingIntervalMs)} ms`}` : '',
+          ].join('');
+          return `Connect to websocket ${q(a.url)} as ${String(a.socket ?? 'ws')}${opts}`;
+        }
         case 'send': return `Send ${q(v)} on websocket ${String(a.socket ?? 'ws')}`;
         case 'expect': return `Wait for a websocket message containing ${q(a.contains)} on ${String(a.socket ?? 'ws')}${store(s.captureAs)}`;
         case 'close': return `Close websocket ${String(a.socket ?? 'ws')}`;

@@ -13,7 +13,7 @@ import {
 } from '../core/index.js';
 import { parseCsv } from '../docs/csv.js';
 import { readXlsxTable } from '../importers/xlsx.js';
-import { buildSoapEnvelope, caseInsensitiveRow, compareRows, getPath, parseSoapResponse, placeholder, scanSql, WsClient, type CompareOptions, type SqlDialect } from '../surfaces/index.js';
+import { buildSoapEnvelope, caseInsensitiveRow, compareRows, getPath, parseSoapResponse, placeholder, scanSql, selectClientCertificate, WsClient, type CompareOptions, type SqlDialect } from '../surfaces/index.js';
 import type { ActionOutcome } from './actions.js';
 import { regex } from './conditions-advanced.js';
 import { maskDeep } from './dom.js';
@@ -274,7 +274,7 @@ export async function dbAction(step: Step, ctx: StepContext, opts: RunOptions): 
 
 // ------------------------------------------------------------------ WebSocket
 
-export async function wsAction(step: Step, ctx: StepContext, timeout: number): Promise<ActionOutcome> {
+export async function wsAction(step: Step, ctx: StepContext, timeout: number, opts?: Pick<RunOptions, 'apiAuth' | 'clientCertificates'>): Promise<ActionOutcome> {
   const a = step.args ?? {};
   const session = ctx.session;
   if (!session) throw new EzTestError('websocket steps need a browser session', 'NO_SESSION');
@@ -290,7 +290,21 @@ export async function wsAction(step: Step, ctx: StepContext, timeout: number): P
       let url = ctx.interpolate(String(a.url));
       if (!/^wss?:/i.test(url)) url = resolveUrl(url, ctx.baseUrl).replace(/^http/i, 'ws');
       await session.sockets.get(name)?.close().catch(() => undefined);
-      session.sockets.set(name, await WsClient.connect(url, { timeoutMs: timeout }));
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries((a.headers ?? {}) as Record<string, string>)) {
+        headers[k] = ctx.interpolate(v);
+      }
+      if (a.asRole !== undefined) {
+        if (!opts?.apiAuth) throw new EzTestError(`Websocket as role "${String(a.asRole)}" needs API credentials for the role (identity.roles.${String(a.asRole)}.api)`, 'NO_API_AUTH');
+        Object.assign(headers, await opts.apiAuth(String(a.asRole), ctx));
+      }
+      const cert = selectClientCertificate(opts?.clientCertificates, url.replace(/^ws/i, 'http'), a.clientCertificate !== undefined ? String(a.clientCertificate) : undefined);
+      session.sockets.set(name, await WsClient.connect(url, {
+        timeoutMs: timeout, headers,
+        ...(Array.isArray(a.protocols) ? { protocols: (a.protocols as string[]).map((p) => ctx.interpolate(p)) } : {}),
+        ...(cert ? { tls: { ...(cert.pfx ? { pfx: cert.pfx } : {}), ...(cert.cert ? { cert: cert.cert } : {}), ...(cert.key ? { key: cert.key } : {}), ...(cert.passphrase !== undefined ? { passphrase: cert.passphrase } : {}), ...(cert.ca ? { ca: cert.ca } : {}) } } : {}),
+        ...(a.pingIntervalMs !== undefined ? { pingIntervalMs: Number(a.pingIntervalMs) } : {}),
+      }));
       return {};
     }
     case 'send': {

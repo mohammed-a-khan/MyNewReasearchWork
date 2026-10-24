@@ -160,7 +160,7 @@ export async function performAdvancedAction(step: Step, loc: Locator | undefined
     case 'browser': return browserAction(step, ctx);
     case 'email': case 'sms': return messageAction(step, ctx, opts, timeout);
     case 'voice': return voiceAction(step, ctx, opts);
-    case 'ws': return wsAction(step, ctx, timeout);
+    case 'ws': return wsAction(step, ctx, timeout, opts);
     case 'compareData': return compareDataAction(step, ctx, opts);
     case 'set': return setAction(step, ctx);
     case 'integration': return integrationAction(step, ctx, opts, timeout);

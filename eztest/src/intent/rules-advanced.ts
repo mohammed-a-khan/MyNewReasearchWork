@@ -733,9 +733,30 @@ export const ADVANCED_RULES: IntentRule[] = [
     { name: 'soap', keywords: ['call', 'send'], example: 'Call SOAP action "GetOrder" on /soap with body "<GetOrder><Id>1</Id></GetOrder>" and store as order',
       re: new RegExp(String.raw`^(?:call|send|invoke)\s+(?:the\s+)?soap\s+(?:action|operation|request)\s+(${Q})\s+(?:on|to|at)\s+(${Q}|\S+)\s+with\s+(?:the\s+)?body\s+(${Q})(?:\s+using\s+soap\s+(1\.[12]))?(?:\s+as\s+([\w-]+)(?=\s|$))?${STORE}?$`, 'i'),
       build: (m, q) => ({ action: 'api', api: { method: 'POST', url: V(m[2], q), soap: { action: V(m[1], q), body: V(m[3], q), ...(m[4] ? { version: m[4] as '1.1' | '1.2' } : {}) }, ...(m[5] ? { asRole: m[5] } : {}) }, captureAs: m[6] ?? 'response' }) },
-    { name: 'ws-connect', keywords: ['connect', 'open'], example: 'Connect to websocket "/ws" as feed',
-      re: new RegExp(String.raw`^(?:connect\s+to|open)\s+(?:a\s+|the\s+)?web\s*socket\s+(?:at\s+|to\s+)?(${Q}|\S+)(?:\s+as\s+(\w+))?$`, 'i'),
-      build: (m, q) => ({ action: 'ws', args: { op: 'connect', url: V(m[1], q), socket: m[2] ?? 'ws' } }) },
+    { name: 'ws-connect', keywords: ['connect', 'open'], example: 'Connect to websocket "/ws" as feed using role manager with headers "X-Tenant" = "eu" with protocol "chat.v2"',
+      re: new RegExp(String.raw`^(?:connect\s+to|open)\s+(?:a\s+|the\s+)?web\s*socket\s+(?:at\s+|to\s+)?(${Q}|\S+)(?:\s+as\s+(\w+))?((?:\s+(?:using|with)\s+.*)?)$`, 'i'),
+      build: (m, q) => {
+        const args: Record<string, unknown> = { op: 'connect', url: V(m[1], q), socket: m[2] ?? 'ws' };
+        for (const raw of (m[3] ?? '').split(/\s+(?=(?:using|with)\s)/i)) {
+          const c = raw.trim();
+          if (!c) continue;
+          let x: RegExpExecArray | null;
+          if ((x = /^(?:using|with)\s+(?:the\s+)?role\s+([\w.-]+)$/i.exec(c))) args.asRole = x[1];
+          else if ((x = new RegExp(String.raw`^with\s+(?:the\s+)?(?:sub)?protocols?\s+(${Q}(?:\s*,\s*${Q})*)$`, 'i').exec(c))) args.protocols = x[1].split(/\s*,\s*/).map((p) => V(p, q));
+          else if ((x = new RegExp(String.raw`^with\s+(?:the\s+)?client\s+certificate\s+(${Q})$`, 'i').exec(c))) args.clientCertificate = V(x[1], q);
+          else if ((x = /^with\s+(?:a\s+)?ping\s+every\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?)$/i.exec(c))) args.pingIntervalMs = /^ms|^milli/i.test(x[2]) ? Number(x[1]) : Math.round(Number(x[1]) * 1000);
+          else if ((x = /^with\s+headers?\s+(.+)$/i.exec(c))) {
+            const headers: Record<string, string> = {};
+            for (const h of x[1].split(/\s*,\s*/)) {
+              const hm = new RegExp(String.raw`^(${Q}|[\w-]+)\s*(?:=|:)\s*(${Q}|\$\{[\w.]+\}|\S+)$`).exec(h.trim());
+              if (!hm) throw Object.assign(new Error(`Expected header "name" = "value", got "${h}"`), { fatal: true });
+              headers[V(hm[1], q)] = V(hm[2], q);
+            }
+            args.headers = headers;
+          } else throw Object.assign(new Error(`Unknown websocket option "${c}" (using role <role>, with headers "Name" = "value", with protocol "name", with client certificate "name", with ping every 10 s)`), { fatal: true });
+        }
+        return { action: 'ws', args };
+      } },
     { name: 'ws-send', keywords: ['send'], example: 'Send "ping" on websocket feed',
       re: new RegExp(String.raw`^send\s+(?:the\s+)?(?:web\s*socket\s+message\s+)?(${Q})\s+(?:on|over|to|through|via)\s+(?:the\s+)?web\s*socket(?:\s+(\w+))?$|^send\s+web\s*socket\s+message\s+(${Q})(?:\s+on\s+(\w+))?$`, 'i'),
       build: (m, q) => ({ action: 'ws', value: V(m[1] ?? m[3], q), args: { op: 'send', socket: m[2] ?? m[4] ?? 'ws' } }) },
