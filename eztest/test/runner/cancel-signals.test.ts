@@ -181,7 +181,7 @@ describe('cancelling a run with process workers (--workers 2)', () => {
     const { dir, tmp } = await workersProject();
     try {
       const c = start([join(ROOT, 'src/cli/bin.ts'), 'run', '--no-analyze', '--workers', '2'], dir, { TMPDIR: tmp });
-      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/);
+      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/, 120_000); // two workers start (engine + browser each) first
       await new Promise((r) => setTimeout(r, 1500)); // both journeys wait on the button, each in its own worker
       expect(readdirSync(tmp).filter((n) => LEFTOVER.test(n)).length).toBeGreaterThan(1); // one browser profile per worker
       c.proc.kill('SIGTERM');
@@ -202,13 +202,13 @@ describe('cancelling a run with process workers (--workers 2)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 240_000);
 
   it('a forced stop (grace period over) kills the workers and their browsers and writes the partial run', async () => {
     const { dir, tmp } = await workersProject();
     try {
       const c = start([join(ROOT, 'src/cli/bin.ts'), 'run', '--no-analyze', '--workers', '2'], dir, { TMPDIR: tmp, EZTEST_CANCEL_GRACE_MS: '1' });
-      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/);
+      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/, 120_000); // two workers start (engine + browser each) first
       await new Promise((r) => setTimeout(r, 1500));
       c.proc.kill('SIGINT');
       const { code } = await c.exited;
@@ -221,7 +221,7 @@ describe('cancelling a run with process workers (--workers 2)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 240_000);
 });
 
 describe('startup sweep of stale temp dirs', () => {
