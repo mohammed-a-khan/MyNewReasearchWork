@@ -163,7 +163,7 @@ describe.skipIf(!ONLINE)('the-internet.herokuapp.com', () => {
         'Open /hovers',
         'Hover over the "User Avatar" image in the row containing "name: user2"',
         'Click the "View profile" link',
-        '  Expect URL contains "/users/2"',
+        '  Expect URL contains "/users/"', // record ids in the path are left out (they differ between runs)
       ]);
       expect(lines).toContain('Drag #column-a to #column-b');
       expect(lines).toContain('Accept the next alert');

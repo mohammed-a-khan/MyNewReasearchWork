@@ -94,7 +94,7 @@ Each phrasing accepts natural variants (articles, "I"/"the user", third person, 
 **Recording real apps.** The recorder writes what a person meant, not what the page did on the way:
 - a pick from a custom dropdown is one `Select ... from ... dropdown` step; a suggestion picked after typing is `Click the "Ayesha Rahman" option`, and the app writing that name into its field is not recorded as typing;
 - a click on a loading overlay or backdrop that is gone a moment later is left out (with a warning);
-- a name that repeats (two identical suggestions, two "New order" links) is recorded by position in words, `the 1st "New order" link`, with a warning to add a test id; a unique test id or id is preferred when there is one;
+- a name that repeats (two identical suggestions, two "New order" links) is told apart by its row, its named landmark (`the "New order" link inside the "Main" navigation`) or, failing those, its position in words (`the 1st "New order" link`); a unique test id or id is preferred when there is one;
 - URL expectations leave out what changes on every run: record ids (`/empNumber/7`), UUIDs, hashes and one-time tokens (`/resetCode/YeC8...`), so `Expect URL contains "/pim/viewPersonalDetails/empNumber/"`;
 - every recording says where it was recorded (`Base URL:`), unless the project's `baseUrl` already points there; `eztest run --base-url <url>` points the same journeys at another environment.
 

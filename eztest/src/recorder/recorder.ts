@@ -42,7 +42,7 @@ export interface RecorderOptions {
 /** Wait this long before committing events, so page events and navigations can be ordered by time. */
 const SETTLE_MS = 120;
 /** A navigation this soon after a click or key press in the page was started by it (a sign-in's redirect chain). */
-const USER_NAV_WINDOW_MS = 5000;
+const USER_NAV_WINDOW_MS = 1200;
 
 async function launch(opts: RecorderOptions): Promise<Browser> {
   const kind = opts.browser ?? 'chromium';
@@ -265,7 +265,8 @@ export class Recorder {
     if (!this.tabs.has(source.page)) this.onNewPage(source.page);
     const tab = this.tabs.get(source.page) ?? 1;
     this.touch(tab);
-    if (ev.kind !== 'fill') this.lastUserAction = Date.now();
+    // What can start a navigation: a click, or Enter/Space on a focused control (not Tab, not typing).
+    if (ev.kind === 'click' || ev.kind === 'dblclick' || ev.kind === 'choose' || (ev.kind === 'press' && /^(?:Enter|NumpadEnter| |Space)$/.test(ev.key))) this.lastUserAction = Date.now();
     const p = (async () => {
       const framed: FramedPageEvent = { ...ev, tab };
       const inPage = (ev as { frameChain?: unknown }).frameChain;

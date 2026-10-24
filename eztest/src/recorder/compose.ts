@@ -575,8 +575,6 @@ export class JourneyComposer {
           const want = describeTarget(d);
           if (!step.target || stable(step.target) !== stable(want)) continue;
           step.target = { ...step.target, fingerprint: rt.fingerprint, ...(frames?.length ? { frames } : {}) };
-          const positional = /^the \d+(?:st|nd|rd|th) /.test(d);
-          if (positional) this.warn(`"${line}": ${rt.note ?? 'the name repeats'}; recorded by position, which changes if items are added or reordered (a test id or a unique label is steadier).`);
           const selector = /^(?:css=|testid=|#)/.test(d);
           if (selector && (rt.kind !== 'generic' || d.startsWith('css='))) {
             const what = d.startsWith('css=') ? 'a CSS selector' : d.startsWith('#') ? 'an id selector' : 'a test id';
