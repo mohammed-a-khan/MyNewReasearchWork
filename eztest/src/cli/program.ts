@@ -310,7 +310,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit', 'csv', 'summary'].includes(r)) as ReportFormat[];
       const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'csv', 'summary', 'console'].includes(r));
       // Parallel journeys run in worker processes (crash and CPU isolation) unless asked otherwise; manual prompts need this terminal.
-      const workerMode: 'process' | 'inline' = o.manual === 'prompt' ? 'inline' : o.workerMode ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');
+      const workerMode: 'process' | 'inline' = o.manual === 'prompt' || cfg.email?.provider === 'sink' ? 'inline' : o.workerMode ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         addons,

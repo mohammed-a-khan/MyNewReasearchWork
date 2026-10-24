@@ -602,11 +602,14 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     ...(integration.specs[0] ? { apiSpec: integration.specs[0] } : {}),
     ...(registries.steps.names().length ? { customSteps: pluginSteps() } : {}),
     // Process workers (docs/scale.md): each worker builds these handlers from the same resolved configuration.
+    // The email sink is one SMTP listener whose mailbox the steps read: runs with it stay in one process.
     ...(config.workers ? { workers: config.workers } : {}),
-    workerSetup: {
-      module: siblingModule(import.meta.url, 'worker-setup'), export: 'setupEngineWorker',
-      args: { cwd, config, variables: loaded.variables, ...(loaded.env ? { env: loaded.env } : {}), ...(loaded.project ? { project: loaded.project } : {}), ...(opts.pipeline ? { pipeline: opts.pipeline } : {}), ...(opts.worker ?? {}) },
-    },
+    ...(config.email?.provider === 'sink' ? {} : {
+      workerSetup: {
+        module: siblingModule(import.meta.url, 'worker-setup'), export: 'setupEngineWorker',
+        args: { cwd, config, variables: loaded.variables, ...(loaded.env ? { env: loaded.env } : {}), ...(loaded.project ? { project: loaded.project } : {}), ...(opts.pipeline ? { pipeline: opts.pipeline } : {}), ...(opts.worker ?? {}) },
+      },
+    }),
     addSecret: (v: string) => void loaded.masker.add(v),
     knownSecrets: () => loaded.masker.secrets(),
     ...opts.runOptions,
