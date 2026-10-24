@@ -307,6 +307,12 @@ export class JourneyComposer {
     return u.origin === this.base.origin ? u.pathname : `${u.origin}${u.pathname}`;
   }
 
+  /** The URL an expectation can rely on on every run: the path up to the first one-time segment (see stablePath). */
+  private stableUrlOf(u: URL): string {
+    const p = stablePath(u.pathname);
+    return u.origin === this.base.origin ? p : `${u.origin}${p}`;
+  }
+
   private addNavigate(u: URL, t: number): void {
     const url = this.relUrl(u);
     const lines = /^\S+$/.test(url) ? [`Open ${url}`] : [];
@@ -347,7 +353,13 @@ export class JourneyComposer {
     this.current = u;
     if (prev && this.pathOf(prev) === this.pathOf(u)) return;
     const last = this.drafts[this.drafts.length - 1];
-    const cond: Condition = { type: 'urlContains', value: this.pathOf(u) };
+    const stable = this.stableUrlOf(u);
+    // Only a one-time token in the path (a reset code, a session id): nothing to expect about the URL.
+    if (stable === '/' && u.pathname !== '/') {
+      this.navConsumed = true;
+      return;
+    }
+    const cond: Condition = { type: 'urlContains', value: stable };
     // A navigation the user started directly (address bar, bookmark) only continues an Open step.
     const related = last !== undefined && (byPage || last.step.action === 'navigate');
     if (related && this.navConsumed && last === this.navDraft && t - this.navT < REDIRECT_WINDOW_MS) {
@@ -478,4 +490,27 @@ export class JourneyComposer {
     }
     return { journey, ez, warnings, variables, baseUrl: this.base.origin, targets };
   }
+}
+
+/**
+ * A path without its one-time parts: everything before the first segment that is different on every run (UUIDs,
+ * long hex or digit ids, random tokens such as a password-reset or session code). `/auth/changeWeakPassword/resetCode/YeC8lO2a...`
+ * becomes `/auth/changeWeakPassword/resetCode/`, `/orders/58213907/edit` becomes `/orders/`.
+ */
+export function stablePath(pathname: string): string {
+  const parts = pathname.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    if (volatileSegment(decodeURIComponent(parts[i]))) return `${parts.slice(0, i).join('/')}/`;
+  }
+  return pathname;
+}
+
+function volatileSegment(seg: string): boolean {
+  if (!seg) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return true; // UUID
+  if (/^\d{6,}$/.test(seg)) return true; // long numeric id
+  if (/^[0-9a-f]{12,}$/i.test(seg) && /\d/.test(seg) && /[a-f]/i.test(seg)) return true; // hex id / hash
+  // A random token: long, no separators a word would have, letters and digits mixed with case changes.
+  if (seg.length >= 16 && /^[\w~.+=-]+$/.test(seg) && /\d/.test(seg) && /[a-z]/.test(seg) && /[A-Z]/.test(seg) && !/^[A-Z]?[a-z]+(?:[A-Z][a-z]+)+\d*$/.test(seg)) return true;
+  return false;
 }

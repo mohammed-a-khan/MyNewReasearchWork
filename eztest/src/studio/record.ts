@@ -6,6 +6,7 @@ import { stringify as toYaml } from 'yaml';
 import { startRecording, type Recorder, type RecordingResult } from '../recorder/index.js';
 import { HttpError } from './http.js';
 import type { EventHub, StudioEvent } from './events.js';
+import type { Page } from '../browser/index.js';
 
 type Listener = (e: StudioEvent) => void;
 
@@ -48,6 +49,11 @@ export class RecordManager {
 
   get current(): RecordingSession | undefined {
     return this.session;
+  }
+
+  /** The page being recorded (acceptance tests act on it the way a person does: mouse and keyboard). */
+  get page(): Page | undefined {
+    return this.recorder?.page;
   }
 
   private emit(type: string, data: Record<string, unknown>): void {

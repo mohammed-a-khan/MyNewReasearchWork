@@ -125,3 +125,18 @@ describe('element description (in-page computation)', () => {
     expect(buildTarget({ ...info, counts: { ...info.counts, label: 2 } })).toMatchObject({ ambiguous: true, descriptions: ['#ship', 'css=select#ship'] });
   });
 });
+
+describe('URL expectations leave out one-time path segments', () => {
+  it.each([
+    ['/web/index.php/auth/changeWeakPassword/resetCode/YeC8lO2aCUIXfpRWA3uofw', '/web/index.php/auth/changeWeakPassword/resetCode/'],
+    ['/web/index.php/dashboard/index', '/web/index.php/dashboard/index'],
+    ['/orders/58213907/edit', '/orders/'],
+    ['/u/3f2a9c1b-1234-4abc-9def-0123456789ab/profile', '/u/'],
+    ['/a/ChangeWeakPasswordPage', '/a/ChangeWeakPasswordPage'],
+    ['/pim/viewPersonalDetails/empNumber/7', '/pim/viewPersonalDetails/empNumber/7'],
+    ['/commit/9fceb02d0ae598e95dc970b74767f19372d61af8', '/commit/'],
+  ])('%s', async (path, want) => {
+    const { stablePath } = await import('../../src/recorder/compose.js');
+    expect(stablePath(path)).toBe(want);
+  });
+});
