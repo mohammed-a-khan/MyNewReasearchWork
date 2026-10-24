@@ -114,6 +114,34 @@ function wire(page: Page, journeyId: string, currentStep: () => string | undefin
   });
 }
 
+/**
+ * The screenshot after a step. A step that starts a navigation (a click that submits a form, a link) can leave
+ * the page between documents when the step ends: a full-page capture then fails ("Cannot take screenshot with
+ * 0 width") and the step lost its evidence, a healed step its heal evidence. On failure, wait for the new
+ * document to load and try again; a last attempt captures the viewport only.
+ */
+async function stepScreenshot(page: Page): Promise<Buffer> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await page.screenshot({ fullPage: true, timeout: 5000 });
+    } catch (e) {
+      last = e;
+      if (page.isClosed()) break;
+      await page.waitForLoadState('load', { timeout: 5000 }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+    }
+  }
+  if (!page.isClosed()) {
+    try {
+      return await page.screenshot({ timeout: 5000 });
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
 const CANCELLED = 'not run: run cancelled';
 const cancelledFields = () => ({ status: 'skipped' as const, error: { message: 'Run cancelled', name: 'CancelledError' } });
 
@@ -606,7 +634,7 @@ async function runStep(
   // A desktop/terminal/screen surface stores its own screenshots and snapshots; the idle browser page has nothing to show.
   if (!sr.surface) try {
     if (shots === 'every-step' || ((shots === 'on-failure' || shots === 'before-assertions') && failed) || sr.heal) {
-      const png = await ctx.page.screenshot({ fullPage: true, timeout: 5000 });
+      const png = await stepScreenshot(ctx.page);
       const ref = await evidence.store('screenshot', `${at}/${safeName(step.id)}.png`, png, meta(step.id, whose(`screenshot after ${step.action}`)));
       sr.evidence.push(ref.id);
       if (sr.heal) sr.heal.evidence.push(ref.id);
