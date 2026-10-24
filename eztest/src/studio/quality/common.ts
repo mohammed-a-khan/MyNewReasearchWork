@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { EvidenceRef, RunResult } from '../../core/index.js';
+import { isDebugRunId, type EvidenceRef, type RunResult } from '../../core/index.js';
 import { loadJourneyFile } from '../../intent/index.js';
 import { HistoryStore, readEvidenceManifest, scoreHistory, type FlakyScore } from '../../insights/index.js';
 import { listJourneys } from '../authoring.js';
@@ -88,10 +88,11 @@ export function branchFilter(app: StudioApp): string | undefined {
   return branchFilters.get(app);
 }
 
-/** Completed (not cancelled) runs, newest first (of the filtered branch, when a branch filter is set). */
+/** Completed (not cancelled, not debug sessions) runs, newest first (of the filtered branch, when a branch filter is set). */
 export async function completedRuns(app: StudioApp): Promise<RunListItem[]> {
   const b = branchFilters.get(app);
-  return (await listRuns(await app.outputDir())).filter((r) => r.summary && !r.cancelled && !r.error && (!b || r.branch === b));
+  // Studio debug sessions (debug-...) stay out of triage, readiness, compare, flaky and trends.
+  return (await listRuns(await app.outputDir())).filter((r) => r.summary && !r.cancelled && !r.error && !r.debug && (!b || r.branch === b));
 }
 
 export interface LoadedRun {
@@ -123,6 +124,7 @@ export async function loadRun(app: StudioApp, runId: string): Promise<LoadedRun>
 export async function pickRun(app: StudioApp, requested: string | null | undefined): Promise<string | undefined> {
   if (requested) {
     assertRunId(requested);
+    if (isDebugRunId(requested)) throw new HttpError(400, `${requested} is a debug session: debug sessions are not analyzed (triage, readiness, compare)`);
     return requested;
   }
   return (await completedRuns(app))[0]?.runId;

@@ -6,7 +6,7 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FlakeCause, JourneyStatus, RunResult } from '../core/index.js';
-import { EzTestError } from '../core/index.js';
+import { EzTestError, isDebugRunId } from '../core/index.js';
 
 export interface JourneyOutcome {
   journeyId: string;
@@ -94,6 +94,8 @@ export class HistoryStore {
         throw new EzTestError(`History file ${this.path} is not valid JSON: ${(e as Error).message}`, 'HISTORY_INVALID');
       }
       this.data = validate(parsed, this.path);
+      // Older versions could record debug sessions (`eztest analyze` of a debug-... folder): leave them out.
+      this.data.runs = this.data.runs.filter((r) => !isDebugRunId(r.runId));
     } else {
       this.data = { version: 1, runs: [] };
     }
@@ -119,6 +121,7 @@ export class HistoryStore {
   record(run: RunResult, signatures: Record<string, string> = {}): RunHistoryEntry {
     this.assertLoaded();
     if (run.journeys.length === 0) throw new EzTestError(`Run ${run.runId} has no journeys to record`, 'HISTORY_EMPTY_RUN');
+    const debug = isDebugRunId(run.runId);
     const branch = run.environment?.gitBranch;
     const entry: RunHistoryEntry = {
       runId: run.runId,
@@ -134,6 +137,8 @@ export class HistoryStore {
         ...(j.reliability?.flake ? { flakeCause: j.reliability.flake.cause } : {}),
       })),
     };
+    // Studio debug sessions are never part of the history (flaky scores, trends, triage, readiness).
+    if (debug) return entry;
     this.data.runs = this.data.runs.filter((r) => r.runId !== run.runId);
     this.data.runs.push(entry);
     this.data.runs.sort((a, b) => a.startedAt.localeCompare(b.startedAt));

@@ -80,6 +80,7 @@ Azure DevOps links need `ado.organizationUrl` and `ado.project` (in Azure Pipeli
 
 ```bash
 eztest report compare <baselineRunDir> <runDir> [-o compare.html] [--json cmp.json] [--fail-on-new-failures]
+# default output: <outputDir>/compare/<baseline>--<run>.html (run folders are evidence and are not written to)
 eztest report trends [-o eztest-trends.html] [--runs 50] [--branch main] [--json trends.json]
 eztest report render <runDir>        # render again from report-model.json (after publishing elsewhere)
 eztest report schema                 # the JSON Schema of report.json

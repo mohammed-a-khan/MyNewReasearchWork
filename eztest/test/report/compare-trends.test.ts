@@ -1,5 +1,6 @@
 /** `eztest report compare`, `eztest report trends`, `report render` and `report schema`, and the pages they write. */
 import { describe, it, expect, beforeAll, afterAll } from '../support/testkit.js';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -41,10 +42,14 @@ describe('eztest report compare', () => {
     expect(r.exitCode).toBe(1);
     const j = JSON.parse(await readFile(join(rich.root, 'cmp.json'), 'utf8'));
     expect(j).toMatchObject({ format: 'eztest-comparison', baselineRunId: 'run-2026-10-21-0800' });
-    const html = await readFile(join(rich.runDir, 'compare.html'), 'utf8');
-    expect(html).toContain('href="report.html#test/api-orders"');
+    // Written next to the run folders, never into the run folder (its files are the run's evidence).
+    expect(existsSync(join(rich.runDir, 'compare.html'))).toBe(false);
+    const file = join(rich.runDir, '..', 'compare', 'run-2026-10-21-0800--run-2026-10-22-0800.html');
+    expect(r.out).toContain(`comparison: ${file}`);
+    const html = await readFile(file, 'utf8');
+    expect(html).toContain('href="../run-2026-10-22-0800/report.html#test/api-orders"');
     const page = await browser.newPage();
-    await page.goto(pathToFileURL(join(rich.runDir, 'compare.html')).href);
+    await page.goto(pathToFileURL(file).href);
     expect(await page.locator('h1').textContent()).toBe('Run comparison');
     await expectNoSeriousA11y(page, 'compare');
     await page.emulateMedia({ colorScheme: 'dark' });

@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { BROWSER_ENGINES, BROWSER_TARGET_RE, BROWSER_TARGETS, EventBus, isBrowserEngine, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
+import { BROWSER_ENGINES, BROWSER_TARGET_RE, BROWSER_TARGETS, EventBus, isBrowserEngine, isDebugRunId, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
 import { loadConfig, createMaskedLogger, type LoadedConfig, type SecretMasker } from '../config/index.js';
 import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, type AnalyzeResult } from '../engine/index.js';
 import { journeyKind, type ManualVerdictProvider } from '../runner/manual.js';
@@ -90,11 +90,6 @@ export interface ActiveRun {
 }
 
 const RUN_ID = /^[A-Za-z0-9][\w.-]{0,120}$/;
-
-/** Run ids of Studio debug sessions. */
-export function isDebugRunId(id: string): boolean {
-  return id.startsWith('debug-');
-}
 
 export function assertRunId(id: string): void {
   if (!RUN_ID.test(id) || id.includes('..')) throw new HttpError(400, 'Invalid run id');
@@ -457,7 +452,7 @@ export async function insights(ctx: StudioContext, outputDir: string): Promise<R
   }
   let latest: Record<string, unknown> | undefined;
   const runs = await listRuns(outputDir);
-  const last = runs.find((r) => r.summary);
+  const last = runs.find((r) => r.summary && !r.debug);
   if (last) {
     try {
       const art = await loadRunArtifacts(join(outputDir, last.runId));

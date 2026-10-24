@@ -48,7 +48,7 @@ export const insightRoutes: StudioRoute[] = [
         listJourneys(app.cwd, await app.journeysDir()),
         app.problems(),
       ]);
-      const lastRun = runs.find((r) => r.summary);
+      const lastRun = runs.find((r) => r.summary && !r.debug);
       let readiness: unknown;
       if (lastRun) {
         const report = await readJsonFile<{ insights?: { readiness?: { decision: string; score: number; rationale?: Array<{ text: string }> } } }>(

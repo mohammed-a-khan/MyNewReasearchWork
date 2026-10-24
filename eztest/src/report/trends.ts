@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { scoreHistory, HistoryStore, type RunHistoryEntry } from '../insights/index.js';
+import { isDebugRunId } from '../core/index.js';
 import { escapeHtml as e } from './escape.js';
 import { columnChart, fmtMs, fmtPct, heatmap, hbarChart, lineChart } from './charts.js';
 import { REPORT_CSS } from './styles.js';
@@ -114,7 +115,7 @@ export function buildTrends(history: readonly RunHistoryEntry[], o: TrendsOption
 export async function suitesFromRuns(outputDir: string, max = 10): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (!existsSync(outputDir)) return out;
-  const dirs = (await readdir(outputDir)).filter((d) => existsSync(join(outputDir, d, 'run.json'))).sort().reverse().slice(0, max);
+  const dirs = (await readdir(outputDir)).filter((d) => !isDebugRunId(d) && existsSync(join(outputDir, d, 'run.json'))).sort().reverse().slice(0, max);
   for (const d of dirs) {
     const m = await readReportModel(join(outputDir, d)).catch(() => undefined);
     for (const t of m?.tests ?? []) if (!out.has(t.id) && t.suite.length) out.set(t.id, t.suite.length > 1 ? t.suite.slice(0, -1).join(' / ') : t.suite[0]);

@@ -8,7 +8,7 @@ import { loadRunArtifacts, HistoryStore, scoreHistory, failureSignature, triageR
 import type { FlakyScore, TriageReport, ReadinessResult, QuarantineStatus } from '../insights/index.js';
 import { writeReports, journeyFilesAndOwners, loadLogo, type ReportFormat, type ReportModelInput } from '../report/index.js';
 import { readFile } from 'node:fs/promises';
-import type { RunResult } from '../core/index.js';
+import { isDebugRunId, type RunResult } from '../core/index.js';
 import type { EzTestConfig } from '../config/index.js';
 import { adoSettings } from '../alm-ado/config.js';
 import { contractReadinessInputs } from '../contracts/readiness.js';
@@ -70,7 +70,8 @@ export function projectName(cwd: string): string {
 async function previousRun(runDir: string, run: RunResult): Promise<RunResult | undefined> {
   const out = resolve(runDir, '..');
   let best: RunResult | undefined;
-  const names = (await readdir(out).catch(() => [] as string[])).filter((n) => n !== run.runId).sort().reverse().slice(0, 40);
+  // Studio debug sessions are never a comparison baseline.
+  const names = (await readdir(out).catch(() => [] as string[])).filter((n) => n !== run.runId && !isDebugRunId(n)).sort().reverse().slice(0, 40);
   for (const name of names) {
     const p = join(out, name, 'run.json');
     if (name === run.runId || !existsSync(p)) continue;
@@ -170,7 +171,7 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
     const now = await a11yIssuesOfRun(runDir, run.runId, opts.a11yScopes ?? [], { evidence });
     if (now.scannedSteps) {
       const out = resolve(runDir, '..');
-      const prev = (await readdir(out)).filter((n) => n !== run.runId && existsSync(join(out, n, 'run.json'))).sort().reverse();
+      const prev = (await readdir(out)).filter((n) => n !== run.runId && !isDebugRunId(n) && existsSync(join(out, n, 'run.json'))).sort().reverse();
       for (const p of prev.slice(0, 20)) {
         const before = await a11yIssuesOfRun(join(out, p), p, opts.a11yScopes ?? []);
         if (!before.scannedSteps) continue;

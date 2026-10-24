@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Journey, JourneyResult, RunResult } from '../core/index.js';
+import { isDebugRunId, type Journey, type JourneyResult, type RunResult } from '../core/index.js';
 import { loadApiCoverage } from '../contracts/run-coverage.js';
 import type { ApiCoverageReport } from '../contracts/coverage.js';
 import { computeTraceability, type ImpactResult, type RequirementInfo } from '../insights/index.js';
@@ -29,7 +29,8 @@ export async function recentRuns(outputDir: string, limit = 60): Promise<RunSumm
   if (!existsSync(outputDir)) return [];
   const out: RunSummaryRef[] = [];
   for (const name of await readdir(outputDir)) {
-    if (!RUN_ID.test(name)) continue;
+    // Studio debug sessions are not part of the project's analytics.
+    if (!RUN_ID.test(name) || isDebugRunId(name)) continue;
     const p = join(outputDir, name, 'run.json');
     if (!existsSync(p)) continue;
     try {
