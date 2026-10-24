@@ -4,7 +4,7 @@
  * dismisses overlays or presses keys. Verification is the runner's job.
  */
 import type { Locator } from '../browser/index.js';
-import { NotSupportedError, type ElementFingerprint, type HealTier, type LocatorCandidate } from '../core/index.js';
+import { type ElementFingerprint, type HealTier, type LocatorCandidate } from '../core/index.js';
 import { analyzeDescription, KIND_ROLE } from '../intent/target.js';
 import { describeCandidate, toLocator, type LocatorRoot } from '../runner/locate.js';
 import { poolSelector, scanElements, type ScannedElement } from './fingerprint.js';
@@ -29,13 +29,10 @@ export const REJECTED_HEAL_NOTE = 'suspected regression: this heal was rejected 
 const tierRank = (t: HealTier) => HEAL_TIERS.indexOf(t);
 const keyOf = (c: LocatorCandidate) => JSON.stringify([c.strategy, c.value, c.name ?? null, c.exact ?? true]);
 
-/** Validate and complete a heal policy. AI healing is refused explicitly. */
+/** Validate and complete a heal policy. */
 export function resolveHealPolicy(p: Partial<HealPolicy> = {}): HealPolicy {
   const policy: HealPolicy = { ...DEFAULT_HEAL_POLICY, ...p };
-  if (policy.allowAI || policy.maxTier === 'T3-ai') {
-    throw new NotSupportedError('AI healing is not available in this version');
-  }
-  if (!HEAL_TIERS.includes(policy.maxTier)) throw new Error(`Unknown heal tier ${policy.maxTier}`);
+  if (!HEAL_TIERS.includes(policy.maxTier)) throw new Error(`Unknown heal tier ${String(policy.maxTier)} (tiers: ${HEAL_TIERS.join(', ')})`);
   for (const k of ['minConfidence', 'margin', 'threshold'] as const) {
     if (!(policy[k] >= 0 && policy[k] <= 1)) throw new Error(`Heal policy ${k} must be between 0 and 1`);
   }

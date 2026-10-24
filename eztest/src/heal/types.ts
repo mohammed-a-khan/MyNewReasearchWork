@@ -4,8 +4,8 @@ import type { HealTier, Journey, LocatorCandidate, Step, Target } from '../core/
 import type { LocatorRoot } from '../runner/locate.js';
 import type { FingerprintStore } from './store.js';
 
-/** Ladder order. T3 (AI) exists in the core contract but is not available in this version. */
-export const HEAL_TIERS: readonly HealTier[] = ['T0-cache', 'T1-fingerprint', 'T2-semantic', 'T3-ai'];
+/** Ladder order. Every tier is deterministic; EZTest uses no AI provider. */
+export const HEAL_TIERS: readonly HealTier[] = ['T0-cache', 'T1-fingerprint', 'T2-semantic'];
 
 export interface HealPolicy {
   /** Master switch. Disabled: no candidates are ever proposed. */
@@ -18,8 +18,12 @@ export interface HealPolicy {
   margin: number;
   /** T1 fingerprint acceptance threshold. */
   threshold: number;
-  /** AI healing; must be false in this version. */
-  allowAI: boolean;
+  /**
+   * A heal counts only when the step's post-conditions (or the action's implied check) verify it. Default true.
+   * false: a heal of a step with nothing to verify it is accepted as passed-healed but marked unverified
+   * (HealRecord.unverified); it is never cached or auto-applied. A heal whose checks fail is still a suspected regression.
+   */
+  requireVerification: boolean;
 }
 
 export const DEFAULT_HEAL_POLICY: HealPolicy = {
@@ -28,7 +32,7 @@ export const DEFAULT_HEAL_POLICY: HealPolicy = {
   minConfidence: 0.6,
   margin: 0.08,
   threshold: 0.72,
-  allowAI: false,
+  requireVerification: true,
 };
 
 /** One locator the runner may try, with where it came from and why. */

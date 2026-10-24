@@ -190,7 +190,7 @@ export function registerHealInbox(): void {
       let focusKey: string | undefined;
 
       const statusSel = h('select', { id: uid('st'), class: 'input input-sm' }, [['pending', 'To review'], ['accepted', 'Accepted'], ['rejected', 'Rejected'], ['applied', 'Already in journey'], ['all', 'All']].map(([v, t]) => h('option', { value: v, text: t })));
-      const tierSel = h('select', { id: uid('tier'), class: 'input input-sm' }, h('option', { value: '', text: 'All tiers' }), Object.entries(TIER_LABEL).filter(([v]) => v !== 'T3-ai').map(([v, t]) => h('option', { value: v, text: t })));
+      const tierSel = h('select', { id: uid('tier'), class: 'input input-sm' }, h('option', { value: '', text: 'All tiers' }), Object.entries(TIER_LABEL).map(([v, t]) => h('option', { value: v, text: t })));
       const confInput = h('input', { id: uid('conf'), class: 'input input-sm q-num', type: 'number', min: '0', max: '100', step: '5', value: '0', inputmode: 'numeric' });
       const journeySel = h('select', { id: uid('j'), class: 'input input-sm' }, h('option', { value: '', text: 'All journeys' }));
       const search = h('input', { id: uid('q'), class: 'input input-sm', type: 'search', placeholder: 'Filter by step or locator' });

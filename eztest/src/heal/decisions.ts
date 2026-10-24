@@ -43,7 +43,9 @@ interface DecisionsFile {
   decisions: HealDecision[];
 }
 
-const TIERS: ReadonlySet<string> = new Set(['T0-cache', 'T1-fingerprint', 'T2-semantic', 'T3-ai', 'improvement']);
+const TIERS: ReadonlySet<string> = new Set(['T0-cache', 'T1-fingerprint', 'T2-semantic', 'improvement']);
+/** A tier older decision files may name (EZTest no longer has it): such decisions are dropped on load. */
+const REMOVED_TIERS: ReadonlySet<string> = new Set(['T3-ai']);
 
 export const locatorKey = (c: LocatorCandidate): string => JSON.stringify([c.strategy, c.value, c.name ?? null, c.exact ?? true]);
 
@@ -57,6 +59,7 @@ function validate(raw: unknown, path: string): DecisionsFile {
   const d = raw as Partial<DecisionsFile>;
   if (d.version !== 1) throw bad(`unsupported version ${String(d.version)}`);
   if (!Array.isArray(d.decisions)) throw bad('"decisions" is not a list');
+  d.decisions = d.decisions.filter((x) => !(x && REMOVED_TIERS.has(x.tier)));
   for (const x of d.decisions) {
     if (!x || typeof x.journeyId !== 'string' || typeof x.stepId !== 'string') throw bad('a decision lacks journeyId/stepId');
     if (x.decision !== 'accepted' && x.decision !== 'rejected') throw bad(`unknown decision "${String(x.decision)}"`);

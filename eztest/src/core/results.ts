@@ -36,7 +36,7 @@ export interface EvidenceRef {
   createdAt: string;
 }
 
-export type HealTier = 'T0-cache' | 'T1-fingerprint' | 'T2-semantic' | 'T3-ai';
+export type HealTier = 'T0-cache' | 'T1-fingerprint' | 'T2-semantic';
 
 export interface HealRecord {
   stepId: string;
@@ -52,6 +52,11 @@ export interface HealRecord {
   element?: string;
   /** The heal is of the step target's i-th scope anchor or container (`below "Email"`), not of the element itself. */
   anchor?: number;
+  /**
+   * Accepted without verification (`healing.requireVerification: false`): the step had no post-condition
+   * or implied check to verify it with. Such heals are listed for review, never cached, auto-applied or auto-accepted.
+   */
+  unverified?: boolean;
 }
 
 export interface ConditionResult {

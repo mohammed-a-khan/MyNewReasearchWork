@@ -27,12 +27,12 @@ import {
   type SqlEntityMapping,
   type ApiEntityMapping,
 } from '../data/index.js';
-import { createHealer, HealDecisions } from '../heal/index.js';
+import { autoApplyHeals, collectHealProposals, createHealer, FingerprintStore, HealDecisions } from '../heal/index.js';
 import { extractPdf, reconcileThreeWay, renderHtml, type ThreeWayMapping } from '../docs/index.js';
 import type { CompareDocumentHandler, DataHandler, DbHandler, Lens, RunHooks, RunOptions, StepContext } from '../runner/index.js';
 import { loadJourneyFile } from '../intent/index.js';
 import { SmtpSink, TwilioSmsProvider, TwilioVoiceProvider, loadTranscriptFixtures } from '../messaging/index.js';
-import { runJourneys } from '../runner/index.js';
+import { defaultFingerprintStorePath, runJourneys } from '../runner/index.js';
 import { ResultsClient } from '../server/client.js';
 import { storeFromConfig, type SharedStore } from '../store/index.js';
 import { branchBaselineDir, seedBranchBaselinesSync } from '../git/branch.js';
@@ -290,6 +290,43 @@ export function documentCheckHandler(config: EzTestConfig, dbs: DbRegistry, cwd:
   };
 }
 
+/** The files written by healing.autoApply, in the run folder. */
+export const HEAL_APPLIED_FILES = { json: 'heal-applied.json', diff: 'heal-applied.diff' } as const;
+
+/**
+ * healing.autoApply after a run: the verified heals (heal proposals) are written into the journey files that define
+ * them and recorded as accepted decisions; `heal-applied.json` and `heal-applied.diff` in the run folder say what changed.
+ */
+async function applyHealsAfterRun(
+  run: RunResult,
+  journeys: Journey[],
+  o: { cwd: string; config: EzTestConfig; outputDir: string; fingerprintStore?: string; decisions?: HealDecisions; logger: Logger },
+): Promise<void> {
+  const file = collectHealProposals(run, journeys);
+  if (!file.proposals.length) return;
+  const { findJourneyFiles, loadJourneysFromFile, defaultJourneyPaths, bddOptionsFrom } = await import('../cli/journeys.js');
+  const where = new Map<string, string>();
+  for (const f of await findJourneyFiles(defaultJourneyPaths(o.config, o.cwd), o.cwd, { code: true, features: true })) {
+    try {
+      for (const j of await loadJourneysFromFile(f, o.cwd, { bdd: bddOptionsFrom(o.config) })) if (!where.has(j.id)) where.set(j.id, resolve(o.cwd, f));
+    } catch {
+      // a file that does not parse defines no journey here
+    }
+  }
+  const decisions = o.decisions ?? (await HealDecisions.open(healDecisionsPath(o.outputDir)));
+  const store = await FingerprintStore.open(o.fingerprintStore ?? defaultFingerprintStorePath(o.outputDir));
+  const r = await autoApplyHeals({ proposals: file.proposals, locate: (id) => where.get(id), cwd: o.cwd, minConfidence: o.config.healing.minConfidence, decisions, store, runId: run.runId });
+  const runDir = join(o.outputDir, run.runId);
+  const { writeFile: write } = await import('node:fs/promises');
+  await write(join(runDir, HEAL_APPLIED_FILES.json), JSON.stringify({ runId: run.runId, applied: r.applied, skipped: r.skipped, files: r.files }, null, 2));
+  if (r.diff) await write(join(runDir, HEAL_APPLIED_FILES.diff), r.diff);
+  if (r.applied.length) {
+    await decisions.save();
+    await store.save();
+  }
+  o.logger.info('healing.autoApply', { runId: run.runId, applied: r.applied.length, skipped: r.skipped.length, files: r.files });
+}
+
 /** `.eztest/heal-decisions.json` next to the fingerprint store for an output directory. */
 export function healDecisionsPath(outputDir: string): string {
   return join(dirname(resolve(outputDir)), '.eztest', 'heal-decisions.json');
@@ -483,7 +520,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     stepTimeoutMs: config.timeouts.step,
     logger,
     healer: config.healing.enabled
-      ? createHealer({ enabled: true, maxTier: config.healing.maxTier, minConfidence: config.healing.minConfidence }, { decisions })
+      ? createHealer({ enabled: true, maxTier: config.healing.maxTier, minConfidence: config.healing.minConfidence, requireVerification: config.healing.requireVerification }, { decisions })
       : undefined,
     login,
     relogin: pooled?.relogin,
@@ -588,6 +625,11 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
       // API coverage against api.spec, recorded next to the run (report, Studio and the apiCoverage gate read it).
       if (integration.specs.length && run.journeys.length) {
         await recordApiCoverage(join(runOptions.outputDir, run.runId), integration.specEntries).catch((e: Error) => logger.warn(`API coverage not recorded: ${e.message}`));
+      }
+      // healing.autoApply: verified heals are written back into the journey files (with a diff in the run folder).
+      if (config.healing.enabled && config.healing.autoApply) {
+        await applyHealsAfterRun(run, tests, { cwd, config, outputDir: runOptions.outputDir, fingerprintStore: runOptions.fingerprintStore, decisions, logger })
+          .catch((e: Error) => logger.warn(`healing.autoApply failed: ${e.message}`));
       }
       return run;
     },

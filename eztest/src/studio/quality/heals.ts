@@ -240,7 +240,7 @@ export interface HealRef {
   anchor?: number;
 }
 
-const TIERS = new Set(['T0-cache', 'T1-fingerprint', 'T2-semantic', 'T3-ai', 'improvement']);
+const TIERS = new Set(['T0-cache', 'T1-fingerprint', 'T2-semantic', 'improvement']);
 const STRATEGIES = new Set(['role', 'label', 'text', 'testId', 'placeholder', 'altText', 'title', 'css', 'xpath', 'section']);
 
 export function parseHealRefs(v: unknown): HealRef[] {

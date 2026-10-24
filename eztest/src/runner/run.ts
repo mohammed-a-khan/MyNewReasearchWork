@@ -479,7 +479,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   }
 
   const proposals = collectHealProposals({ runId, journeys: results }, journeys);
-  if (proposals.proposals.length || proposals.rejected.length || proposals.improvements?.length) {
+  if (proposals.proposals.length || proposals.rejected.length || proposals.improvements?.length || proposals.unverified?.length) {
     await evidence.store('report', 'heal-proposals.json', JSON.stringify(proposals, null, 2), { description: 'heal proposals for review' });
   }
   await store.save();

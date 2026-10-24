@@ -1,8 +1,8 @@
 import { describe, expect, it } from '../support/testkit.js';
 import { join } from 'node:path';
-import { NotSupportedError, type ElementFingerprint, type RunResult } from '../../src/core/index.js';
+import { type ElementFingerprint, type RunResult } from '../../src/core/index.js';
 import {
-  FingerprintStore, collectHealProposals, createHealer, jaccard, jaroWinkler, pickBest, poolSelector,
+  FingerprintStore, HEAL_TIERS, collectHealProposals, createHealer, jaccard, jaroWinkler, pickBest, poolSelector,
   promoteVerifiedHeals, resolveHealPolicy, robustCandidates, scoreFingerprint, textSimilarity, tokenOverlap,
 } from '../../src/heal/index.js';
 import { tempDir } from '../runner/fixtures.js';
@@ -73,10 +73,10 @@ describe('pickBest: threshold and margin rule', () => {
 });
 
 describe('heal policy and helpers', () => {
-  it('AI healing is not available: T3 / allowAI throw NotSupportedError', () => {
-    expect(() => createHealer({ maxTier: 'T3-ai' })).toThrow(NotSupportedError);
-    expect(() => createHealer({ maxTier: 'T3-ai' })).toThrow(/AI healing is not available in this version/);
-    expect(() => resolveHealPolicy({ allowAI: true })).toThrow(NotSupportedError);
+  it('there is no AI tier: the ladder is T0-T2, and "T3-ai" is an unknown tier', () => {
+    expect(HEAL_TIERS).toEqual(['T0-cache', 'T1-fingerprint', 'T2-semantic']);
+    expect(() => createHealer({ maxTier: 'T3-ai' as never })).toThrow(/Unknown heal tier T3-ai \(tiers: T0-cache, T1-fingerprint, T2-semantic\)/);
+    expect(Object.keys(resolveHealPolicy())).not.toContain('allowAI');
     expect(() => resolveHealPolicy({ margin: 2 })).toThrow(/between 0 and 1/);
     expect(resolveHealPolicy()).toMatchObject({ enabled: true, maxTier: 'T2-semantic', threshold: 0.72, margin: 0.08 });
   });

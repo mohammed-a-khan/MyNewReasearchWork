@@ -205,7 +205,7 @@ const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG'
  */
 const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT)_|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
 
-/** Turn EZTEST_* variables into a config object (EZTEST_AI__MODEL -> ai.model). `origin` records key path -> variable name. */
+/** Turn EZTEST_* variables into a config object (EZTEST_HEALING__MAX_TIER -> healing.maxTier). `origin` records key path -> variable name. */
 export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
   let out: Obj = {};
   for (const [name, value] of Object.entries(vars)) {

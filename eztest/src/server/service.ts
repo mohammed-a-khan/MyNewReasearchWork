@@ -524,13 +524,16 @@ export function stateKey(kind: StateKind): (e: Record<string, unknown>) => strin
   return (e) => `${String(e.runId)}/${String(e.journeyId)}`;
 }
 
+/** Tiers a shared heal decision may name (EZTest's deterministic healing ladder). */
+const HEAL_DECISION_TIERS: readonly string[] = ['T0-cache', 'T1-fingerprint', 'T2-semantic'];
+
 function validateEntry(kind: StateKind, raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ServiceError(400, 'Each entry must be an object');
   const e = raw as Record<string, unknown>;
   if (kind === 'heal-decisions') {
     if (typeof e.journeyId !== 'string' || typeof e.stepId !== 'string') throw new ServiceError(400, 'A heal decision needs journeyId and stepId');
     if (e.decision !== 'accepted' && e.decision !== 'rejected') throw new ServiceError(400, 'decision must be accepted or rejected');
-    if (!['T0-cache', 'T1-fingerprint', 'T2-semantic', 'T3-ai'].includes(String(e.tier))) throw new ServiceError(400, 'Unknown heal tier');
+    if (!HEAL_DECISION_TIERS.includes(String(e.tier))) throw new ServiceError(400, `Unknown heal tier (one of ${HEAL_DECISION_TIERS.join(', ')})`);
     const l = e.locator as { strategy?: unknown; value?: unknown } | undefined;
     if (!l || typeof l.strategy !== 'string' || typeof l.value !== 'string') throw new ServiceError(400, 'A heal decision needs its locator');
     if (typeof e.reviewer !== 'string' || !e.reviewer) throw new ServiceError(400, 'A heal decision needs a reviewer');

@@ -11,7 +11,7 @@ import { BROWSER_ENGINES, EventBus, verifyEvidence, type EzEvent, type RunResult
 import { loadConfig, listProjects, encryptValue, createMaskedLogger, type LoadedConfig } from '../config/index.js';
 import { effectiveSummary } from './effective.js';
 import { journeyToEzScript, loadJourneyFile } from '../intent/index.js';
-import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions } from '../engine/index.js';
+import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, HEAL_APPLIED_FILES } from '../engine/index.js';
 import { reportOptionsFromConfig } from '../engine/analyze.js';
 import { terminalManualProvider } from '../manual/terminal.js';
 import { registerCoverageCommands } from './coverage.js';
@@ -344,6 +344,13 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       // Why each journey failed, so a CI log is useful without opening the report.
       if (!log) for (const line of failureLines(run)) io.out(loaded.masker.mask(line));
       if (s.passedHealed) out(`Healed steps need review: ${join(runDir, 'heal-proposals.json')}`);
+      // healing.autoApply: what was written back into the journey files.
+      const appliedFile = join(runDir, HEAL_APPLIED_FILES.json);
+      if (existsSync(appliedFile)) {
+        const ap = JSON.parse(await readFile(appliedFile, 'utf8')) as { applied: Array<{ journeyId: string; stepId: string; file: string }>; skipped: Array<{ journeyId: string; stepId: string; reason: string }> };
+        if (ap.applied.length) out(`healing.autoApply: ${ap.applied.length} verified heal(s) written to ${[...new Set(ap.applied.map((a) => a.file))].join(', ')} (diff: ${join(runDir, HEAL_APPLIED_FILES.diff)})`);
+        for (const k of ap.skipped) out(`healing.autoApply: not applied ${k.journeyId}/${k.stepId}: ${k.reason}`);
+      }
       // Reliability: environment problems, and the circuit breaker.
       if (run.health?.preflight && !run.health.preflight.ok) io.err(`environment unavailable: ${run.health.preflight.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.message}`).join('; ')} (nothing ran)`);
       if (run.health?.circuit) io.err(`circuit breaker opened after ${run.health.circuit.afterJourney}: ${run.health.circuit.notRun} journey(s) not run (${run.health.circuit.reason})`);

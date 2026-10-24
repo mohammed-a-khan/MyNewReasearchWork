@@ -249,6 +249,7 @@ export async function executeStepCore(rawStep: Step, ctx: StepContext, rt: StepR
       });
       return { status: 'passed-healed', conditions, evidence: outcome.evidence ?? [], heal, usedLocator: c, captured: outcome.captured };
     }
+    if (!hasVerification && healer.policy.requireVerification === false) return unverifiedHeal(heal, conditions, outcome, c);
     const why = !hasVerification
       ? 'heal could not be verified: the step has no post-conditions (add an Expect line)'
       : `${SUSPECTED_REGRESSION} (${[conditionFailure(conditions), implied && !implied.ok ? implied.message : ''].filter(Boolean).join('; ')})`;
@@ -314,6 +315,7 @@ async function healAnchor(step: Step, target: NonNullable<Step['target']>, scope
     const verified = (conditions.length > 0 || implied !== undefined) && conditions.every((x) => x.passed) && (implied?.ok ?? true);
     heal.verified = verified;
     rt.opts.events?.emit({ type: 'heal', journeyId: ctx.journey.id, stepId: step.id, tier: cand.tier, verified });
+    if (!verified && !(conditions.length || implied) && healer.policy.requireVerification === false) return { notes, result: unverifiedHeal(heal, conditions, outcome, r.candidate) };
     if (!verified) {
       const why = conditions.length || implied ? `${SUSPECTED_REGRESSION} (${conditionFailure(conditions)})` : 'heal could not be verified: the step has no post-conditions (add an Expect line)';
       return { notes, result: { status: 'failed', conditions, evidence: outcome.evidence ?? [], heal, usedLocator: r.candidate, error: { message: why } } };
@@ -324,6 +326,19 @@ async function healAnchor(step: Step, target: NonNullable<Step['target']>, scope
     return { notes, result: { status: 'passed-healed', conditions, evidence: outcome.evidence ?? [], heal, usedLocator: r.candidate, captured: outcome.captured } };
   }
   return { notes };
+}
+
+/**
+ * healing.requireVerification: false and the step has nothing to verify the heal with: the step passes healed,
+ * the heal is marked unverified, and it is not recorded in the fingerprint store (never replayed from the cache).
+ */
+function unverifiedHeal(heal: HealRecord, conditions: ConditionResult[], outcome: ActionOutcome, used: Core['usedLocator']): Core {
+  heal.unverified = true;
+  heal.reason = `${heal.reason}; not verified: the step has no post-conditions (healing.requireVerification is false)`;
+  return {
+    status: 'passed-healed', conditions, evidence: outcome.evidence ?? [], heal, usedLocator: used, captured: outcome.captured,
+    warnings: [`unverified heal (${heal.tier}): the step has no post-conditions to verify it; review it before accepting (healing.requireVerification is false)`],
+  };
 }
 
 /**

@@ -48,7 +48,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
 
 export const CATEGORIES = ['product-bug', 'test-issue', 'environment', 'data', 'flaky', 'unknown'];
 
-export const TIER_LABEL: Record<string, string> = { 'T0-cache': 'T0 cache', 'T1-fingerprint': 'T1 fingerprint', 'T2-semantic': 'T2 semantic', 'T3-ai': 'T3 AI', improvement: 'Improvement (more robust locator)' };
+export const TIER_LABEL: Record<string, string> = { 'T0-cache': 'T0 cache', 'T1-fingerprint': 'T1 fingerprint', 'T2-semantic': 'T2 semantic', improvement: 'Improvement (more robust locator)' };
 
 // ------------------------------------------------------------------ page frame
 

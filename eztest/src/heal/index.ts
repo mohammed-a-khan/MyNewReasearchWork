@@ -12,3 +12,4 @@ export { scoreFingerprint, pickBest, FEATURE_WEIGHTS, type FingerprintScore, typ
 export { jaroWinkler, tokenOverlap, textSimilarity, jaccard, tokens } from './similarity.js';
 export { collectHealProposals, promoteVerifiedHeals, type HealProposal, type HealProposalFile, type ImprovementProposal } from './proposals.js';
 export { planHealRewrite, rewriteStepLine, phrasesFor, unifiedDiff, ezStepLine, sidecarPath, SIDECAR_RE, applyLocatorSidecar, loadLocatorSidecar, type HealRewritePlan, type HealRewriteMethod, type FileChange, type DiffLine, type LocatorSidecar, type PlanInput } from './apply.js';
+export { autoApplyHeals, AUTO_APPLY_REVIEWER, type AutoApplyOptions, type AutoApplyResult, type AutoAppliedHeal } from './auto-apply.js';

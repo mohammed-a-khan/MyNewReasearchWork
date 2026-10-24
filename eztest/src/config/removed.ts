@@ -62,6 +62,24 @@ export function stripRemovedKeys(raw: unknown): { raw: unknown; warnings: string
     out.reporters = out.reporters.filter((r) => String(r).toLowerCase() !== 'ctrf');
   }
 
+  // The AI healing tier and AI settings never shipped and were removed: EZTest uses no AI provider.
+  if (isObj(out.healing)) {
+    const h: Obj = { ...out.healing };
+    if ('allowAI' in h) {
+      warn('healing.allowAI', 'EZTest has no AI healing (it uses no AI provider); healing is deterministic (T0-cache, T1-fingerprint, T2-semantic)');
+      delete h.allowAI;
+    }
+    if (h.maxTier === 'T3-ai') {
+      warn('healing.maxTier: T3-ai', 'the AI tier was removed; T2-semantic (the highest tier) is used');
+      h.maxTier = 'T2-semantic';
+    }
+    out.healing = h;
+  }
+  if ('ai' in out) {
+    warn('ai', 'EZTest uses no AI provider; the ai: section (and EZTEST_AI__* variables) are ignored');
+    delete out.ai;
+  }
+
   if (Array.isArray(out.publishers)) {
     out.publishers = out.publishers.filter((p, i) => {
       const use = isObj(p) ? String(p.use ?? '').toLowerCase() : '';

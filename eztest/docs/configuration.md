@@ -49,7 +49,10 @@ healing:
   enabled: true
   maxTier: T2-semantic         # T0-cache | T1-fingerprint | T2-semantic
   minConfidence: 0.7           # heals are also verified by post-conditions
-  requireVerification: true
+  requireVerification: true    # a heal counts only when the step's post-conditions verify it; false: a heal of a
+                               # step with nothing to verify it passes healed, marked unverified (never cached or applied)
+  autoApply: false             # true: after a run, verified heals are written into the journey files
+                               # (diff in <run>/heal-applied.diff, accepted decisions in .eztest/heal-decisions.json)
 
 lenses: [a11y, security:warn, visual]   # after every step; ":warn" = record only
 

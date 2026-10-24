@@ -23,6 +23,10 @@ export interface HealProposal {
   suggestedTarget?: Target;
   /** Shared repository element: accepting the heal rewrites elements/*.yaml (every journey using it is fixed). */
   element?: string;
+  /** The heal is of a scope anchor or container of the target (not rewritten automatically). */
+  anchor?: number;
+  /** Accepted without verification (healing.requireVerification: false). */
+  unverified?: boolean;
 }
 
 /** A more robust locator for a step that passed with a weak one (verified to select the same element). */
@@ -45,6 +49,8 @@ export interface HealProposalFile {
   proposals: HealProposal[];
   /** Heals whose post-conditions did not hold (suspected regressions). */
   rejected: HealProposal[];
+  /** Heals accepted without verification (healing.requireVerification: false): review them; never auto-accepted. */
+  unverified?: HealProposal[];
   /** Verified, more robust locators for weak targets of passing steps (review kind "improvement"). */
   improvements?: ImprovementProposal[];
 }
@@ -79,9 +85,12 @@ export function collectHealProposals(run: Pick<RunResult, 'runId' | 'journeys'>,
         reason: h.reason,
         evidence: h.evidence,
         ...(h.element ? { element: h.element } : {}),
+        ...(h.anchor !== undefined ? { anchor: h.anchor } : {}),
+        ...(h.unverified ? { unverified: true } : {}),
         ...(target && h.verified ? { suggestedTarget: { ...target, locators: [h.healed, ...target.locators] } } : {}),
       };
-      (h.verified ? out.proposals : out.rejected).push(p);
+      if (h.unverified) (out.unverified ??= []).push(p);
+      else (h.verified ? out.proposals : out.rejected).push(p);
     }
   }
   return out;
