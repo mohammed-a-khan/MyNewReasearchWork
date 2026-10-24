@@ -6,6 +6,7 @@ The query results compare with UI tables, API bodies and other databases by
 key, with typed and case-insensitive matching.
 
 - [Connections](#connections)
+- [SQL Server authentication](#sql-server-authentication)
 - [Results: rows, types and column names](#results-rows-types-and-column-names)
 - [Steps](#steps)
 - [The named-query catalogue](#the-named-query-catalogue)
@@ -24,6 +25,9 @@ db:
     shop:   { type: sqlite, file: /abs/path/shop.db }
     erp:    { type: postgres, connectionString: "${ERP_DB_URL}" }
     crm:    { type: mssql, server: sql.test, database: crm, user: qa, password: secret://vault/CRM_PW }
+    sales:                           # SQL Server from an ADO.NET connection string, Entra ID service principal
+      type: mssql
+      connectionString: "Server=tcp:sales.database.windows.net,1433;Database=sales;Encrypt=True;Authentication=Active Directory Service Principal;User ID=${SALES_APP_ID};Password=secret://vault/SALES_SP_SECRET;TenantId=${TENANT_ID}"
     ledger:
       type: oracle
       host: ora.test
@@ -46,7 +50,7 @@ of the run.
 | Dialect | Package | Install | Placeholders |
 |---|---|---|---|
 | SQLite | built in (`node:sqlite`, Node 22.5+) | nothing | `?`, `:name` |
-| PostgreSQL | `pg` | `npm install pg` | `$1..$n` |
+| PostgreSQL | `pg` | `npm install pg` | `$1..$n`, `:name` (rewritten to `$n`; `::` casts and literals are left alone) |
 | SQL Server | `mssql` | `npm install mssql` | `@p1..@pn`, `@name` |
 | Oracle | `oracledb` (Thin mode, pure JavaScript) | `npm install oracledb` | `:1..:n`, `:name` |
 
@@ -59,7 +63,81 @@ oracledb licence is Apache-2.0 OR UPL-1.0.
 Passwords can be `secret://store/key` references, which are resolved through
 `identity.secretStores` when the connection opens. They can also be `ENC(...)`
 values, which are decrypted when the config loads. Either way, resolved values
-are masked in logs, reports and evidence.
+are masked in logs, reports and evidence. A `secret://` reference may also sit
+inside a connection string (`Password=secret://vault/PW;` or an `mssql://` URL
+query value); it is resolved and quoted so the string still parses. Ports may
+come from `${ENV}` text (`port: ${PG_PORT:-5432}`).
+
+**Drivers installed elsewhere.** When a driver lives outside the project (a
+shared drivers folder, a CI image), point EZTest at its package folder:
+`EZTEST_PG_DRIVER`, `EZTEST_MSSQL_DRIVER` or `EZTEST_ORACLEDB_DRIVER`
+(for example `EZTEST_PG_DRIVER=/opt/drivers/node_modules/pg`).
+
+## SQL Server authentication
+
+`authentication:` (or `Authentication=` in a connection string) picks how
+EZTest signs in. Each mode maps onto the `authentication` option of the
+mssql / tedious driver:
+
+| `authentication.type` | Connection string | Driver option | Needs |
+|---|---|---|---|
+| `sql` (default) | `Authentication=Sql Password` | `default` | `user`, `password` |
+| `ntlm` | `Authentication=Windows` or `Integrated Security=true` with `DOMAIN\user` | `ntlm` | `domain` (or `DOMAIN\user`), `user`, `password` |
+| `kerberos` | `Integrated Security=SSPI` / `Trusted_Connection=yes` | the `mssql/msnodesqlv8` driver, `Trusted_Connection=Yes` | `npm install msnodesqlv8`, the Microsoft ODBC Driver 18, and a Kerberos ticket (`kinit` on Linux) |
+| `entra-password` | `Authentication=Active Directory Password` | `azure-active-directory-password` | `user`, `password`, `clientId` (`ClientId=`), `tenantId` |
+| `entra-service-principal` | `Authentication=Active Directory Service Principal` | `azure-active-directory-service-principal-secret` | `clientId` (`User ID=`), `clientSecret` (`Password=`), `tenantId` |
+| `entra-managed-identity` | `Authentication=Active Directory Managed Identity` (or `MSI`) | `azure-active-directory-msi-vm`, or `-msi-app-service` when `IDENTITY_ENDPOINT` is set | `clientId` for a user-assigned identity |
+| `entra-access-token` | `Authentication=Active Directory Access Token` + `AccessToken=` | `azure-active-directory-access-token` | `token` (a `secret://` reference) |
+| `entra-default` | `Authentication=Active Directory Default` | `azure-active-directory-default` | the Azure credential chain of the machine |
+
+```yaml
+db:
+  connections:
+    crm:
+      type: mssql
+      server: sql.corp.test
+      database: crm
+      user: CORP\qa_reader            # or user: qa_reader + domain: CORP
+      password: secret://vault/CRM_PW
+      authentication: { type: ntlm }
+    reports:
+      type: mssql
+      server: reports.database.windows.net
+      database: reports
+      authentication:
+        type: entra-service-principal
+        clientId: 11111111-2222-3333-4444-555555555555
+        clientSecret: secret://vault/REPORTS_SP_SECRET
+        tenantId: contoso.onmicrosoft.com
+        tokenSource: eztest           # tokens from EZTest's own OAuth client
+```
+
+`mssql://user:password@host:1433/database?encrypt=true&trustServerCertificate=false&authentication=ntlm&domain=CORP`
+is the URL form (`mssql://host/INSTANCE/database` names an instance). Fields
+given next to a connection string win over it.
+
+**`tokenSource: eztest`** (Entra password, service principal and managed
+identity): EZTest gets the token itself (client credentials, resource-owner
+password, or the managed identity endpoint: IMDS on a VM, `IDENTITY_ENDPOINT`
+on App Service) for the scope the server asks for, caches it until 5 minutes
+before it expires, and hands it to the driver as a token credential. The
+driver's own Azure libraries are then not used at all.
+
+What is proven, and how:
+
+- **SQL logins**, from fields, an ADO.NET string with a `secret://` password and
+  an `mssql://` URL: live against SQL Server 2022.
+- **NTLM**: live against the same SQL Server. The container is not joined to a
+  domain, so it answers the NTLM sign-in with "The login is from an untrusted
+  domain and cannot be used with Integrated authentication": proof that the
+  NTLM exchange reached the server and was handled as a Windows login. A
+  successful NTLM login needs a domain-joined SQL Server.
+- **Kerberos**: the mapping only (driver module, ODBC connection string). It
+  was not run here: it needs `msnodesqlv8` (native), the ODBC driver and a KDC.
+  tedious itself has no Kerberos support on any platform.
+- **Entra ID modes**: every mapping is accepted by the real tedious driver's
+  configuration check; the `tokenSource: eztest` credentials get tokens from
+  local fake token and IMDS servers. No Azure SQL database was used.
 
 ## Results: rows, types and column names
 
@@ -303,12 +381,19 @@ docker run -d --name ez-oracle -p 1521:1521 \
 docker run -d --name ez-mssql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD='EzSql_Pass1' \
   -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
 
-npm install --no-save oracledb       # and mssql for the SQL Server test
+# PostgreSQL 16 (pg_stat_statements loaded, for the top-SQL monitor)
+docker run -d --name ez-postgres -p 5432:5432 -e POSTGRES_USER=eztest -e POSTGRES_PASSWORD=EzPg_Pass1 \
+  -e POSTGRES_DB=eztest postgres:16-alpine -c shared_preload_libraries=pg_stat_statements
+
+npm install --no-save oracledb       # and mssql / pg for the SQL Server / PostgreSQL tests
 export EZTEST_ORACLE_URL=oracle://eztest:EzTest_1@localhost:1521/FREEPDB1
 #   (or EZTEST_ORACLE_HOST / _PORT / _SERVICE / _USER / _PASSWORD)
 export EZTEST_MSSQL_URL=mssql://sa:EzSql_Pass1@localhost:1433/master
 #   EZTEST_MSSQL_DRIVER=/path/to/node_modules/mssql   when mssql is installed elsewhere
+export EZTEST_PG_URL=postgres://eztest:EzPg_Pass1@localhost:5432/eztest
+#   EZTEST_PG_DRIVER=/path/to/node_modules/pg         when pg is installed elsewhere
 npm test -- test/surfaces/db-oracle.test.ts test/surfaces/db-cross-dialect.test.ts test/e2e/oracle-journey.test.ts
+npm test -- test/surfaces/db-postgres.test.ts test/e2e/postgres-journey.test.ts test/surfaces/db-mssql.test.ts
 ```
 
 | Test file | Needs | Covers |
@@ -318,3 +403,6 @@ npm test -- test/surfaces/db-oracle.test.ts test/surfaces/db-cross-dialect.test.
 | `test/surfaces/db-oracle.test.ts` | Oracle | pooling, binds and injection, types and CLOB, `FETCH FIRST`/`DBMS_RANDOM`, PL/SQL OUT/IN OUT/REF CURSOR, read-only transactions, the catalogue, `queries check`, Examples |
 | `test/e2e/oracle-journey.test.ts` | Oracle (+ Chromium) | `examples/oracle-project`: seeds a fictional ledger, then runs an API and UI journey cross-checked against Oracle, the CLI, and the Studio workbench |
 | `test/surfaces/db-cross-dialect.test.ts` | Oracle + SQL Server | the same rows compared across dialects, and one catalogue query run and checked on both |
+| `test/surfaces/db-postgres.test.ts` | PostgreSQL | pooling, `$n` and `:name` binds and injection, casts, pg types, transactions and SQLSTATE errors, the catalogue, `queries check` (EXPLAIN, read-only), Examples, the load test's database monitor |
+| `test/e2e/postgres-journey.test.ts` | PostgreSQL (+ Chromium) | `examples/postgres-project`: API and UI compared with the ledger cell by cell, one run per query row (`Examples: from query`), the CLI, and a missing table triaged as `db-schema-missing` |
+| `test/surfaces/db-mssql.test.ts` | nothing (+ SQL Server for the live part) | connection strings, every authentication mapping checked by the real tedious driver, Entra tokens from EZTest, live SQL login and NTLM |

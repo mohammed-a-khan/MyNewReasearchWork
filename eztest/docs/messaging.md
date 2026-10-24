@@ -22,6 +22,9 @@ The client libraries are optional peer dependencies, loaded on first use like th
 | IBM MQ | nothing: the MQ REST messaging API (mqweb) over HTTPS | |
 | gRPC | `@grpc/grpc-js`, `@grpc/proto-loader` (Apache-2.0) | `npm install @grpc/grpc-js @grpc/proto-loader` |
 | SFTP / SSH | `ssh2` (MIT) | `npm install ssh2` |
+| Protobuf payloads (schema registry) | `protobufjs` (BSD-3-Clause), already a gRPC peer | `npm install protobufjs` |
+
+Avro, the schema registry client, Amazon MSK IAM signing and OAUTHBEARER tokens are EZTest's own code: no further package.
 
 **IBM MQ uses the REST messaging API, not the native client.** The `ibmmq` npm package needs the IBM MQ C client libraries installed on every machine that runs tests. The REST messaging API of the queue manager's web server (mqweb, port 9443 by default) needs nothing but HTTPS.
 
@@ -61,6 +64,60 @@ messaging:
 **Kafka topics.** A missing topic is an error (`KAFKA_TOPIC_MISSING`); with `createTopics: true` EZTest creates it (and a failure to create is an error). Consumers use one consumer group per run, never commit offsets, and the groups are deleted when the run ends.
 
 **IBM MQ waits** browse the queue (MQ 9.1.5+ REST API) and consume only the message a wait matched, by its message id; other messages are never taken, held or reordered. A REST API without browse fails with `BUS_NO_BROWSE`.
+
+### TLS and authentication
+
+Every broker's TLS settings take a private CA, a client certificate and key (mutual TLS) and the name to verify. Files are relative to the project (PEM text works too); server certificates are always verified.
+
+```yaml
+messaging:
+  brokers:
+    bus:
+      type: kafka
+      brokers: [kafka-1:9093]
+      ssl: { ca: certs/ca.pem, cert: certs/client.pem, key: certs/client-key.pem, servername: kafka.internal }
+    events:                                     # SASL OAUTHBEARER: client credentials through EZTest's OAuth client
+      type: kafka
+      brokers: [kafka-1:9094]
+      ssl: { ca: certs/ca.pem }
+      sasl: { mechanism: oauthbearer, tokenUrl: https://login.example.com/oauth2/token, clientId: orders-svc, clientSecret: secret://vault/ORDERS_SVC, scope: kafka }
+    msk:                                        # Amazon MSK IAM (AWS_MSK_IAM), signed with EZTest's SigV4
+      type: kafka
+      brokers: [b-1.demo.kafka.eu-west-1.amazonaws.com:9098]
+      ssl: true
+      sasl: { mechanism: aws-msk-iam, region: eu-west-1 }     # keys: AWS_ACCESS_KEY_ID / ..., or accessKeyId / secretAccessKey: secret://...
+    rabbit: { type: amqp, url: "amqps://svc:${RABBIT_PW}@rabbit:5671", tls: { ca: certs/ca.pem, cert: certs/client.pem, key: certs/client-key.pem } }
+    iot:    { type: mqtt, url: mqtts://broker:8883, tls: { ca: certs/ca.pem, cert: certs/client.pem, key: certs/client-key.pem, servername: mqtt.internal } }
+```
+
+- SASL `plain`, `scram-sha-256` and `scram-sha-512` work over TLS as before.
+- OAUTHBEARER tokens are cached and refreshed; `extensions:` adds SASL extensions (Confluent Cloud's `logicalCluster`, `identityPoolId`). A broker that rejects a token closes the connection; EZTest reports that as `BUS_AUTH` with the likely causes (audience, issuer, scope, signing key).
+- A refused password is `BUS_AUTH`, a certificate problem `BUS_TLS`.
+- MSK IAM sends the `AWS_MSK_IAM` payload (a SigV4-presigned `kafka-cluster:Connect`). EZTest's SigV4 matches AWS's published signature examples, but MSK IAM has not been run against a real MSK cluster: it is tested against an independent recomputation of the signature.
+
+### Schema registry, Avro and Protobuf
+
+A Kafka broker with a `schemaRegistry` decodes schema-encoded messages (the Confluent wire format: magic byte 0, a 4-byte schema id) to JSON for waits, filters and captures, and publishes JSON payloads encoded with a subject's schema:
+
+```yaml
+    bus:
+      type: kafka
+      brokers: [kafka-1:9092]
+      schemaRegistry: { url: https://registry:8081, username: svc, password: secret://vault/REGISTRY_PW }   # or token: secret://...
+```
+
+```text
+Publish message from file "order.json" to Kafka topic "orders" with key "${orderId}" as Avro using subject "orders-value" as sent
+Publish message '{"order_id": "42", "reason": "customer request"}' to Kafka topic "shipments" as Protobuf using subject "shipments-value" message "shop.events.Cancelled"
+Wait for a message on Kafka topic "orders" where "$.orderId" = ${orderId} and "$.status" = "PAID" within 30 s as placed
+Expect ${placed_meta.format} equals "avro"
+```
+
+- `as Avro | Protobuf | JSON Schema using subject "..."` encodes with the subject's latest version (`version 3` picks one); the step fails when the payload does not fit the schema, naming the field.
+- Waits decode framed messages with the schema of their id (`<capture>_meta.format` and `.schemaId` say how). A message whose schema cannot be fetched stays raw, and a failed wait says why.
+- Avro is EZTest's own codec, written from the Apache Avro 1.11 specification: records, enums, arrays, maps, unions, fixed, named types and recursion; the logical types decimal, uuid, date, time-millis/-micros, timestamp-millis/-micros, local-timestamp-millis/-micros and duration (readable values: dates `2026-03-01`, timestamps ISO-8601, decimals as text); schema resolution and compatibility (BACKWARD / FORWARD / FULL); Parsing Canonical Form and the CRC-64-AVRO fingerprint. Longs beyond 2^53 come back as text.
+- Protobuf needs `protobufjs`; message indexes select nested or later message types as Confluent writes them.
+- The registry client (`SchemaRegistryClient`) covers subjects, versions, schemas by id, registration, lookup, compatibility checks and compatibility settings, for code that sets up subjects.
 
 ## Steps
 
@@ -296,6 +353,8 @@ The repository's e2e suites (`test/integration/*-e2e.test.ts`) run against real 
 | IBM MQ | `ibmcom/mq` (REST on 19443) | 19443 |
 | SFTP | `atmoz/sftp` | 12222 |
 | OpenSSH | `linuxserver/openssh-server` | 12223 |
+
+With the same images, the security suites start brokers with TLS turned on, using a throwaway PKI made with openssl: `eztest-it-kafka-sec` (19093 mutual TLS, 19094 SASL_SSL with PLAIN, SCRAM-SHA-256 and OAUTHBEARER checked against a JWKS file), `eztest-it-mqtt-tls` (18883, client certificate required) and `eztest-it-rabbit-tls` (15671, amqps only, `verify_peer`). The Avro and Protobuf suite uses a local Confluent-compatible registry server written for the tests (`test/support/schema-registry-server.ts`).
 
 The tests start these containers when Docker is running and the images are already pulled; tests never pull images. Each broker can instead come from an environment variable: `EZTEST_KAFKA_BROKERS`, `EZTEST_AMQP_URL`, `EZTEST_MQTT_URL`, `EZTEST_IBMMQ_URL`, `EZTEST_SFTP_URL`, `EZTEST_SSH_URL`. `EZTEST_DOCKER=0` turns Docker off. A suite whose broker is unavailable is skipped with a note.
 
