@@ -169,6 +169,61 @@ setInterval(() => undefined, 1000);
   }, 60_000);
 });
 
+/** Two journeys that wait on a button that never appears (they run until cancelled) and one that cannot start before them. */
+async function workersProject(): Promise<{ dir: string; tmp: string }> {
+  const p = await project();
+  writeFileSync(join(p.dir, 'journeys', 'a-quick.ez'), 'Journey: Slow two\nOpen /slow\nClick the "Later" button\n');
+  return p;
+}
+
+describe('cancelling a run with process workers (--workers 2)', () => {
+  it('SIGTERM mid-run: the workers stop, their browsers and temp dirs are gone, run.json is marked cancelled, exit 143', async () => {
+    const { dir, tmp } = await workersProject();
+    try {
+      const c = start([join(ROOT, 'src/cli/bin.ts'), 'run', '--no-analyze', '--workers', '2'], dir, { TMPDIR: tmp });
+      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/);
+      await new Promise((r) => setTimeout(r, 1500)); // both journeys wait on the button, each in its own worker
+      expect(readdirSync(tmp).filter((n) => LEFTOVER.test(n)).length).toBeGreaterThan(1); // one browser profile per worker
+      c.proc.kill('SIGTERM');
+      const { code } = await c.exited;
+      const text = c.out.join('');
+      expect(code).toBe(143);
+      expect(text).toMatch(/run cancelled by SIGTERM/);
+      expect(readdirSync(tmp).filter((n) => LEFTOVER.test(n))).toEqual([]);
+      const run = runJson(dir);
+      expect(run.cancelled).toMatchObject({ reason: 'SIGTERM' });
+      expect(run.environment.workers).toBe('2 processes');
+      const by = Object.fromEntries(run.journeys.map((j) => [j.journeyId, j]));
+      for (const id of ['slow-one', 'slow-two']) {
+        expect(by[id]).toMatchObject({ status: 'skipped', error: { name: 'CancelledError' } });
+        expect(by[id].error!.message).toMatch(/Run cancelled \(SIGTERM\) while the journey was running/);
+      }
+      expect(by['never-started']).toMatchObject({ status: 'skipped', error: { name: 'CancelledError' } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it('a forced stop (grace period over) kills the workers and their browsers and writes the partial run', async () => {
+    const { dir, tmp } = await workersProject();
+    try {
+      const c = start([join(ROOT, 'src/cli/bin.ts'), 'run', '--no-analyze', '--workers', '2'], dir, { TMPDIR: tmp, EZTEST_CANCEL_GRACE_MS: '1' });
+      await c.waitFor(/> Slow one[\s\S]*> Slow two|> Slow two[\s\S]*> Slow one/);
+      await new Promise((r) => setTimeout(r, 1500));
+      c.proc.kill('SIGINT');
+      const { code } = await c.exited;
+      expect(code).toBe(130);
+      expect(c.out.join('')).toMatch(/SIGINT: stopping now; writing the partial results/);
+      expect(readdirSync(tmp).filter((n) => LEFTOVER.test(n))).toEqual([]);
+      const run = runJson(dir);
+      expect(run.cancelled).toMatchObject({ reason: 'SIGINT', partial: true });
+      expect(run.journeys.find((j) => j.journeyId === 'never-started')).toMatchObject({ status: 'skipped', error: { name: 'CancelledError' } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
 describe('startup sweep of stale temp dirs', () => {
   it('removes old directories of dead processes only', async () => {
     const root = await mkdtemp(join(tmpdir(), 'eztest-sweep-'));

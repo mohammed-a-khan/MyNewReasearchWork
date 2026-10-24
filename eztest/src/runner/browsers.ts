@@ -85,10 +85,12 @@ export function runBrowsers(opts: Pick<RunOptions, 'browsers' | 'browser' | 'cha
 }
 
 /** Launch the browser, or attach to it when it has a remote endpoint. */
-export async function openBrowser(b: ResolvedBrowser, opts: Pick<RunOptions, 'headless'>): Promise<Browser> {
+export async function openBrowser(b: ResolvedBrowser, opts: Pick<RunOptions, 'headless'> & { handleSignals?: boolean }): Promise<Browser> {
   if (b.connect) return connectBrowser(b);
   const launch = {
     headless: opts.headless ?? true,
+    // Process workers leave terminal signals to the run (it cancels them and closes their browsers itself).
+    ...(opts.handleSignals === false ? { handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false } : {}),
     ...(b.executablePath ? { executablePath: b.executablePath } : {}),
     ...(b.channel && !b.executablePath ? { channel: b.channel } : {}),
   };

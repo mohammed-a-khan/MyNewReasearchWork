@@ -148,6 +148,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--browsers <names>', 'cross-browser run: every journey on each browser (chromium,firefox,msedge,chrome,...); result ids end in @<browser>', list)
     .option('--headed', 'show the browser')
     .option('-w, --workers <n>', 'journeys in parallel', (v) => parseInt(v, 10))
+    .addOption(new Option('--worker-mode <mode>', 'parallel journeys in worker processes with their own browser (default when workers > 1), or inline in this process').choices(['process', 'inline']))
     .option('-r, --retries <n>', 'journey retries', (v) => parseInt(v, 10))
     .option('-u, --base-url <url>', 'base URL of the app under test')
     .option('--no-heal', 'disable self-healing')
@@ -308,15 +309,19 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const reporterNames: string[] = o.reporter ?? cfg.reporters;
       const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit', 'csv', 'summary'].includes(r)) as ReportFormat[];
       const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'csv', 'summary', 'console'].includes(r));
+      // Parallel journeys run in worker processes (crash and CPU isolation) unless asked otherwise; manual prompts need this terminal.
+      const workerMode: 'process' | 'inline' = o.manual === 'prompt' ? 'inline' : o.workerMode ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         addons,
+        worker: { updateBaselines: !!o.updateBaselines, timeTravel: !!o.timeTravel },
         ...(client ? { serverClient: client } : {}),
         ...(pipe ? { pipeline: pipe.resolution.name } : {}),
         logger: log ? log.child({}) : createMaskedLogger(cfg.logLevel === 'debug' ? 'debug' : 'warn', loaded.masker),
         runOptions: {
           events,
           library,
+          workers: workerMode,
           ...(o.trace ? { trace: true } : {}),
           ...(locks ? { locks } : {}),
           signal: cancel.signal,

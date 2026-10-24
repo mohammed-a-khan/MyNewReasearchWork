@@ -378,6 +378,11 @@ export class SharedStore implements StoreStepRuntime {
   }
 
   // ---------------------------------------------------------------- pipeline export
+  /** Values saved "for the pipeline" by another process of the same run (a process worker): exported with this run's. */
+  absorbExports(entries: StoreExport['entries']): void {
+    for (const e of entries) this.exported.set(`${e.namespace}\u0000${e.key}`, e);
+  }
+
   pipelineExport(o: { runId?: string; pipeline?: string } = {}): StoreExport {
     return { kind: 'eztest-store-export', version: 1, createdAt: new Date().toISOString(), ...(o.runId ? { runId: o.runId } : {}), ...(o.pipeline ? { pipeline: o.pipeline } : {}), entries: [...this.exported.values()] };
   }

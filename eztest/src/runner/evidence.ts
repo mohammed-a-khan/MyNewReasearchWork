@@ -3,6 +3,8 @@
  * manifest is a hash chain whose lines must be appended strictly in order, so
  * every write goes through one queue.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { EvidenceKind, EvidenceRef, EvidenceVault } from '../core/index.js';
 
 type Meta = { stepId?: string; journeyId?: string; description?: string };
@@ -12,7 +14,11 @@ export class EvidenceWriter {
   private readonly used = new Set<string>();
 
   /** `mask`, when given, is applied to every text artifact (secrets never reach the vault). */
-  constructor(readonly vault: EvidenceVault, private readonly mask?: (s: string) => string) {}
+  /**
+   * `claimOnDisk`: also skip paths that exist in the run directory (process workers write their own
+   * artifacts there, see src/runner/workers/remote-evidence.ts).
+   */
+  constructor(readonly vault: EvidenceVault, private readonly mask?: (s: string) => string, private readonly claimOnDisk = false) {}
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.queue.then(fn, fn);
@@ -27,7 +33,7 @@ export class EvidenceWriter {
    */
   reserve(relPath: string): string {
     let p = relPath;
-    for (let n = 2; this.used.has(p); n++) p = relPath.replace(/(\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)?$/, (ext) => `-${n}${ext}`);
+    for (let n = 2; this.used.has(p) || (this.claimOnDisk && existsSync(join(this.vault.runDir, p))); n++) p = relPath.replace(/(\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)?$/, (ext) => `-${n}${ext}`);
     this.used.add(p);
     return p;
   }

@@ -12,6 +12,18 @@ export const MIN_SECRET_LENGTH = 3;
 export class SecretMasker {
   private readonly values = new Set<string>();
   private sorted: string[] | undefined;
+  private readonly observers = new Set<(value: string) => void>();
+
+  /** Be told about every secret registered from now on (a process worker hands its secrets to the run). Returns the stop function. */
+  observe(fn: (value: string) => void): () => void {
+    this.observers.add(fn);
+    return () => this.observers.delete(fn);
+  }
+
+  /** The registered values (with their encoded forms), e.g. to give a process worker the same masking. */
+  secrets(): string[] {
+    return [...this.values];
+  }
 
   /** Register a secret value (plus its URL-encoded and base64 forms). Returns the value for chaining. */
   add(value: string | undefined | null): string | undefined | null {
@@ -19,12 +31,15 @@ export class SecretMasker {
     const forms = new Set([value, encodeURIComponent(value), Buffer.from(value, 'utf8').toString('base64')]);
     // JSON-escaped form, so secrets inside JSON.stringify output are caught too.
     forms.add(JSON.stringify(value).slice(1, -1));
+    let fresh = false;
     for (const f of forms) {
       if (f.length >= MIN_SECRET_LENGTH && !this.values.has(f)) {
         this.values.add(f);
         this.sorted = undefined;
+        fresh = true;
       }
     }
+    if (fresh) for (const o of this.observers) o(value);
     return value;
   }
 

@@ -2,12 +2,14 @@
  * The fingerprint store: per `journeyId/stepId`, the fingerprint of the
  * element the step last acted on successfully, the last good locator, and the
  * last verified heal (the T0 cache). Persisted as JSON; writes are serialised
- * and atomic (write temp file, then rename).
+ * and atomic (write temp file, then rename), and processes that share the file
+ * (process workers, shards on one machine) merge under a cross-process lock.
  */
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { ElementFingerprint, HealTier, LocatorCandidate } from '../core/index.js';
+import { withFileLock } from '../store/file.js';
 
 /** Journey id under which repository elements are kept: `@elements/<element id>`. */
 export const ELEMENTS_JOURNEY = '@elements';
@@ -115,22 +117,26 @@ export class FingerprintStore {
       if (!this.dirty) return;
       this.dirty = false;
       await mkdir(dirname(this.path), { recursive: true });
-      // Parallel runs (shards, other processes) share this file: keep their newer entries instead of overwriting them.
-      if (existsSync(this.path)) {
-        try {
-          const disk = JSON.parse(await readFile(this.path, 'utf8')) as Partial<StoreFile>;
-          for (const [k, v] of Object.entries(disk.steps ?? {})) {
-            const mine = this.data.steps[k];
-            if (!mine || (v?.updatedAt ?? '') > (mine.updatedAt ?? '')) this.data.steps[k] = v;
-          }
-        } catch {
-          // being replaced right now: our copy is written as is
-        }
-      }
-      const tmp = `${this.path}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(this.data, null, 2));
-      await rename(tmp, this.path);
+      await withFileLock(this.path, () => this.mergeAndWrite(), { waitMs: 60_000 });
     });
     return this.writing;
+  }
+
+  private async mergeAndWrite(): Promise<void> {
+    // Parallel runs (shards, process workers) share this file: keep their newer entries instead of overwriting them.
+    if (existsSync(this.path)) {
+      try {
+        const disk = JSON.parse(await readFile(this.path, 'utf8')) as Partial<StoreFile>;
+        for (const [k, v] of Object.entries(disk.steps ?? {})) {
+          const mine = this.data.steps[k];
+          if (!mine || (v?.updatedAt ?? '') > (mine.updatedAt ?? '')) this.data.steps[k] = v;
+        }
+      } catch {
+        // being replaced right now: our copy is written as is
+      }
+    }
+    const tmp = `${this.path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(this.data, null, 2));
+    await rename(tmp, this.path);
   }
 }
