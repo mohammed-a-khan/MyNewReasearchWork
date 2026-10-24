@@ -22,6 +22,8 @@ describe('MySQL protocol: offline pieces', () => {
     const s = mysqlSettings({ connectionString: 'mariadb://qa%40corp:p%3Bss@db.test:3310/hr?ssl=true&allowPublicKeyRetrieval=true&timezone=Z', database: 'other' });
     expect(s).toMatchObject({ host: 'db.test', port: 3310, user: 'qa@corp', password: 'p;ss', database: 'other', ssl: true, allowPublicKeyRetrieval: true, timezone: 'Z' });
     expect(mysqlSettings({ connectionString: 'mysql://u@h/d?ssl-mode=DISABLED' }).ssl).toBe(false);
+    expect(mysqlSettings({ connectionString: 'mysql://u@h/d?ssl-mode=PREFERRED' }).ssl).toEqual({ rejectUnauthorized: false, optional: true });
+    expect(mysqlSettings({ connectionString: 'mysql://u@h/d?ssl-mode=VERIFY_IDENTITY' }).ssl).toBe(true);
     expect(mysqlSettings({ connectionString: 'mysql://u@h/d?ssl-ca=/x/ca.pem' }).ssl).toEqual({ ca: '/x/ca.pem' });
     expect(mysqlSettings({ host: 'h' })).toMatchObject({ host: 'h', port: 3306 });
     expect(() => mysqlSettings({ connectionString: 'postgres://u@h/d' })).toThrow(/mysql:\/\/ or mariadb:\/\//);

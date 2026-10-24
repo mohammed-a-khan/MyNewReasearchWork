@@ -332,7 +332,8 @@ package to install, and MySQL 5.7/8.x and MariaDB 10.x/11.x work the same way.
   the host name; `ssl: { ca, cert, key, servername, rejectUnauthorized }` takes
   PEM text or file paths (`cert`/`key` for X.509 users). A host given as an IP
   address is checked against the certificate's IP SANs. URL forms:
-  `?ssl=true`, `?ssl-mode=REQUIRED|VERIFY_IDENTITY|DISABLED`, `?ssl-ca=/path`.
+  `?ssl=true`, `?ssl-mode=VERIFY_IDENTITY|VERIFY_CA` (verified), `REQUIRED` (TLS, not verified), `PREFERRED`
+  (TLS when the server offers it), `DISABLED`, and `?ssl-ca=/path`.
 - **Statements.** SQL without values goes as a plain query (several statements
   separated by `;` return several results). SQL with values is prepared on the
   server and executed with the values bound in the binary protocol; prepared

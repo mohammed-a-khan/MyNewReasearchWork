@@ -36,6 +36,8 @@ export interface MysqlTlsOptions {
   key?: string;
   /** Host name to verify the certificate against (default: the connection host). */
   servername?: string;
+  /** Use TLS when the server offers it, else go on without (ssl-mode=PREFERRED). Default false: TLS is required. */
+  optional?: boolean;
 }
 
 export interface MysqlOptions {
@@ -112,7 +114,12 @@ export function mysqlSettings(o: MysqlOptions): MysqlOptions & { host: string; p
     const flag = (k: string) => (q.has(k) ? /^(1|true|yes|on|required|verify[-_](ca|identity))$/i.test(q.get(k)!) : undefined);
     const sslMode = q.get('ssl-mode') ?? q.get('sslMode') ?? q.get('sslmode');
     let ssl: MysqlOptions['ssl'] = flag('ssl');
-    if (sslMode) ssl = /^disabled$/i.test(sslMode) ? false : /^(required|preferred)$/i.test(sslMode) ? { rejectUnauthorized: false } : true;
+    if (sslMode) {
+      ssl = /^disabled$/i.test(sslMode) ? false
+        : /^preferred$/i.test(sslMode) ? { rejectUnauthorized: false, optional: true }
+          : /^required$/i.test(sslMode) ? { rejectUnauthorized: false }
+            : true; // VERIFY_CA, VERIFY_IDENTITY
+    }
     const ca = q.get('ssl-ca') ?? q.get('sslca') ?? q.get('sslrootcert');
     if (ca) ssl = { ...(typeof ssl === 'object' ? ssl : {}), ca };
     fromUrl = {
@@ -727,7 +734,8 @@ export class MysqlConnection {
     if (!(caps & CLIENT.PROTOCOL_41)) throw new DbError(`[${this.label}] the server (${version}) does not speak protocol 4.1`, 'DB_PROTOCOL');
 
     const ssl = o.ssl;
-    const wantTls = ssl === true || (typeof ssl === 'object' && ssl !== null);
+    let wantTls = ssl === true || (typeof ssl === 'object' && ssl !== null);
+    if (wantTls && typeof ssl === 'object' && ssl.optional && !(caps & CLIENT.SSL)) wantTls = false;
     let flags = CLIENT.LONG_PASSWORD | CLIENT.FOUND_ROWS | CLIENT.LONG_FLAG | CLIENT.PROTOCOL_41 | CLIENT.TRANSACTIONS | CLIENT.SECURE_CONNECTION |
       CLIENT.MULTI_STATEMENTS | CLIENT.MULTI_RESULTS | CLIENT.PS_MULTI_RESULTS | CLIENT.PLUGIN_AUTH | CLIENT.PLUGIN_AUTH_LENENC_CLIENT_DATA | CLIENT.CONNECT_ATTRS;
     if (o.database) flags |= CLIENT.CONNECT_WITH_DB;
