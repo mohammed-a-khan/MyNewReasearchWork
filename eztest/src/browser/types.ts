@@ -107,7 +107,19 @@ export interface BrowserContextOptions {
   serviceWorkers?: 'allow' | 'block';
   /** A StorageState object or the path of a JSON file holding one. */
   storageState?: string | StorageState;
+  /**
+   * Locator actions always need exactly one match. With strictSelectors, the handle queries
+   * (page.$, frame.$, elementHandle.$, $eval and waitForSelector) need one too, instead of
+   * taking the first of several.
+   */
   strictSelectors?: boolean;
+  /**
+   * After a click / tap, how long the page is watched for a navigation it starts (a link, a form,
+   * or `window.location` set after async work): until it was quiet this long (default 150 ms; a
+   * request the click started keeps the watch open), at most `max` (default 2000 ms). A number
+   * sets the quiet time. A navigation that starts is waited for until it commits.
+   */
+  navigationWindow?: number | { quiet?: number; max?: number };
   timezoneId?: string;
   userAgent?: string;
   /** null disables the viewport override (the window size is used). Default 1280x720. */
@@ -129,12 +141,17 @@ export interface LaunchOptions {
   downloadsPath?: string;
   proxy?: { server: string; bypass?: string; username?: string; password?: string };
   devtools?: boolean;
-  /** Accepted for compatibility; signals are always handled. */
+  /**
+   * Close the browser and remove its temporary profile and download folders when the process gets
+   * SIGINT / SIGTERM / SIGHUP (default true each). When nothing else listens for the signal, the
+   * signal is then raised again, so the process ends as it would have without EZTest.
+   */
   handleSIGINT?: boolean;
   handleSIGTERM?: boolean;
   handleSIGHUP?: boolean;
-  /** Write a browser log here. */
+  /** Not supported (rejected): use EZTEST_DEBUG=browser,protocol for the driver log. */
   logger?: unknown;
+  /** Not supported (rejected): pass the path to context.tracing.stop({ path }). */
   tracesDir?: string;
 }
 

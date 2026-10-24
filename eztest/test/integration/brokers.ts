@@ -185,7 +185,11 @@ export async function sshServer(): Promise<Brokers['sftp']> {
   ], async () => {
     if (!(await portOpen('127.0.0.1', 12223))) return false;
     const { SshSession } = await import('../../src/integration/files.js');
-    const s = new SshSession('probe', cfg, process.cwd());
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    // The probe trusts the container's key in a throwaway known_hosts file (the suites keep their own).
+    const s = new SshSession('probe', { ...cfg, knownHosts: join(mkdtempSync(join(tmpdir(), 'eztest-probe-')), 'known_hosts'), trustOnFirstUse: true }, process.cwd());
     try {
       return (await s.exec('echo ready', 5000)).stdout.trim() === 'ready';
     } finally {

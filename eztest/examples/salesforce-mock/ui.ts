@@ -53,6 +53,8 @@ export interface PageData {
   record?: { id: string; name: string; values: Record<string, unknown>; display: Record<string, string>; links: Record<string, string> };
   highlights?: string[];
   listView?: { name: string; columns: Array<{ field: string; label: string }> };
+  /** Render the list view header this long after the page (ms). */
+  listHeaderDelayMs?: number;
   related?: Array<{ label: string; columns: Array<{ field: string; label: string }>; rows: UiRow[] }>;
   path?: { field: string; stages: string[]; current: string };
   modal?: { mode: 'new' | 'edit'; backUrl: string };
@@ -384,6 +386,11 @@ customElements.define('lst-list-view-manager-header', class extends HTMLElement 
   connectedCallback(){
     if (this.shadowRoot) return;
     var root = this.attachShadow({ mode: 'open' });
+    var self = this;
+    if (SF.listHeaderDelayMs && !self.rendered) { setTimeout(function(){ self.rendered = true; self.render(root); }, SF.listHeaderDelayMs); return; }
+    this.render(root);
+  }
+  render(root){
     css(root, BASE + '.slds-page-header{background:#fff;padding:12px;border:1px solid #ddd;display:flex;justify-content:space-between}');
     var hd = h('div', { 'class': 'slds-page-header' });
     var left = h('div');

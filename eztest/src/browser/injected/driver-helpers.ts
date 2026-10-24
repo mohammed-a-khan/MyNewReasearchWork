@@ -37,7 +37,7 @@ export interface DriverHelpers {
   removeOverlay(): void;
   isFileInput(el: Element): 'file' | 'multiple' | 'no';
   /** Retarget a label to its control (for fill / check / setInputFiles). */
-  retarget(el: Element, kind: 'control' | 'none'): Element;
+  resolveControl(el: Element, kind: 'control' | 'none'): Element;
   content(): string;
   setContent(html: string): void;
 }
@@ -47,7 +47,7 @@ export function createDriverHelpers(): DriverHelpers {
   const directSet = new Set(['color', 'date', 'time', 'datetime-local', 'month', 'range', 'week']);
   const typeable = new Set(['', 'email', 'number', 'password', 'search', 'tel', 'text', 'url']);
 
-  function retarget(el: Element, kind: 'control' | 'none'): Element {
+  function resolveControl(el: Element, kind: 'control' | 'none'): Element {
     if (kind === 'none') return el;
     if (el.localName === 'label' && (el as HTMLLabelElement).control) return (el as HTMLLabelElement).control as Element;
     if (!/^(input|textarea|select)$/.test(el.localName) && !(el as HTMLElement).isContentEditable) {
@@ -68,13 +68,13 @@ export function createDriverHelpers(): DriverHelpers {
       if (directSet.has(type)) {
         input.focus();
         input.value = value;
-        if (input.value !== value) throw new Error('Malformed value');
+        if (input.value !== value) throw new Error(`The value "${value}" is not in the format this <input type=${type}> takes (e.g. 2026-03-15 for a date, 14:30 for a time)`);
         fire(input, 'input');
         fire(input, 'change');
         return 'done';
       }
-      if (!typeable.has(type)) throw new Error(`Input of type "${type}" cannot be filled`);
-      if (type === 'number' && value.trim() !== '' && Number.isNaN(Number(value))) throw new Error('Cannot type text into input[type=number]');
+      if (!typeable.has(type)) throw new Error(`An <input type=${type}> takes no typed text; use check(), setInputFiles() or click() for it`);
+      if (type === 'number' && value.trim() !== '' && Number.isNaN(Number(value))) throw new Error(`"${value}" is not a number, so it cannot go into this <input type=number>`);
       input.focus();
       try {
         input.setSelectionRange(0, input.value.length);
@@ -98,11 +98,11 @@ export function createDriverHelpers(): DriverHelpers {
       sel?.addRange(range);
       return 'input';
     }
-    throw new Error('Element is not an <input>, <textarea> or [contenteditable] element');
+    throw new Error('The element takes no typed text: fill() needs an input, a textarea or an editable element (contenteditable)');
   }
 
   function selectOptions(el: Element, specs: Array<{ value?: string; label?: string; index?: number; valueOrLabel?: string }>): string[] | { retry: string } {
-    if (el.localName !== 'select') throw new Error('Element is not a <select> element');
+    if (el.localName !== 'select') throw new Error('selectOption() needs a <select> (or a label of one); this element is not one');
     const select = el as HTMLSelectElement;
     const options = Array.from(select.options);
     const chosen: HTMLOptionElement[] = [];
@@ -129,9 +129,9 @@ export function createDriverHelpers(): DriverHelpers {
   }
 
   function setFiles(el: Element, files: Array<{ name: string; mimeType: string; b64: string; lastModified?: number }>) {
-    if (el.localName !== 'input' || (el as HTMLInputElement).type !== 'file') throw new Error('Node is not an HTMLInputElement of type file');
+    if (el.localName !== 'input' || (el as HTMLInputElement).type !== 'file') throw new Error('The target is not a file input (<input type=file>) or a label of one');
     const input = el as HTMLInputElement;
-    if (files.length > 1 && !input.multiple) throw new Error('Non-multiple file input can only accept single file');
+    if (files.length > 1 && !input.multiple) throw new Error(`This file input takes one file (it has no "multiple" attribute), but ${files.length} were given`);
     const dt = new DataTransfer();
     for (const f of files) {
       const bin = atob(f.b64);
@@ -164,7 +164,7 @@ export function createDriverHelpers(): DriverHelpers {
 
   function inputValue(el: Element): string {
     if (el.localName === 'input' || el.localName === 'textarea' || el.localName === 'select') return (el as HTMLInputElement).value;
-    throw new Error('Node is not an <input>, <textarea> or <select> element');
+    throw new Error('inputValue() reads form fields only: an input, a textarea or a select');
   }
 
   function rect(el: Element) {
@@ -309,7 +309,7 @@ export function createDriverHelpers(): DriverHelpers {
     overlay,
     removeOverlay,
     isFileInput: (el) => (el.localName === 'input' && (el as HTMLInputElement).type === 'file' ? ((el as HTMLInputElement).multiple ? 'multiple' : 'file') : 'no'),
-    retarget,
+    resolveControl,
     content: () => {
       let s = '';
       if (document.doctype) s = new XMLSerializer().serializeToString(document.doctype);

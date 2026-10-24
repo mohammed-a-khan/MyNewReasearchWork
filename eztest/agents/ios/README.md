@@ -19,7 +19,10 @@ eztest mobile build-agent --ios --device   # device build (set your signing team
 
 Point `mobile.ios.xctestrun` at the `.xctestrun` file under `build/Build/Products`.
 EZTest then launches the agent with `xcodebuild test-without-building` and connects
-to it on `127.0.0.1:8790` (simulator) or through usbmuxd (device).
+to it on `127.0.0.1:8790` (simulator) or through usbmuxd (device). The agent listens
+on the loopback only and answers only requests carrying the random session token
+EZTest passes it (`EZTEST_AGENT_TOKEN`); for an agent you start yourself, set the
+same token as `mobile.ios.agentToken`.
 
 ## What it does
 

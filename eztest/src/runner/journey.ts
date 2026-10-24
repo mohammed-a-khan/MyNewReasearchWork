@@ -622,7 +622,7 @@ async function runStep(
       sr.diagnosis = d;
       const hint = diagnosisHint(d);
       // Hints go on the runner's own generic failures; adapter/custom-step errors are already specific (the diagnosis is still attached).
-      const generic = /^(?:no locator candidate matched|post-condition failed|suspected regression|[\w.]+: Timeout \d+ms exceeded|Timed out after)/.test(sr.error?.message ?? '');
+      const generic = /^(?:no locator candidate matched|post-condition failed|suspected regression|[\w.]+: Timeout \d+ms exceeded|[\w.]+: timed out after \d+ ms|Timed out after)/.test(sr.error?.message ?? '');
       if (hint && generic && sr.error && !sr.error.message.includes('did you mean')) sr.error.message = `${sr.error.message}; ${hint}`;
     }
   }

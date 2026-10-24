@@ -12,7 +12,7 @@ import type { RunResult } from '../core/index.js';
 import type { RunHistoryEntry } from '../insights/index.js';
 import type { CanReleaseResult, PublishedContract, ReleaseRecord, VerificationRecord } from '../contracts/release.js';
 import type { DurationTable } from '../scale/durations.js';
-import type { LockBackend, LockHandle } from '../scale/locks.js';
+import { reportLostLock, type LockBackend, type LockHandle } from '../scale/locks.js';
 import type { NewPoolItem, PoolItem, PoolSummary, StoredEntry } from '../store/types.js';
 import type { DeploymentRecord } from '../pipelines/types.js';
 
@@ -270,10 +270,32 @@ export class ServerLockBackend implements LockBackend {
       return undefined;
     }
     const token = r.token;
-    const timer = setInterval(() => void this.client.renewLock(key, token, this.ttlMs).catch(() => undefined), Math.max(1000, Math.floor(this.ttlMs / 3)));
+    let lost: string | undefined;
+    let lastRenewed = Date.now();
+    const lose = (why: string) => {
+      if (lost) return;
+      lost = `lock "${key}" on the results server was lost while held: ${why}; another run may be using the resource`;
+      clearInterval(timer);
+      reportLostLock(lost);
+    };
+    // Renewals are checked: a refused renewal (the lease expired or was taken over) loses the lock at
+    // once; failed calls are retried until the lease would have expired.
+    const timer = setInterval(() => {
+      if (lost) return;
+      this.client.renewLock(key, token, this.ttlMs).then(
+        (res) => {
+          if (res.renewed) lastRenewed = Date.now();
+          else lose('the server refused to renew it (the lease expired or another holder has it)');
+        },
+        (e: Error) => {
+          if (Date.now() - lastRenewed >= this.ttlMs) lose(`it could not be renewed for ${Date.now() - lastRenewed} ms (${e.message}) and has expired`);
+        },
+      );
+    }, Math.max(1000, Math.floor(this.ttlMs / 3)));
     timer.unref();
     return {
       key,
+      lost: () => lost,
       release: async () => {
         clearInterval(timer);
         await this.client.releaseLock(key, token).catch(() => undefined);

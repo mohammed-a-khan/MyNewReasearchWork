@@ -4,9 +4,11 @@
  * page-level API.
  */
 import { readFile, writeFile } from 'node:fs/promises';
-import { UTILITY_WORLD_NAME } from '../injected/contract.js';
+import { ENGINE_WORLD_NAME } from '../injected/contract.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError, TimeoutError, isClosedError } from '../errors.js';
+import { NO_DEBUGGER_TEXT, pauseHandlerFor } from '../pause.js';
+import { FRAME_GONE_TEXT, bindingTakenMessage, dialogHandledMessage, timeoutMessage } from '../messages.js';
 import { FrameLocator, Locator, type GetByRoleOptions, type LocatorOptions, type TextOptions } from '../locator.js';
 import { KEEP_NAMES_SHIM, functionSource, pageCodec, serializeArgument } from '../serializer.js';
 import type { CDPSession } from '../transport/connection.js';
@@ -14,9 +16,9 @@ import type { LifecycleEvent, URLMatch, ViewportSize } from '../types.js';
 import { Deadline, sleep, urlMatches } from '../util.js';
 import * as actions from '../actions.js';
 import { routeFromHAR, type RouteFromHAROptions } from '../har.js';
-import type { CrBrowserContext } from './browser.js';
+import type { ChromiumContext } from './browser.js';
 import { ExecutionContext, type RemoteObject } from './exec-context.js';
-import { CrFrame, type GotoOptions } from './frame.js';
+import { ChromiumFrame, type GotoOptions } from './frame.js';
 import type { ElementHandle, JSHandle } from './handles.js';
 import type { PageFunction } from '../eval-types.js';
 import { APIRequestContext } from '../request.js';
@@ -34,7 +36,7 @@ export class ConsoleMessage {
     private readonly text_: string,
     private readonly args_: JSHandle[],
     private readonly location_: { url: string; lineNumber: number; columnNumber: number },
-    private readonly page_: CrPage | null,
+    private readonly page_: ChromiumPage | null,
   ) {}
   type(): string {
     return this.type_;
@@ -48,7 +50,7 @@ export class ConsoleMessage {
   location(): { url: string; lineNumber: number; columnNumber: number } {
     return this.location_;
   }
-  page(): CrPage | null {
+  page(): ChromiumPage | null {
     return this.page_;
   }
   toString(): string {
@@ -59,7 +61,7 @@ export class ConsoleMessage {
 export class Dialog {
   protected handled = false;
   constructor(
-    private readonly page_: CrPage,
+    private readonly page_: ChromiumPage,
     private readonly session: CDPSession | null,
     private readonly type_: string,
     private readonly message_: string,
@@ -74,16 +76,16 @@ export class Dialog {
   defaultValue(): string {
     return this.defaultValue_;
   }
-  page(): CrPage {
+  page(): ChromiumPage {
     return this.page_;
   }
   async accept(promptText?: string): Promise<void> {
-    if (this.handled) throw new Error('Cannot accept dialog which is already handled!');
+    if (this.handled) throw new Error(dialogHandledMessage('accept'));
     this.handled = true;
     await this.session!.send('Page.handleJavaScriptDialog', { accept: true, ...(promptText !== undefined ? { promptText } : {}) });
   }
   async dismiss(): Promise<void> {
-    if (this.handled) throw new Error('Cannot dismiss dialog which is already handled!');
+    if (this.handled) throw new Error(dialogHandledMessage('dismiss'));
     this.handled = true;
     await this.session!.send('Page.handleJavaScriptDialog', { accept: false });
   }
@@ -133,8 +135,8 @@ export class Worker extends TypedEmitter<WorkerEvents> {
 }
 
 export class FileChooser {
-  constructor(private readonly page_: CrPage, private readonly element_: ElementHandle, private readonly multiple: boolean) {}
-  page(): CrPage {
+  constructor(private readonly page_: ChromiumPage, private readonly element_: ElementHandle, private readonly multiple: boolean) {}
+  page(): ChromiumPage {
     return this.page_;
   }
   element(): ElementHandle {
@@ -149,19 +151,19 @@ export class FileChooser {
 }
 
 export interface PageEvents {
-  close: CrPage;
+  close: ChromiumPage;
   console: ConsoleMessage;
-  crash: CrPage;
+  crash: ChromiumPage;
   dialog: Dialog;
-  domcontentloaded: CrPage;
+  domcontentloaded: ChromiumPage;
   download: import('./browser.js').Download;
   filechooser: FileChooser;
-  frameattached: CrFrame;
-  framedetached: CrFrame;
-  framenavigated: CrFrame;
-  load: CrPage;
+  frameattached: ChromiumFrame;
+  framedetached: ChromiumFrame;
+  framenavigated: ChromiumFrame;
+  load: ChromiumPage;
   pageerror: Error;
-  popup: CrPage;
+  popup: ChromiumPage;
   request: Request;
   requestfailed: Request;
   requestfinished: Request;
@@ -201,7 +203,7 @@ export class TargetSession {
   readonly contexts = new Map<number, ExecutionContext>();
 
   constructor(
-    readonly page: CrPage,
+    readonly page: ChromiumPage,
     readonly cdp: CDPSession,
     readonly isMain: boolean,
   ) {
@@ -268,9 +270,9 @@ export class TargetSession {
       if (frameId) this.pendingContexts.set(frameId, [...(this.pendingContexts.get(frameId) ?? []), c]);
       return;
     }
-    let world: 'main' | 'utility' | undefined;
+    let world: 'main' | 'engine' | undefined;
     if (c.auxData?.isDefault) world = 'main';
-    else if (c.name === UTILITY_WORLD_NAME) world = 'utility';
+    else if (c.name === ENGINE_WORLD_NAME) world = 'engine';
     if (!world) return;
     const ctx = new ExecutionContext(this.cdp, c.id, frame, world);
     this.contexts.set(c.id, ctx);
@@ -303,7 +305,7 @@ export class TargetSession {
       s.send('Page.setLifecycleEventsEnabled', { enabled: true }),
       s.send('Runtime.enable'),
       s.send('Network.enable'),
-      s.send('Page.addScriptToEvaluateOnNewDocument', { source: '', worldName: UTILITY_WORLD_NAME }),
+      s.send('Page.addScriptToEvaluateOnNewDocument', { source: '', worldName: ENGINE_WORLD_NAME }),
       s.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }),
     ];
     if (this.isMain) sends.push(s.send('Log.enable'));
@@ -362,13 +364,13 @@ export function bindingSource(name: string): string {
 
 export interface BindingEntry {
   name: string;
-  callback: (source: { page: CrPage; frame: CrFrame; context: CrBrowserContext }, ...args: any[]) => unknown;
+  callback: (source: { page: ChromiumPage; frame: ChromiumFrame; context: ChromiumContext }, ...args: any[]) => unknown;
   source: string;
 }
 
 // ---------------------------------------------------------------------- the page
 
-export class CrPage extends TypedEmitter<PageEvents> {
+export class ChromiumPage extends TypedEmitter<PageEvents> {
   /**
    * The page's network bookkeeping. For Chromium the CDP NetworkManager; other
    * engines provide an object with the same isIdle / documentResponse members.
@@ -380,11 +382,11 @@ export class CrPage extends TypedEmitter<PageEvents> {
   /** The page target's CDP session (Chromium only). */
   readonly mainSession: TargetSession;
   private readonly sessions = new Map<string, TargetSession>();
-  protected readonly frames_ = new Map<string, CrFrame>();
-  protected mainFrame_?: CrFrame;
+  protected readonly frames_ = new Map<string, ChromiumFrame>();
+  protected mainFrame_?: ChromiumFrame;
   protected closed = false;
   private readonly conditionWaiters = new Set<() => void>();
-  protected readonly navListeners = new Set<(frame: CrFrame, loaderId: string | undefined) => void>();
+  protected readonly navListeners = new Set<(frame: ChromiumFrame, loaderId: string | undefined) => void>();
   protected readonly workers_ = new Map<string, Worker>();
   readonly initScripts: string[] = [];
   readonly bindings = new Map<string, BindingEntry>();
@@ -396,26 +398,26 @@ export class CrPage extends TypedEmitter<PageEvents> {
   private defaultNavigationTimeout_?: number;
   protected readonly downloadsByFrame = new Map<string, number>();
   readonly video_?: Video;
-  readonly opener_?: CrPage;
+  readonly opener_?: ChromiumPage;
   initialized = false;
 
   /**
-   * `session` is the page target's CDP session. Other engines subclass CrPage
+   * `session` is the page target's CDP session. Other engines subclass ChromiumPage
    * (the engine-independent page API lives here) and pass `engine` instead:
    * their network manager and input devices.
    */
   constructor(
-    protected readonly context_: CrBrowserContext,
+    protected readonly context_: ChromiumContext,
     session: CDPSession | null,
     readonly targetId: string,
-    opener: CrPage | undefined,
+    opener: ChromiumPage | undefined,
     engine?: { network: unknown; keyboard: Keyboard; mouse: Mouse; touchscreen: Touchscreen; mainSession: unknown },
   ) {
     super();
     this.opener_ = opener;
     this.viewport_ = context_.options.viewport === null ? null : { ...(context_.options.viewport ?? { width: 1280, height: 720 }) };
     if (engine || !session) {
-      if (!engine) throw new Error('CrPage needs a CDP session or an engine');
+      if (!engine) throw new Error('ChromiumPage needs a CDP session or an engine');
       this.network = engine.network as NetworkManager;
       this.keyboard = engine.keyboard;
       this.mouse = engine.mouse;
@@ -445,18 +447,18 @@ export class CrPage extends TypedEmitter<PageEvents> {
   }
 
   // ------------------------------------------------------------------ accessors
-  context(): CrBrowserContext {
+  context(): ChromiumContext {
     return this.context_;
   }
 
-  mainFrame(): CrFrame {
+  mainFrame(): ChromiumFrame {
     if (!this.mainFrame_) throw new Error('Page has no main frame yet');
     return this.mainFrame_;
   }
 
-  frames(): CrFrame[] {
-    const out: CrFrame[] = [];
-    const visit = (f: CrFrame) => {
+  frames(): ChromiumFrame[] {
+    const out: ChromiumFrame[] = [];
+    const visit = (f: ChromiumFrame) => {
       out.push(f);
       for (const c of f.children) visit(c);
     };
@@ -464,16 +466,16 @@ export class CrPage extends TypedEmitter<PageEvents> {
     return out;
   }
 
-  frame(sel: string | { name?: string; url?: URLMatch }): CrFrame | null {
+  frame(sel: string | { name?: string; url?: URLMatch }): ChromiumFrame | null {
     const s = typeof sel === 'string' ? { name: sel } : sel;
     return this.frames().find((f) => (s.name === undefined || f.name() === s.name) && (s.url === undefined || urlMatches(undefined, f.url(), s.url))) ?? null;
   }
 
-  frameById(id: string): CrFrame | undefined {
+  frameById(id: string): ChromiumFrame | undefined {
     return this.frames_.get(id);
   }
 
-  async waitForFrameById(id: string, timeout: number): Promise<CrFrame | null> {
+  async waitForFrameById(id: string, timeout: number): Promise<ChromiumFrame | null> {
     const deadline = new Deadline(timeout);
     while (!deadline.expired()) {
       const f = this.frames_.get(id);
@@ -491,7 +493,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
     return this.closed;
   }
 
-  async opener(): Promise<CrPage | null> {
+  async opener(): Promise<ChromiumPage | null> {
     return this.opener_ && !this.opener_.isClosed() ? this.opener_ : null;
   }
 
@@ -535,7 +537,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
 
   // ------------------------------------------------------------------ frame tree events
   onFrameTree(session: TargetSession, tree: any): void {
-    const visit = (node: any, parent: CrFrame | undefined) => {
+    const visit = (node: any, parent: ChromiumFrame | undefined) => {
       const known = this.frames_.has(node.frame.id) && !!this.frames_.get(node.frame.id)!.loaderId;
       const f = this.ensureFrame(session, node.frame.id, parent?.id ?? node.frame.parentId);
       // Navigation events may have overtaken the tree: never go back to the older state.
@@ -553,10 +555,10 @@ export class CrPage extends TypedEmitter<PageEvents> {
     this.notifyChange();
   }
 
-  private ensureFrame(session: TargetSession, id: string, parentId: string | undefined): CrFrame {
+  private ensureFrame(session: TargetSession, id: string, parentId: string | undefined): ChromiumFrame {
     let f = this.frames_.get(id);
     if (!f) {
-      f = new CrFrame(this, id, session);
+      f = new ChromiumFrame(this, id, session);
       this.frames_.set(id, f);
       const parent = parentId ? this.frames_.get(parentId) : undefined;
       if (parent) {
@@ -614,11 +616,11 @@ export class CrPage extends TypedEmitter<PageEvents> {
     this.notifyChange();
   }
 
-  protected detachFrame(f: CrFrame): void {
+  protected detachFrame(f: ChromiumFrame): void {
     for (const c of [...f.children]) this.detachFrame(c);
     f.detached = true;
     f.clearContexts();
-    f.failWaiters(new Error('Frame was detached'));
+    f.failWaiters(new Error(FRAME_GONE_TEXT));
     f.parent?.children.delete(f);
     this.frames_.delete(f.id);
     this.emitEvent('framedetached', f);
@@ -654,19 +656,49 @@ export class CrPage extends TypedEmitter<PageEvents> {
     this.onNavigationSettled();
   }
 
+  /** Requests in flight (start time), and when the last one ended: async work an action may have started. */
+  private readonly inflight = new Map<Request, number>();
+  private lastRequestEnd = 0;
+
+  /** The post-action navigation window of this page's context (BrowserContextOptions.navigationWindow). */
+  navigationWindow(): { quietMs: number; maxMs: number } {
+    const o = this.context_.options.navigationWindow;
+    const quietMs = typeof o === 'number' ? o : (o?.quiet ?? 150);
+    const maxMs = typeof o === 'number' ? Math.max(o, 2000) : (o?.max ?? 2000);
+    return { quietMs: Math.max(0, quietMs), maxMs: Math.max(0, maxMs) };
+  }
+
   /**
-   * After an input action: if it started a navigation within a short grace
-   * period, wait until that navigation commits or stops (like a user would).
+   * After an input action (click, tap, dblclick): did it start a navigation, now or after some
+   * async work (a fetch, then `window.location = ...`)? The page is watched for a navigation
+   * request until it has been quiet for the navigation window (default 150 ms) - a request the
+   * action started keeps the watch open until it ends - and never longer than the window's cap
+   * (default 2 s). A navigation that starts is waited for until it commits (or stops, fails or
+   * turns into a download), up to `timeout`; one that does not commit in time fails the action.
    */
-  async waitForInitiatedNavigation(before: { starts: number; ends: number }, timeout: number): Promise<void> {
-    const grace = new Deadline(15);
-    try {
-      await this.waitForCondition(() => this.navStarts > before.starts, grace, () => 'no navigation');
-    } catch {
-      return;
+  async waitForInitiatedNavigation(before: { starts: number; ends: number; at?: number }, timeout: number, api = 'click'): Promise<void> {
+    const { quietMs, maxMs } = this.navigationWindow();
+    const started = Date.now();
+    const cap = started + Math.min(maxMs, timeout);
+    // Requests sent since the input was dispatched (the input command can return after they started).
+    const since = before.at ?? started;
+    const busy = () => [...this.inflight.values()].some((t) => t >= since);
+    for (;;) {
+      if (this.closed) return;
+      if (this.navEnds > before.ends) return; // committed, same-document, stopped or cancelled already
+      if (this.navStarts > before.starts) break;
+      const now = Date.now();
+      const quietSince = Math.max(started, this.lastRequestEnd);
+      if (now >= cap || (!busy() && now - quietSince >= quietMs)) return;
+      await sleep(10);
     }
-    // Any commit / same-document navigation / stop after the action ends the wait.
-    await this.waitForCondition(() => this.navEnds > before.ends, new Deadline(Math.min(timeout, 10_000)), () => 'navigation did not commit').catch(() => undefined);
+    const remaining = Math.max(1, timeout - (Date.now() - started));
+    await this.waitForCondition(() => this.navEnds > before.ends, new Deadline(remaining), () =>
+      `${api}: the action started a navigation that did not finish loading within ${timeout} ms (the page is at ${this.mainFrame().url()}); pass { noWaitAfter: true } if the page is meant to keep loading`,
+    ).catch((e: Error) => {
+      if (this.closed || e instanceof TargetClosedError) return;
+      throw e;
+    });
   }
 
   onStoppedLoading(frameId: string): void {
@@ -757,7 +789,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
 
   onConsole(session: TargetSession, e: any): void {
     const ctx = session.contexts.get(e.executionContextId);
-    if (ctx && ctx.world !== 'main') return; // our own utility world
+    if (ctx && ctx.world !== 'main') return; // our own engine world
     const msg = this.consoleMessage(e, ctx);
     this.context_.tracing.onConsole(msg.type(), msg.text());
     this.emitEvent('console', msg);
@@ -845,6 +877,12 @@ export class CrPage extends TypedEmitter<PageEvents> {
   emitRequestEvent(name: 'request' | 'requestfinished' | 'requestfailed', r: Request): void;
   emitRequestEvent(name: 'response', r: Response): void;
   emitRequestEvent(name: 'request' | 'requestfinished' | 'requestfailed' | 'response', r: Request | Response): void {
+    if (name === 'request') {
+      // Long-lived requests (streams, long polls) are forgotten after a minute.
+      if (this.inflight.size > 200) for (const [k, t] of this.inflight) if (Date.now() - t > 60_000) this.inflight.delete(k);
+      this.inflight.set(r as Request, Date.now());
+    }
+    else if (name !== 'response' && this.inflight.delete(r as Request)) this.lastRequestEnd = Date.now();
     this.emitEvent(name as 'request', r as Request);
     this.context_.emitEvent(name as 'request', r as Request);
     this.context_.onNetworkEvent(name, r);
@@ -913,10 +951,10 @@ export class CrPage extends TypedEmitter<PageEvents> {
   }
 
   /** Resolve on the next navigation of `frame` (optionally to a matching URL). */
-  nextNavigation(frame: CrFrame, deadline: Deadline, url?: URLMatch): Promise<{ loaderId?: string }> {
+  nextNavigation(frame: ChromiumFrame, deadline: Deadline, url?: URLMatch): Promise<{ loaderId?: string }> {
     return new Promise((resolve, reject) => {
       let timer: NodeJS.Timeout | undefined;
-      const listener = (f: CrFrame, loaderId: string | undefined) => {
+      const listener = (f: ChromiumFrame, loaderId: string | undefined) => {
         if (f !== frame) return;
         if (url !== undefined && !urlMatches(this.context_.baseURL(), f.url(), url)) return;
         cleanup();
@@ -935,7 +973,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
       this.on('close', onClose);
       if (Number.isFinite(deadline.end)) timer = setTimeout(() => {
         cleanup();
-        reject(new TimeoutError(`page.waitForNavigation: Timeout ${deadline.timeout}ms exceeded.`));
+        reject(new TimeoutError(timeoutMessage('page.waitForNavigation', deadline.timeout, ['waiting for the page to navigate'])));
       }, deadline.remaining());
     });
   }
@@ -1045,7 +1083,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
   }
 
   async exposeBinding(name: string, callback: BindingEntry['callback'], _options: { handle?: boolean } = {}): Promise<void> {
-    if (this.bindings.has(name) || this.context_.binding(name)) throw new Error(`Function "${name}" has been already registered`);
+    if (this.bindings.has(name) || this.context_.binding(name)) throw new Error(bindingTakenMessage(name));
     const entry: BindingEntry = { name, callback, source: bindingSource(name) };
     this.bindings.set(name, entry);
     await this.installBinding(entry);
@@ -1128,7 +1166,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
     return this.mainFrame()['$$eval'](selector, fn, arg);
   }
 
-  waitForSelector(selector: string, options?: Parameters<CrFrame['waitForSelector']>[1]): Promise<ElementHandle | null> {
+  waitForSelector(selector: string, options?: Parameters<ChromiumFrame['waitForSelector']>[1]): Promise<ElementHandle | null> {
     return this.mainFrame().waitForSelector(selector, options);
   }
 
@@ -1292,11 +1330,11 @@ export class CrPage extends TypedEmitter<PageEvents> {
     return this.mainFrame().title();
   }
 
-  addScriptTag(options: Parameters<CrFrame['addScriptTag']>[0]): Promise<ElementHandle> {
+  addScriptTag(options: Parameters<ChromiumFrame['addScriptTag']>[0]): Promise<ElementHandle> {
     return this.mainFrame().addScriptTag(options);
   }
 
-  addStyleTag(options: Parameters<CrFrame['addStyleTag']>[0]): Promise<ElementHandle> {
+  addStyleTag(options: Parameters<ChromiumFrame['addStyleTag']>[0]): Promise<ElementHandle> {
     return this.mainFrame().addStyleTag(options);
   }
 
@@ -1381,8 +1419,11 @@ export class CrPage extends TypedEmitter<PageEvents> {
     await Promise.race([closed, sleep(5000)]);
   }
 
+  /** Hand control to the live debugger (eztest debug, Studio); throws when no debugger is attached. */
   async pause(): Promise<void> {
-    /* No inspector: a no-op kept for API compatibility. */
+    const handler = pauseHandlerFor(this.context_);
+    if (!handler) throw new Error(NO_DEBUGGER_TEXT);
+    await handler(this);
   }
 
   async pdf(options: { path?: string; scale?: number; displayHeaderFooter?: boolean; headerTemplate?: string; footerTemplate?: string; printBackground?: boolean; landscape?: boolean; pageRanges?: string; format?: string; width?: string | number; height?: string | number; margin?: { top?: string | number; right?: string | number; bottom?: string | number; left?: string | number }; preferCSSPageSize?: boolean } = {}): Promise<Buffer> {
@@ -1444,7 +1485,7 @@ export class CrPage extends TypedEmitter<PageEvents> {
   }
 
   /** Internal: capture with masks / styles / background options applied. */
-  async capture(o: { type: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number; scale: number }; beyond: boolean; options: ScreenshotOptions; frame: CrFrame; path?: string }): Promise<Buffer> {
+  async capture(o: { type: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number; scale: number }; beyond: boolean; options: ScreenshotOptions; frame: ChromiumFrame; path?: string }): Promise<Buffer> {
     const s = this.mainSession.cdp;
     const opts = o.options;
     const cleanups: Array<() => Promise<unknown>> = [];
@@ -1456,8 +1497,8 @@ export class CrPage extends TypedEmitter<PageEvents> {
       const rects: Array<{ x: number; y: number; width: number; height: number }> = [];
       for (const m of opts.mask ?? []) rects.push(...(await m.boundingBoxesAll()));
       if (rects.length || css.length) {
-        await this.mainFrame().utility((_e, h, r, color, style) => h.overlay(r, color, style), [rects, opts.maskColor ?? '#FF00FF', css.join('\n') || undefined]);
-        cleanups.push(() => this.mainFrame().utility((_e, h) => h.removeOverlay()).catch(() => undefined));
+        await this.mainFrame().inEngine((_e, h, r, color, style) => h.overlay(r, color, style), [rects, opts.maskColor ?? '#FF00FF', css.join('\n') || undefined]);
+        cleanups.push(() => this.mainFrame().inEngine((_e, h) => h.removeOverlay()).catch(() => undefined));
       }
       if (opts.omitBackground) {
         await s.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
@@ -1524,5 +1565,5 @@ export async function initScriptSource(script: string | ((arg: any) => unknown) 
   if (typeof script === 'string') return script;
   if (script.path) return `${await readFile(script.path, 'utf8')}\n//# sourceURL=${script.path.replace(/\n/g, '')}`;
   if (script.content !== undefined) return script.content;
-  throw new Error('Either path or content property must be present');
+  throw new Error('addInitScript: give a function, a string, or { path } / { content }');
 }

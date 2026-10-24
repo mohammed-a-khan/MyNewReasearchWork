@@ -37,6 +37,8 @@ export interface AndroidSettings {
   agentPort?: number;
   /** An agent that is already running and reachable (skips install/start/forward). */
   agentUrl?: string;
+  /** Session token of an agent started by hand (agentUrl). */
+  agentToken?: string;
   /** `pm clear` the app before each journey attempt. Default false. */
   clearData?: boolean;
 }
@@ -47,6 +49,8 @@ export interface IosSettings {
   simulator?: boolean;
   agentUrl?: string;
   agentPort?: number;
+  /** Session token of an agent started by hand. */
+  agentToken?: string;
   /** Launch the agent with `xcodebuild test-without-building -xctestrun <file>`. */
   xctestrun?: string;
   usbmux?: UsbmuxEndpoint;
@@ -139,11 +143,11 @@ export class MobileDriver implements PlatformDriver {
       const bundled = PREBUILT_APK();
       slot.session = await AndroidDevice.connect({
         adb: new AdbClient({ host: a.adb?.host, port: a.adb?.port }), serial: id, agentApk: a.agentApk ? this.path(a.agentApk) : existsSync(bundled) ? bundled : undefined,
-        agentPort: a.agentPort, agentUrl: a.agentUrl, agentTimeoutMs: o.agentTimeoutMs, onCommand,
+        agentPort: a.agentPort, agentUrl: a.agentUrl, ...(a.agentToken ? { agentToken: a.agentToken } : {}), agentTimeoutMs: o.agentTimeoutMs, onCommand,
       });
     } else {
       const i = o.ios ?? {};
-      slot.session = await IosDevice.connect({ udid: id, simulator: i.simulator, agentUrl: i.agentUrl, agentPort: i.agentPort, xctestrun: i.xctestrun ? this.path(i.xctestrun) : undefined, usbmux: i.usbmux, run: i.run, agentTimeoutMs: o.agentTimeoutMs, onCommand });
+      slot.session = await IosDevice.connect({ udid: id, simulator: i.simulator, agentUrl: i.agentUrl, agentPort: i.agentPort, ...(i.agentToken ? { agentToken: i.agentToken } : {}), xctestrun: i.xctestrun ? this.path(i.xctestrun) : undefined, usbmux: i.usbmux, run: i.run, agentTimeoutMs: o.agentTimeoutMs, onCommand });
     }
     slot.deviceId ??= slot.session.deviceId;
     return slot.session;

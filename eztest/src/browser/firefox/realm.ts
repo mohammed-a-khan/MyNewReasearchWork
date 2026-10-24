@@ -1,7 +1,7 @@
 /**
  * A WebDriver BiDi realm (one world of one document, or a worker) behind the
  * same ExecutionContext interface the CDP engine uses: evaluate, the
- * utility-world engine calls, element adoption, handle properties.
+ * engine-world engine calls, element adoption, handle properties.
  *
  * Values travel as our tagged JSON (serializer.ts), carried in BiDi
  * LocalValues / RemoteValues: arrays, objects with string keys, strings,
@@ -11,12 +11,13 @@
  * between the main world and the sandbox costs nothing.
  */
 import { ENGINE_GLOBAL } from '../injected/contract.js';
+import { CONTEXT_GONE_TEXT, DISPOSED_HANDLE_TEXT, FOREIGN_HANDLE_TEXT } from '../messages.js';
 import { driverHelpersSource } from '../injected/driver-helpers.js';
 import { engineSource } from '../injected/index.js';
 import { KEEP_NAMES_SHIM, deserializeValue, functionSource, pageCodec, serializeArgument } from '../serializer.js';
 import { ExecutionContext, type RemoteObject, type World } from '../chromium/exec-context.js';
 import { ElementHandle, JSHandle } from '../chromium/handles.js';
-import type { CrFrame } from '../chromium/frame.js';
+import type { ChromiumFrame } from '../chromium/frame.js';
 import { cdpUnavailable } from './stubs.js';
 import { isGoneBidiError, type BidiConnection } from './connection.js';
 
@@ -115,12 +116,12 @@ function sameDocument(a: string, b: string): boolean {
 }
 
 function contextGone(): Error {
-  const err = new Error('Execution context was destroyed, most likely because of a navigation');
+  const err = new Error(CONTEXT_GONE_TEXT);
   (err as Error & { contextGone?: boolean }).contextGone = true;
   return err;
 }
 
-export class FfRealm extends ExecutionContext {
+export class FirefoxRealm extends ExecutionContext {
   private installingEngine?: Promise<void>;
 
   constructor(
@@ -128,7 +129,7 @@ export class FfRealm extends ExecutionContext {
     readonly realmId: string,
     /** Browsing context (frame) id, or undefined for worker realms. */
     readonly contextId: string | undefined,
-    frame: CrFrame | undefined,
+    frame: ChromiumFrame | undefined,
     world: World,
     worker?: unknown,
   ) {
@@ -152,15 +153,15 @@ export class FfRealm extends ExecutionContext {
 
   /** LocalValue that references a handle in this realm. */
   private reference(h: JSHandle): BidiValue {
-    if (h.disposed) throw new Error('JSHandle is disposed');
+    if (h.disposed) throw new Error(DISPOSED_HANDLE_TEXT);
     const remote = h.remote as RemoteObject & { sharedId?: string; bidiHandle?: string };
     if (remote.sharedId) {
       // Shared references work in every realm of the node's document.
-      if (h.context !== this && !(h instanceof ElementHandle)) throw new Error('JSHandles can be evaluated only in the context they were created!');
+      if (h.context !== this && !(h instanceof ElementHandle)) throw new Error(FOREIGN_HANDLE_TEXT);
       return { type: 'node', sharedId: remote.sharedId } as BidiValue;
     }
-    if (h.context !== this) throw new Error('JSHandles can be evaluated only in the context they were created!');
-    if (!remote.bidiHandle) throw new Error('JSHandle has no remote reference');
+    if (h.context !== this) throw new Error(FOREIGN_HANDLE_TEXT);
+    if (!remote.bidiHandle) throw new Error('This handle has no remote reference in Firefox (it cannot be passed back to the page)');
     return { type: 'object', handle: remote.bidiHandle } as BidiValue;
   }
 
@@ -192,7 +193,7 @@ export class FfRealm extends ExecutionContext {
   private encodeArgs(args: unknown[]): Array<Record<string, unknown>> {
     const handles: JSHandle[] = [];
     const encoded = serializeArgument(args, (v) => v instanceof JSHandle, handles as unknown[]);
-    return [toLocalValue(encoded) as unknown as Record<string, unknown>, ...handles.map((h) => FfRealm.refArg(this.reference(h)))];
+    return [toLocalValue(encoded) as unknown as Record<string, unknown>, ...handles.map((h) => FirefoxRealm.refArg(this.reference(h)))];
   }
 
   private ffWrapper(fnSrc: string, returnByValue: boolean, isExpression: boolean): string {
@@ -330,7 +331,7 @@ export class FfRealm extends ExecutionContext {
     return this.installingEngine;
   }
 
-  override async callUtility<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[], returnByValue = true): Promise<R> {
+  override async callEngine<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[], returnByValue = true): Promise<R> {
     await this.ensureEngine();
     const encodedArgs = this.encodeArgs(args);
     const body = `const r = await (${functionSource(fn)})(globalThis['${ENGINE_GLOBAL}'], globalThis['${HELPERS_GLOBAL}'], ...args);`;
@@ -366,7 +367,7 @@ export class FfRealm extends ExecutionContext {
   override async queryElements(chain: unknown, scope?: ElementHandle): Promise<ElementHandle[]> {
     await this.ensureEngine();
     const args: Array<Record<string, unknown>> = [toLocalValue(JSON.parse(JSON.stringify(chain ?? null))) as unknown as Record<string, unknown>];
-    if (scope) args.push(FfRealm.refArg(this.reference(scope)));
+    if (scope) args.push(FirefoxRealm.refArg(this.reference(scope)));
     const res = await this.call(
       `function (chain, scope) { return globalThis['${HELPERS_GLOBAL}'].query(globalThis['${ENGINE_GLOBAL}'], chain, scope); }`,
       args,
@@ -390,7 +391,7 @@ export class FfRealm extends ExecutionContext {
     // references and primitives as values; objects are fetched one by one as handles.
     const res = await this.call(
       'function (o) { const out = []; for (const k of Object.keys(o)) out.push([k, o[k]]); return out; }',
-      [FfRealm.refArg(this.reference(h))],
+      [FirefoxRealm.refArg(this.reference(h))],
       'none',
       { maxObjectDepth: 2, maxDomDepth: 0 },
     );
@@ -404,7 +405,7 @@ export class FfRealm extends ExecutionContext {
         out.set(key, this.handleFor(v));
         continue;
       }
-      const one = await this.call('function (o, k) { return o[k]; }', [FfRealm.refArg(this.reference(h)), { type: 'string', value: key }], 'root', { maxObjectDepth: 0, maxDomDepth: 0 });
+      const one = await this.call('function (o, k) { return o[k]; }', [FirefoxRealm.refArg(this.reference(h)), { type: 'string', value: key }], 'root', { maxObjectDepth: 0, maxDomDepth: 0 });
       if (one.type === 'success') out.set(key, this.handleFor(one.result));
     }
     return out;
@@ -417,10 +418,10 @@ export class FfRealm extends ExecutionContext {
     void this.bidi.send('script.disown', { handles: [handle], target: this.target() }).catch(() => undefined);
   }
 
-  override async contentFrameOf(h: ElementHandle): Promise<CrFrame | null> {
+  override async contentFrameOf(h: ElementHandle): Promise<ChromiumFrame | null> {
     const res = await this.call(
       'function (el) { return el && (el.localName === "iframe" || el.localName === "frame") ? el.contentWindow : null; }',
-      [FfRealm.refArg(this.reference(h))],
+      [FirefoxRealm.refArg(this.reference(h))],
       'none',
       { maxObjectDepth: 0, maxDomDepth: 0 },
     );

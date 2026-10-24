@@ -12,7 +12,7 @@ import { EzTestError, nowIso } from '../core/index.js';
 import { safeName } from '../runner/evidence.js';
 import { SalesforceApiError, type SalesforceClient } from './client.js';
 import {
-  closeAppLauncher, isReadOnlyInModal, layoutItem, navTabs, openModal, poll, searchAppLauncher, waitForModal, SalesforceUiError,
+  closeAppLauncher, isReadOnlyInModal, layoutItem, navTabs, openModal, poll, searchAppLauncher, waitForListViewHeader, waitForModal, SalesforceUiError,
 } from './lightning.js';
 import { assertApiName, SalesforceMetadataError, StaticDescribeSource, type SObjectDescribe } from './metadata.js';
 import { SalesforceFieldResolver, normalizeLabel, suggestLabels } from './resolver.js';
@@ -202,9 +202,9 @@ async function uiAccess(page: Page, ui: PermissionUiOptions, c: PermissionCheck,
   if (!field) {
     await page.goto(`${root}/lightning/o/${c.object}/list`, { timeout: t });
     if (await errorShown()) return 'hidden';
-    const btn = page.locator('lst-list-view-manager-header a[title="New"]');
-    const state = await poll(async () => ((await btn.count()) ? 'edit' : (await page.locator('lightning-datatable').count()) ? 'read' : undefined), t);
-    return state ?? 'hidden';
+    // Decide only once the header has rendered: before that a missing New button means nothing.
+    if (!(await waitForListViewHeader(page, t))) return (await page.locator('lightning-datatable').count()) ? 'read' : 'hidden';
+    return (await page.locator('lst-list-view-manager-header a[title="New"]').count()) ? 'edit' : 'read';
   }
   // Field: inspect the create form the user gets.
   await page.goto(`${root}/lightning/o/${c.object}/new`, { timeout: t });

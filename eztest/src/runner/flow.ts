@@ -198,7 +198,13 @@ export async function readDataRows(path: string, sheet?: string): Promise<Array<
     const table = parseCsv(await readFile(path, 'utf8'), ext === '.tsv' ? '\t' : undefined).filter((r) => r.some((c) => c.trim() !== ''));
     const [head, ...body] = table;
     if (!head) return [];
-    return body.map((r) => Object.fromEntries(head.map((h, i) => [h.trim(), r[i] ?? ''])));
+    const names = head.map((h) => h.trim());
+    // Two columns with one name would silently keep only the last one's values.
+    names.forEach((h, i) => {
+      const first = names.indexOf(h);
+      if (first !== i) throw new EzTestError(`${path}: the column "${h}" appears twice in the header (columns ${first + 1} and ${i + 1}); give every column its own name`, 'BAD_DATA');
+    });
+    return body.map((r) => Object.fromEntries(names.map((h, i) => [h, r[i] ?? ''])));
   }
   if (ext === '.xlsx') {
     const { readXlsx } = await import('../importers/xlsx.js');

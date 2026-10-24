@@ -305,8 +305,11 @@ export interface RunOptions {
 
 /** Lock coordination hook used by the runner's scheduler. */
 export interface RunLocks {
-  /** Acquire all of the journey's lock keys, or none: a release function, or undefined when a key is busy. */
-  tryAcquire(journey: Journey): Promise<(() => Promise<void>) | undefined>;
+  /**
+   * Acquire all of the journey's lock keys, or none: a release function, or undefined when a key
+   * is busy. The release function may say which locks were lost while held (`lost()`).
+   */
+  tryAcquire(journey: Journey): Promise<((() => Promise<void>) & { lost?: () => string[] }) | undefined>;
   /** Give up on a journey whose locks stay busy this long (it is recorded as an error). Default 30 min. */
   timeoutMs?: number;
   /** Retry interval while every pending journey is blocked. Default 250 ms. */

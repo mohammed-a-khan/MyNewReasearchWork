@@ -123,7 +123,7 @@ export async function startResultsServer(o: ServerOptions): Promise<ServerHandle
     ? { driver: 'sqlite', file: cfg.database.file ? resolve(cfg.baseDir ?? process.cwd(), cfg.database.file) : join(cfg.dataDir, 'eztest.db') }
     : (cfg.database as unknown as DbConnectionSpec);
   const store = await Store.open(dbSpec);
-  const service = new ResultsService(store, cfg.dataDir, { maxUploadBytes: cfg.maxUploadMb * 1024 * 1024, retention: cfg.retention });
+  const service = new ResultsService(store, cfg.dataDir, { maxUploadBytes: cfg.maxUploadMb * 1024 * 1024, retention: cfg.retention, ...(cfg.auditKeyFile ? { auditKeyFile: cfg.auditKeyFile } : {}) });
   const contracts = new ContractRegistry(store, service.audit, (p) => service.ensureProject(p));
   const shared = new SharedDataRegistry(store, service.audit, (p) => service.ensureProject(p));
   const bootstrapHash = o.bootstrapToken ? sha256hex(o.bootstrapToken) : undefined;
@@ -470,6 +470,10 @@ export async function startResultsServer(o: ServerOptions): Promise<ServerHandle
     if (p) need(c, checkName('project', p), 'audit.read');
     else need(c, '*', 'audit.read');
     return service.audit.list({ project: p, limit: Number(c.url.searchParams.get('limit') ?? 200), action: c.url.searchParams.get('action') ?? undefined });
+  });
+  add('POST', '/api/audit/rotate-key', async (c) => {
+    need(c, '*', 'token.manage');
+    return service.audit.rotateKey(c.who.id);
   });
   add('GET', '/api/audit/verify', async (c) => {
     need(c, '*', 'audit.read');

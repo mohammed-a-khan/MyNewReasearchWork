@@ -11,10 +11,11 @@ import { resolve as resolvePath, basename } from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import type { ActionabilityResult, ActionKind } from './injected/contract.js';
 import { TimeoutError, isClosedError, isContextGoneError } from './errors.js';
+import { DETACHED_TEXT, closedMessage, timeoutMessage } from './messages.js';
 import type { FilePayload, MouseButton, KeyboardModifier, Rect } from './types.js';
 import { Deadline, mimeFor, pollDelay, sleep } from './util.js';
-import type { CrFrame } from './chromium/frame.js';
-import type { CrPage, ScreenshotOptions } from './chromium/page.js';
+import type { ChromiumFrame } from './chromium/frame.js';
+import type { ChromiumPage, ScreenshotOptions } from './chromium/page.js';
 import type { ElementHandle, JSHandle } from './chromium/handles.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,17 +49,17 @@ export interface ElementScreenshotOptions extends Omit<ScreenshotOptions, 'fullP
 export type SelectValue = string | { value?: string; label?: string; index?: number } | ElementHandle;
 export type SelectValues = SelectValue | SelectValue[] | null;
 
-/** An element found in a frame (handle in the frame's utility world). */
+/** An element found in a frame (handle in the frame's engine world). */
 export interface Resolved {
-  frame: CrFrame;
+  frame: ChromiumFrame;
   el: ElementHandle;
 }
 
 /** What an action operates on: a locator (re-resolved each attempt) or a fixed handle. */
 export interface ElementTarget {
   description: string;
-  page: CrPage;
-  /** The element, or null when it does not exist (yet). Throws for errors waiting cannot fix (strict mode). */
+  page: ChromiumPage;
+  /** The element, or null when it does not exist (yet). Throws for errors waiting cannot fix (several matches). */
   resolve(): Promise<Resolved | null>;
 }
 
@@ -67,9 +68,9 @@ export function handleTarget(h: ElementHandle): ElementTarget {
     description: 'element handle',
     page: h.frame.page(),
     resolve: async () => {
-      const el = await h.inUtility();
-      const attached = await el.context.callUtility((_e, _h, x) => x.isConnected, [el]);
-      if (!attached) throw new Error('Element is not attached to the DOM');
+      const el = await h.inEngineWorld();
+      const attached = await el.context.callEngine((_e, _h, x) => x.isConnected, [el]);
+      if (!attached) throw new Error(DETACHED_TEXT);
       return { frame: h.frame, el };
     },
   };
@@ -85,7 +86,7 @@ export async function retrying<T>(api: string, target: ElementTarget, timeout: n
     if (log[log.length - 1] !== m) log.push(m);
   };
   for (let attempt = 0; ; attempt++) {
-    if (target.page.isClosed()) throw new Error(`${api}: Target page, context or browser has been closed`);
+    if (target.page.isClosed()) throw new Error(closedMessage(api));
     let r: Resolved | null = null;
     try {
       r = await target.resolve();
@@ -97,7 +98,7 @@ export async function retrying<T>(api: string, target: ElementTarget, timeout: n
     } catch (e) {
       const err = e as Error;
       if (isClosedError(err) || target.page.isClosed()) {
-        throw Object.assign(new Error(`${api}: Target page, context or browser has been closed`), { name: 'TargetClosedError' });
+        throw Object.assign(new Error(closedMessage(api)), { name: 'TargetClosedError' });
       }
       if (err instanceof RetryableError || isContextGoneError(err) || (err as { contextGone?: boolean }).contextGone) {
         note(err.message);
@@ -110,7 +111,7 @@ export async function retrying<T>(api: string, target: ElementTarget, timeout: n
       if (r && target.description !== 'element handle') void r.el.dispose();
     }
     if (deadline.expired()) {
-      throw new TimeoutError(`${api}: Timeout ${timeout}ms exceeded.\nCall log:\n${log.map((l) => `  - ${l}`).join('\n')}`);
+      throw new TimeoutError(timeoutMessage(api, timeout, log));
     }
     await sleep(Math.min(pollDelay(attempt), deadline.remaining()));
   }
@@ -120,14 +121,14 @@ function timeoutFor(target: ElementTarget, o: { timeout?: number }): number {
   return o.timeout ?? target.page.defaultTimeout();
 }
 
-async function actionability(r: Resolved, action: ActionKind, o: { position?: { x: number; y: number }; force?: boolean }, retarget = false): Promise<ActionabilityResult> {
-  return r.el.context.callUtility(
-    (e, h, el, a, opts, rt) => e.actionability(rt ? h.retarget(el, 'control') : el, a, opts),
-    [r.el, action, { position: o.position, force: o.force }, retarget],
+async function actionability(r: Resolved, action: ActionKind, o: { position?: { x: number; y: number }; force?: boolean }, resolveControl = false): Promise<ActionabilityResult> {
+  return r.el.context.callEngine(
+    (e, h, el, a, opts, rt) => e.actionability(rt ? h.resolveControl(el, 'control') : el, a, opts),
+    [r.el, action, { position: o.position, force: o.force }, resolveControl],
   );
 }
 
-async function holdModifiers(page: CrPage, mods: KeyboardModifier[] | undefined): Promise<() => Promise<void>> {
+async function holdModifiers(page: ChromiumPage, mods: KeyboardModifier[] | undefined): Promise<() => Promise<void>> {
   if (!mods?.length) return async () => undefined;
   const mac = process.platform === 'darwin';
   const keys = mods.map((m) => (m === 'ControlOrMeta' ? (mac ? 'Meta' : 'Control') : m)).filter((k) => !page.keyboard.pressed.has(k));
@@ -144,16 +145,16 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
     if (!res.ok) {
       if (!res.retry) throw new Error(res.reason ?? 'action not possible');
       const blocker = (res as ActionabilityResult & { blocker?: string }).blocker;
-      return { retry: blocker ? `${blocker} intercepts pointer events` : (res.reason ?? 'not actionable') };
+      return { retry: blocker ? `${blocker} covers the element and would receive the pointer event` : (res.reason ?? 'not actionable') };
     }
     if (o.trial) return { done: undefined };
     const off = await r.frame.viewportOffset();
     const x = res.point!.x + off.x;
     const y = res.point!.y + off.y;
-    log.push(`performing ${action} action at (${Math.round(x)}, ${Math.round(y)})`);
+    log.push(`${action} at (${Math.round(x)}, ${Math.round(y)})`);
     const page = target.page;
     const release = await holdModifiers(page, o.modifiers);
-    const navBefore = { starts: page.navStarts, ends: page.navEnds };
+    const navBefore = { starts: page.navStarts, ends: page.navEnds, at: Date.now() };
     const pressesBefore = page.mouse.pressesSent + page.touchscreen.touchesSent;
     try {
       if (action === 'hover') await page.mouse.move(x, y);
@@ -164,8 +165,8 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
         // again after that frame, in the page, and retry when the target is no longer there.
         if (!o.force && (page.mouse.x !== x || page.mouse.y !== y)) {
           await page.mouse.move(x, y);
-          const again = await r.el.context.callUtility((_e, h, el, px, py) => h.hitsAfterFrame(el, px, py), [r.el, res.point!.x, res.point!.y]);
-          if (!again.ok) return { retry: again.hit ? `${again.hit} intercepts pointer events after the pointer moved there` : 'element moved after the pointer moved there' };
+          const again = await r.el.context.callEngine((_e, h, el, px, py) => h.hitsAfterFrame(el, px, py), [r.el, res.point!.x, res.point!.y]);
+          if (!again.ok) return { retry: again.hit ? `${again.hit} covered the element once the pointer moved there` : 'the element moved away once the pointer arrived' };
         }
         await page.mouse.click(x, y, { button: o.button, clickCount: action === 'dblclick' ? 2 : (o.clickCount ?? 1), delay: o.delay });
       }
@@ -181,7 +182,7 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
       });
     }
     if (page.isClosed()) return { done: undefined };
-    if (!o.noWaitAfter && action !== 'hover') await page.waitForInitiatedNavigation(navBefore, timeoutFor(target, o));
+    if (!o.noWaitAfter && action !== 'hover') await page.waitForInitiatedNavigation(navBefore, timeoutFor(target, o), api);
     return { done: undefined };
   });
 }
@@ -197,7 +198,7 @@ export async function fill(api: string, target: ElementTarget, value: string, o:
         return { retry: res.reason ?? 'not fillable' };
       }
     }
-    const mode = await r.el.context.callUtility((_e, h, el, v) => h.prepareFill(h.retarget(el, 'control'), v), [r.el, value]);
+    const mode = await r.el.context.callEngine((_e, h, el, v) => h.prepareFill(h.resolveControl(el, 'control'), v), [r.el, value]);
     if (mode === 'input') {
       if (value === '') await target.page.keyboard.press('Delete');
       else await target.page.keyboard.insertText(value);
@@ -209,14 +210,14 @@ export async function fill(api: string, target: ElementTarget, value: string, o:
 /** Focus the element (no visibility requirement). */
 export async function focus(api: string, target: ElementTarget, o: ActionOptions): Promise<void> {
   await retrying(api, target, timeoutFor(target, o), async (r) => {
-    await r.el.context.callUtility((_e, h, el) => h.focus(el), [r.el]);
+    await r.el.context.callEngine((_e, h, el) => h.focus(el), [r.el]);
     return { done: undefined };
   });
 }
 
 export async function blur(api: string, target: ElementTarget, o: ActionOptions): Promise<void> {
   await retrying(api, target, timeoutFor(target, o), async (r) => {
-    await r.el.context.callUtility((_e, h, el) => h.blur(el), [r.el]);
+    await r.el.context.callEngine((_e, h, el) => h.blur(el), [r.el]);
     return { done: undefined };
   });
 }
@@ -239,7 +240,7 @@ export async function setChecked(api: string, target: ElementTarget, checked: bo
     const r = await target.resolve();
     if (!r) return undefined;
     try {
-      return await r.el.context.callUtility((e, h, el) => e.elementState(h.retarget(el, 'control'), 'checked'), [r.el]);
+      return await r.el.context.callEngine((e, h, el) => e.checkState(h.resolveControl(el, 'control'), 'checked'), [r.el]);
     } finally {
       if (target.description !== 'element handle') void r.el.dispose();
     }
@@ -253,14 +254,14 @@ export async function setChecked(api: string, target: ElementTarget, checked: bo
       throw Object.assign(e as Error, { message: `${api}: ${(e as Error).message}` });
     }
     if (current !== undefined) break;
-    if (deadline.expired()) throw new TimeoutError(`${api}: Timeout ${deadline.timeout}ms exceeded.\nCall log:\n  - waiting for ${target.description}`);
+    if (deadline.expired()) throw new TimeoutError(timeoutMessage(api, deadline.timeout, [`waiting for ${target.description}`]));
     await sleep(pollDelay(attempt));
   }
   if (current === checked) return;
   await pointerAction(api, target, 'click', { ...o, timeout: deadline.remaining() || 1 });
   if (o.trial) return;
   const after = await state();
-  if (after !== checked) throw new Error(`${api}: Clicking the checkbox did not change its state`);
+  if (after !== checked) throw new Error(`${api}: the click landed but the control is still ${checked ? 'unchecked' : 'checked'} (the page may handle the click itself; check what the click does)`);
 }
 
 /** Select options in a <select> by value or label (or index / option element). */
@@ -282,7 +283,7 @@ export async function selectOption(api: string, target: ElementTarget, values: S
         return { retry: res.reason ?? 'not selectable' };
       }
     }
-    const out = await r.el.context.callUtility((_e, h, el, s) => h.selectOptions(h.retarget(el, 'control'), s), [r.el, specs]);
+    const out = await r.el.context.callEngine((_e, h, el, s) => h.selectOptions(h.resolveControl(el, 'control'), s), [r.el, specs]);
     if (!Array.isArray(out)) return { retry: (out as { retry: string }).retry };
     return { done: out as string[] };
   });
@@ -294,14 +295,14 @@ export async function selectText(api: string, target: ElementTarget, o: ActionOp
       const res = await actionability(r, 'selectText', o);
       if (!res.ok) return res.retry ? { retry: res.reason ?? 'not ready' } : Promise.reject(new Error(res.reason));
     }
-    await r.el.context.callUtility((_e, h, el) => h.selectText(el), [r.el]);
+    await r.el.context.callEngine((_e, h, el) => h.selectText(el), [r.el]);
     return { done: undefined };
   });
 }
 
 export async function dispatchEvent(api: string, target: ElementTarget, type: string, init: Record<string, unknown>, o: ActionOptions): Promise<void> {
   await retrying(api, target, timeoutFor(target, o), async (r) => {
-    await r.el.context.callUtility((_e, h, el, t, i) => h.dispatch(el, t, i), [r.el, type, init ?? {}]);
+    await r.el.context.callEngine((_e, h, el, t, i) => h.dispatch(el, t, i), [r.el, type, init ?? {}]);
     return { done: undefined };
   });
 }
@@ -319,20 +320,20 @@ export async function setInputFiles(api: string, target: ElementTarget, files: s
   const list = (Array.isArray(files) ? files : [files]) as Array<string | FilePayload>;
   const paths = list.filter((f): f is string => typeof f === 'string').map((p) => resolvePath(p));
   const payloads = list.filter((f): f is FilePayload => typeof f !== 'string');
-  if (paths.length && payloads.length) throw new Error(`${api}: File paths cannot be mixed with buffers`);
-  for (const p of paths) await stat(p).catch(() => Promise.reject(new Error(`${api}: ENOENT: no such file or directory, stat '${p}'`)));
+  if (paths.length && payloads.length) throw new Error(`${api}: pass either file paths or in-memory files ({ name, mimeType, buffer }), not both in one call`);
+  for (const p of paths) await stat(p).catch(() => Promise.reject(new Error(`${api}: the file to upload does not exist: ${p}`)));
   await retrying(api, target, timeoutFor(target, o), async (r) => {
     // Retarget a label to its input.
-    const input = (await r.el.context.callUtility((_e, h, el) => h.retarget(el, 'control'), [r.el], false)) as unknown as ElementHandle;
+    const input = (await r.el.context.callEngine((_e, h, el) => h.resolveControl(el, 'control'), [r.el], false)) as unknown as ElementHandle;
     try {
-      const kind = await input.context.callUtility((_e, h, el) => h.isFileInput(el), [input]);
-      if (kind === 'no') throw new Error('Node is not an HTMLInputElement of type file');
-      if (kind === 'file' && list.length > 1) throw new Error('Non-multiple file input can only accept single file');
+      const kind = await input.context.callEngine((_e, h, el) => h.isFileInput(el), [input]);
+      if (kind === 'no') throw new Error('The target is not a file input (<input type=file>) or a label of one');
+      if (kind === 'file' && list.length > 1) throw new Error(`This file input takes one file (it has no "multiple" attribute), but ${list.length} were given`);
       if (paths.length) {
         await input.context.setInputFilePaths(input, paths);
       } else {
         const enc = payloads.map((f) => ({ name: f.name, mimeType: f.mimeType || mimeFor(f.name), b64: Buffer.from(f.buffer).toString('base64') }));
-        await input.context.callUtility((_e, h, el, fs) => h.setFiles(el, fs), [input, enc]);
+        await input.context.callEngine((_e, h, el, fs) => h.setFiles(el, fs), [input, enc]);
       }
     } finally {
       void input.dispose();
@@ -348,8 +349,8 @@ export async function payloadFromPath(p: string): Promise<FilePayload> {
 
 /** The element's box in top-level viewport CSS px, or null. */
 export async function boundingBox(h: ElementHandle): Promise<Rect | null> {
-  const u = await h.inUtility();
-  const rect = await u.context.callUtility((_e, hp, el) => hp.rect(el), [u]);
+  const u = await h.inEngineWorld();
+  const rect = await u.context.callEngine((_e, hp, el) => hp.rect(el), [u]);
   if (!rect) return null;
   const off = await h.frame.viewportOffset();
   return { x: rect.x + off.x, y: rect.y + off.y, width: rect.width, height: rect.height };
@@ -366,7 +367,7 @@ export async function elementScreenshot(api: string, target: ElementTarget, o: E
     return { done: b };
   });
   // Scroll offset of the top-level document (the clip is in page coordinates): asked of the page itself, so any engine works.
-  const vv = await page.mainFrame().utility(() => {
+  const vv = await page.mainFrame().inEngine(() => {
     const v = window.visualViewport;
     return v ? { pageX: v.pageLeft, pageY: v.pageTop } : { pageX: window.scrollX, pageY: window.scrollY };
   });
@@ -380,12 +381,12 @@ export async function elementScreenshot(api: string, target: ElementTarget, o: E
 export async function waitForElementState(h: ElementHandle, state: 'visible' | 'hidden' | 'stable' | 'enabled' | 'disabled' | 'editable', timeout: number): Promise<void> {
   const deadline = new Deadline(timeout);
   for (let attempt = 0; ; attempt++) {
-    const u = await h.inUtility();
+    const u = await h.inEngineWorld();
     const ok = state === 'stable'
-      ? (await u.context.callUtility((e, _h, el) => e.actionability(el, 'scrollIntoView', {}), [u])).ok
-      : await u.context.callUtility((e, _h, el, s) => e.elementState(el, s), [u, state]);
+      ? (await u.context.callEngine((e, _h, el) => e.actionability(el, 'scrollIntoView', {}), [u])).ok
+      : await u.context.callEngine((e, _h, el, s) => e.checkState(el, s), [u, state]);
     if (ok) return;
-    if (deadline.expired()) throw new TimeoutError(`elementHandle.waitForElementState: Timeout ${timeout}ms exceeded.`);
+    if (deadline.expired()) throw new TimeoutError(timeoutMessage('elementHandle.waitForElementState', timeout, [`waiting for the element to be ${state}`]));
     await sleep(pollDelay(attempt));
   }
 }

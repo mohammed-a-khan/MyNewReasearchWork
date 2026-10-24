@@ -49,7 +49,7 @@ export class Keyboard {
         // A character outside the layout: no key code, just text.
         return { def: { code: '', keyCode: 0, key: name, location: 0, text: name }, shifted: false };
       }
-      throw new Error(`Unknown key: "${key}"`);
+      throw new Error(`keyboard: "${key}" is not a key name EZTest knows (use names like Enter, Tab, ArrowDown, Control+A or a single character)`);
     }
     return r;
   }
@@ -226,7 +226,7 @@ export class Touchscreen {
   constructor(private readonly session: () => CDPSession, protected readonly keyboard: Keyboard, protected readonly hasTouch: () => boolean) {}
 
   async tap(x: number, y: number): Promise<void> {
-    if (!this.hasTouch()) throw new Error('hasTouch must be enabled on the browser context before using the touchscreen.');
+    if (!this.hasTouch()) throw new Error('touchscreen.tap: this context has no touch support; create it with newContext({ hasTouch: true })');
     this.touchesSent++;
     const modifiers = this.keyboard.modifiers();
     await this.session().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }], modifiers });

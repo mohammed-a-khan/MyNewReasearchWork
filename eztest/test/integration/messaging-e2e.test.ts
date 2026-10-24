@@ -21,6 +21,7 @@ import { flattenStepResults, type JourneyResult } from '../../src/core/index.js'
 import { createEngine } from '../../src/engine/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
 import { KafkaBusDriver } from '../../src/integration/bus/kafka.js';
+import { IbmMqBusDriver } from '../../src/integration/bus/ibmmq.js';
 import { startDemoApp, type DemoServer } from '../../examples/demo-app/server.js';
 import { amqpBroker, ibmMqBroker, kafkaBroker, mqttBroker, skipNote } from './brokers.js';
 
@@ -104,7 +105,7 @@ describe.skipIf(!kafka)('Kafka (real broker)', () => {
   let stop = false;
 
   beforeAll(async () => {
-    side = new KafkaBusDriver('side', { brokers: kafka! });
+    side = new KafkaBusDriver('side', { brokers: kafka!, createTopics: true });
     demo = await startDemoApp({ onEvent: async (_t, e) => void (await side.publish({ type: 'topic', name: topic }, { payload: JSON.stringify(e), key: String(e.orderId) })) });
     // The "billing service": consumes replies and shows them on the order page.
     const sub = await side.subscribe({ type: 'topic', name: replies });
@@ -126,7 +127,7 @@ describe.skipIf(!kafka)('Kafka (real broker)', () => {
   });
 
   it('publishes, listens, filters by JSONPath/header/correlation id, validates the schema and captures variables', async () => {
-    const dir = await project({ bus: { type: 'kafka', brokers: kafka } });
+    const dir = await project({ bus: { type: 'kafka', brokers: kafka, createTopics: true } });
     const { j, runDir } = await runJourney(dir, roundTrip('Kafka', 'topic', `rt-${randomUUID().slice(0, 8)}`, 'bus'));
     expect(j.status, steps(j)).toBe('passed');
     const ev = await allEvidence(runDir);
@@ -135,7 +136,7 @@ describe.skipIf(!kafka)('Kafka (real broker)', () => {
   });
 
   it('finds an event emitted just before the wait (time-based seek, no listener)', async () => {
-    const dir = await project({ bus: { type: 'kafka', brokers: kafka } });
+    const dir = await project({ bus: { type: 'kafka', brokers: kafka, createTopics: true } });
     const t = `seek-${randomUUID().slice(0, 8)}`;
     const { j } = await runJourney(dir, `Journey: Kafka lookback
 Publish message '{"orderId": 77, "status": "PAID"}' to Kafka topic "${t}" with key "77"
@@ -146,7 +147,7 @@ Wait for a message on Kafka topic "${t}" where key = "77" and "$.status" = "PAID
   });
 
   it('fails with the filter and what did arrive when no message matches', async () => {
-    const dir = await project({ bus: { type: 'kafka', brokers: kafka } });
+    const dir = await project({ bus: { type: 'kafka', brokers: kafka, createTopics: true } });
     const t = `miss-${randomUUID().slice(0, 8)}`;
     const { j } = await runJourney(dir, `Journey: Kafka miss
 Publish message '{"orderId": 1}' to Kafka topic "${t}"
@@ -158,7 +159,7 @@ Wait for a message on Kafka topic "${t}" where "$.orderId" = 2 within 3 s as nop
   });
 
   it('G14 acceptance: an order placed in the UI emits the Kafka event, and a published reply shows in the UI', async () => {
-    const dir = await project({ bus: { type: 'kafka', brokers: kafka } });
+    const dir = await project({ bus: { type: 'kafka', brokers: kafka, createTopics: true } });
     const { j } = await runJourney(dir, `Journey: Order event round trip
 Start listening on Kafka topic "${topic}" as orderEvents
 Open /login
@@ -179,19 +180,122 @@ Reload the page [retry=20 every=500ms]
 `, { baseUrl: demo.url });
     expect(j.status, steps(j)).toBe('passed');
   });
+
+  it('a missing topic is an error (no auto-creation), createTopics: true creates it, and the run deletes its consumer groups', async () => {
+    const t = `absent-${randomUUID().slice(0, 8)}`;
+    const { Kafka, logLevel } = (await import('kafkajs')).default as unknown as { Kafka: new (o: object) => { admin(): KafkaAdmin }; logLevel: { NOTHING: number } };
+    type KafkaAdmin = { connect(): Promise<void>; disconnect(): Promise<void>; listTopics(): Promise<string[]>; listGroups(): Promise<{ groups: Array<{ groupId: string }> }>; deleteTopics(o: { topics: string[] }): Promise<void> };
+    const admin = new Kafka({ brokers: kafka!, logLevel: logLevel.NOTHING }).admin();
+    await admin.connect();
+    const strict = new KafkaBusDriver('strict', { brokers: kafka! });
+    const make = new KafkaBusDriver('make', { brokers: kafka!, createTopics: true });
+    try {
+      await expect(strict.publish({ type: 'topic', name: t }, { payload: 'x' })).rejects.toThrow(/Kafka topic ".+" does not exist on broker "strict" \(.+\)\. Create it, or set createTopics: true on messaging\.brokers\.strict/);
+      await expect(strict.subscribe({ type: 'topic', name: t })).rejects.toThrow(/does not exist on broker "strict"/);
+      expect(await admin.listTopics()).not.toContain(t);
+      // The same through a journey: the step fails with the message, nothing is created.
+      const dir = await project({ bus: { type: 'kafka', brokers: kafka } });
+      const { j } = await runJourney(dir, `Journey: Kafka missing topic\nPublish message '{"a": 1}' to Kafka topic "${t}"\n`);
+      expect(j.status).toBe('failed');
+      expect(steps(j)).toMatch(/does not exist on broker "bus".*createTopics: true/);
+      expect(await admin.listTopics()).not.toContain(t);
+      // Opted in: created, and two subscriptions on it at once use the run's group and one sibling.
+      await make.publish({ type: 'topic', name: t }, { payload: '{"n": 1}' });
+      expect(await admin.listTopics()).toContain(t);
+      const s1 = await make.subscribe({ type: 'topic', name: t });
+      const s2 = await make.subscribe({ type: 'topic', name: t });
+      expect(make.consumerGroups()).toEqual([make.groupId, `${make.groupId}-2`]);
+      const listed = (await admin.listGroups()).groups.map((g) => g.groupId);
+      expect(listed).toEqual(expect.arrayContaining(make.consumerGroups()));
+      await s1.close();
+      await s2.close();
+      await make.close();
+      expect(make.closeWarnings).toEqual([]);
+      const after = (await admin.listGroups()).groups.map((g) => g.groupId);
+      expect(after.filter((g) => g.startsWith(make.groupId))).toEqual([]);
+    } finally {
+      await strict.close();
+      await make.close();
+      await admin.deleteTopics({ topics: [t] }).catch(() => undefined);
+      await admin.disconnect();
+    }
+  });
 });
+
+/** Queues the tests own: created before, deleted after (the application would own them in real life). */
+async function rabbitQueues(names: string[], o: { create?: boolean } = {}): Promise<() => Promise<void>> {
+  const pkg: string = 'amqplib';
+  const lib = ((await import(pkg)) as { default: { connect(u: string): Promise<{ createChannel(): Promise<{ assertQueue(q: string, o: object): Promise<unknown>; deleteQueue(q: string): Promise<unknown>; close(): Promise<void> }>; close(): Promise<void> }> } }).default;
+  const conn = await lib.connect(amqp!);
+  const ch = await conn.createChannel();
+  if (o.create !== false) for (const n of names) await ch.assertQueue(n, { durable: false });
+  return async () => {
+    for (const n of names) await ch.deleteQueue(n).catch(() => undefined);
+    await ch.close().catch(() => undefined);
+    await conn.close().catch(() => undefined);
+  };
+}
 
 describe.skipIf(!amqp)('RabbitMQ / AMQP 0-9-1 (real broker)', () => {
   it('queue round trip with schema, capture and expect-none', async () => {
+    const q = `eztest.rt.${randomUUID().slice(0, 8)}`;
+    const drop = await rabbitQueues([q]);
+    try {
+      const dir = await project({ rabbit: { type: 'amqp', url: amqp } });
+      const { j, runDir } = await runJourney(dir, roundTrip('RabbitMQ', 'queue', q, 'rabbit'));
+      expect(j.status, steps(j)).toBe('passed');
+      expect(await allEvidence(runDir)).not.toContain(SECRET);
+    } finally {
+      await drop();
+    }
+  });
+
+  it('a missing queue is an error unless declare: true; nothing is declared behind the user\'s back', async () => {
+    const q = `eztest.missing.${randomUUID().slice(0, 8)}`;
     const dir = await project({ rabbit: { type: 'amqp', url: amqp } });
-    const { j, runDir } = await runJourney(dir, roundTrip('RabbitMQ', 'queue', `eztest.rt.${randomUUID().slice(0, 8)}`, 'rabbit'));
-    expect(j.status, steps(j)).toBe('passed');
-    expect(await allEvidence(runDir)).not.toContain(SECRET);
+    const { j } = await runJourney(dir, `Journey: AMQP missing queue\nPublish message '{"a": 1}' to RabbitMQ queue "${q}"\n`);
+    expect(j.status).toBe('failed');
+    expect(steps(j)).toMatch(new RegExp(`RabbitMQ queue "${q.replace(/\./g, '\\.')}" does not exist on broker "rabbit".*declare: true`));
+    const w = await runJourney(dir, `Journey: AMQP missing queue wait\nWait for a message on RabbitMQ queue "${q}" within 2 s as m\n`);
+    expect(w.j.status).toBe('failed');
+    expect(steps(w.j)).toMatch(/does not exist on broker "rabbit"/);
+    // Opted in: declared and used.
+    const dir2 = await project({ rabbit: { type: 'amqp', url: amqp, declare: true } });
+    const ok = await runJourney(dir2, `Journey: AMQP declared\nPublish message '{"a": 1}' to RabbitMQ queue "${q}"\nWait for a message on RabbitMQ queue "${q}" where "$.a" = 1 within 10 s as m\n`);
+    expect(ok.j.status, steps(ok.j)).toBe('passed');
+    await (await rabbitQueues([q], { create: false }))();
+  });
+
+  it.skipIf(!!process.env.EZTEST_AMQP_URL)('a permission refusal is reported as one (not as a missing queue)', async () => {
+    const q = `eztest.perm.${randomUUID().slice(0, 8)}`;
+    const drop = await rabbitQueues([q]);
+    const { execFileSync } = await import('node:child_process');
+    const ctl = (...args: string[]) => execFileSync('docker', ['exec', 'eztest-it-rabbit', 'rabbitmqctl', ...args], { stdio: 'pipe' });
+    try {
+      try {
+        ctl('add_user', 'eztest-limited', 'limitedpw');
+      } catch {
+        // already there
+      }
+      ctl('set_permissions', '-p', '/', 'eztest-limited', '^$', '^$', '^$');
+      const limited = amqp!.replace(/\/\/[^@]+@/, '//eztest-limited:limitedpw@');
+      const dir = await project({ rabbit: { type: 'amqp', url: limited } });
+      const { j } = await runJourney(dir, `Journey: AMQP refused\nWait for a message on RabbitMQ queue "${q}" within 2 s as m\n`);
+      expect(j.status).toBe('failed');
+      expect(steps(j)).toMatch(/RabbitMQ broker "rabbit" refused consuming from queue ".+": .*ACCESS_REFUSED.*needs permission/);
+      const p = await runJourney(dir, `Journey: AMQP refused publish\nPublish message '{"a": 1}' to RabbitMQ queue "${q}"\n`);
+      expect(p.j.status).toBe('failed');
+      expect(steps(p.j)).toMatch(/refused publishing to queue ".+": .*ACCESS_REFUSED/);
+    } finally {
+      await drop();
+    }
   });
 
   it('exchange with routing keys, waiting without a listener on a queue, and purge', async () => {
     const dir = await project({ rabbit: { type: 'amqp', url: amqp } });
     const q = `eztest.work.${randomUUID().slice(0, 8)}`;
+    const drop = await rabbitQueues([q]);
+    after.push(drop);
     const { j } = await runJourney(dir, `Journey: AMQP exchange
 Start listening on RabbitMQ exchange "amq.topic" as created
 Publish message '{"id": 5, "event": "created"}' to RabbitMQ exchange "amq.topic" with routing key "order.created"
@@ -205,6 +309,11 @@ Purge RabbitMQ queue "${q}"
 Expect no message on RabbitMQ queue "${q}" within 1 s
 `);
     expect(j.status, steps(j)).toBe('passed');
+  });
+
+  const after: Array<() => Promise<void>> = [];
+  afterAll(async () => {
+    for (const f of after) await f();
   });
 });
 
@@ -227,7 +336,7 @@ Wait for a message in temps where "$.sensor" = "s1" and "$.celsius" > 20 within 
 });
 
 describe.skipIf(!ibmmq)('IBM MQ via the REST messaging API (real queue manager)', () => {
-  it('put and get with correlation id selector and JSONPath filter (non-matching messages are put back)', async () => {
+  it('put and get with correlation id selector and JSONPath filter (non-matching messages stay on the queue)', async () => {
     const dir = await project({ qm1: { type: 'ibmmq', ...ibmmq, insecure: true } });
     const { j } = await runJourney(dir, `Journey: IBM MQ
 Purge IBM MQ queue "DEV.QUEUE.2"
@@ -240,5 +349,34 @@ Wait for a message on IBM MQ queue "DEV.QUEUE.2" where "$.order" = 1 within 10 s
 Expect no message on IBM MQ queue "DEV.QUEUE.2" within 2 s
 `);
     expect(j.status, steps(j)).toBe('passed');
+  });
+
+  it("a filtered wait browses: other consumers' messages stay on the queue, in order, with their message ids", async () => {
+    const d = new IbmMqBusDriver('t', { ...ibmmq!, insecure: true, waitMs: 0 });
+    const q = { type: 'queue' as const, name: 'DEV.QUEUE.3' };
+    try {
+      await d.purge(q);
+      const first = await d.publish(q, { payload: '{"n": "other-1"}' });
+      const mine = await d.publish(q, { payload: '{"n": "mine"}' });
+      const last = await d.publish(q, { payload: '{"n": "other-2"}' });
+      const ids = (xs: Array<{ messageId?: string }>) => xs.map((x) => x.messageId!.toLowerCase());
+      expect(ids(await d.browseList(q))).toEqual(ids([first, mine, last]));
+      const sub = await d.subscribe(q, { consumeMatched: true });
+      const m = await sub.next((x) => JSON.parse(x.payload).n === 'mine', 10_000);
+      expect(m?.messageId).toBe(mine.messageId!.toLowerCase());
+      // Only the matched message was consumed, as soon as the wait took it.
+      expect(ids(await d.browseList(q))).toEqual(ids([first, last]));
+      await sub.close();
+      expect(ids(await d.browseList(q))).toEqual(ids([first, last]));
+      // A wait that matches nothing leaves the queue exactly as it was.
+      const none = await d.subscribe(q, { consumeMatched: true });
+      expect(await none.next((x) => JSON.parse(x.payload).n === 'absent', 1500)).toBeUndefined();
+      expect(none.messages.length).toBe(2);
+      await none.close();
+      expect(ids(await d.browseList(q))).toEqual(ids([first, last]));
+    } finally {
+      await d.purge(q);
+      await d.close();
+    }
   });
 });

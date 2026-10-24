@@ -187,8 +187,7 @@ describe('ApiClient retries, timeouts, auth and bodies', () => {
     await expect(api.get('/echo', { json: {} })).rejects.toThrow(/cannot have a body/);
   });
 
-  it('throws NotSupportedError for proxy and disabled TLS verification', () => {
-    expect(() => new ApiClient({ proxy: 'http://proxy:8080' })).toThrow(NotSupportedError);
+  it('throws NotSupportedError for disabled TLS verification (a proxy is supported, see proxy.test.ts)', () => {
     expect(() => new ApiClient({ rejectUnauthorized: false })).toThrow(NotSupportedError);
     expect(() => new ApiClient().resolveUrl('/relative')).toThrow(/baseUrl/);
   });

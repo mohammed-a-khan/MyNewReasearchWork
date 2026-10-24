@@ -196,7 +196,7 @@ describe('pages, evaluation and input', () => {
       await expect(page.evaluate(() => {
         throw new TypeError('boom');
       })).rejects.toThrow(/boom/);
-      // The page cannot see the driver's utility world.
+      // The page cannot see the driver's engine world.
       expect(await page.evaluate(() => typeof (globalThis as Record<string, unknown>).__eztestEngine)).toBe('undefined');
     });
   });
@@ -233,8 +233,8 @@ describe('pages, evaluation and input', () => {
       await page.setContent(`<button id=a>One</button><button id=b>Two</button>
         <div id=late></div><script>setTimeout(() => { late.innerHTML = '<button id=c onclick="this.textContent=\\'done\\'">Late</button>'; }, 300)</script>
         <div id=cover style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`);
-      await expect(page.locator('button').click({ timeout: 500 })).rejects.toThrow(/strict mode violation.*resolved to 2 elements/s);
-      await expect(page.locator('#a').click({ timeout: 600 })).rejects.toThrow(/intercepts pointer events/);
+      await expect(page.locator('button').click({ timeout: 500 })).rejects.toThrow(/locator\('button'\) matched 2 elements, but this needs exactly one.*1\) .*2\) .*Narrow it down/s);
+      await expect(page.locator('#a').click({ timeout: 600 })).rejects.toThrow(/covers the element and would receive the pointer event/);
       await page.evaluate(() => document.getElementById('cover')!.remove());
       await page.getByRole('button', { name: 'Late' }).click();
       expect(await page.locator('#c').textContent()).toBe('done');

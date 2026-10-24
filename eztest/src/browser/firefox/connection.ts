@@ -48,7 +48,7 @@ export class BidiConnection extends EventEmitter {
 
   send<T extends BidiResult = BidiResult>(method: string, params: BidiParams = {}): Promise<T> {
     if (this.closedReason !== undefined) {
-      return Promise.reject(new TargetClosedError(`Protocol error (${method}): Browser has been closed (${this.closedReason})`));
+      return Promise.reject(new TargetClosedError(`${method}: the browser connection closed (${this.closedReason})`));
     }
     const id = ++this.lastId;
     const text = JSON.stringify({ id, method, params });
@@ -85,7 +85,7 @@ export class BidiConnection extends EventEmitter {
   private onClose(reason: string): void {
     if (this.closedReason !== undefined) return;
     this.closedReason = reason;
-    for (const p of this.pending.values()) p.reject(new TargetClosedError(`Protocol error (${p.method}): Browser has been closed (${reason})`));
+    for (const p of this.pending.values()) p.reject(new TargetClosedError(`${p.method}: the browser connection closed (${reason})`));
     this.pending.clear();
     this.emit('disconnected', reason);
   }

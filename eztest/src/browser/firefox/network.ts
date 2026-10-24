@@ -23,11 +23,11 @@
  * chromium/network.ts).
  */
 import { Request, Response, runRouteChain, type ContinueOptions, type Header, type RouteBackend } from '../chromium/network.js';
-import type { CrFrame } from '../chromium/frame.js';
+import type { ChromiumFrame } from '../chromium/frame.js';
 import { debugLog } from '../debug.js';
 import type { BidiConnection } from './connection.js';
 import { cdpUnavailable } from './stubs.js';
-import type { FfPage } from './page.js';
+import type { FirefoxPage } from './page.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -132,20 +132,20 @@ function timingOf(t: any): Record<string, number> | undefined {
 }
 
 /** A BiDi request hop. */
-interface FfRequest extends Request {
+interface FirefoxRequest extends Request {
   bidiId: string;
   redirectCount: number;
   abortText?: string;
 }
 
 /** The engine-specific half of a route: BiDi network.* commands for one blocked request. */
-export function bidiRouteBackend(bidi: BidiConnection, requestId: string, req: FfRequest, latency: () => number): RouteBackend {
+export function bidiRouteBackend(bidi: BidiConnection, requestId: string, req: FirefoxRequest, latency: () => number): RouteBackend {
   const wait = async () => {
     const ms = latency();
     if (ms > 0) await new Promise((r) => setTimeout(r, ms));
   };
   const ignoreGone = (e: Error) => {
-    if (!/no such request|no such frame|has been closed|Browser has been closed/i.test(e.message)) throw e;
+    if (!/no such request|no such frame|connection closed|was closed before/i.test(e.message)) throw e;
   };
   return {
     abort: async (reason) => {
@@ -189,17 +189,17 @@ const STATUS_TEXT: Record<number, string> = {
   500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout',
 };
 
-export class FfNetwork {
-  private readonly requests = new Map<string, FfRequest>();
+export class FirefoxNetwork {
+  private readonly requests = new Map<string, FirefoxRequest>();
   private readonly documentRequests = new Map<string, Request>();
-  private readonly inflight = new Map<FfRequest, number>();
+  private readonly inflight = new Map<FirefoxRequest, number>();
   private lastActivity = Date.now();
   private readonly authAttempts = new Set<string>();
   /** Per-request event order (request bodies are fetched before the 'request' event). */
   private readonly ready = new Map<string, Promise<void>>();
 
   constructor(
-    private readonly page: FfPage,
+    private readonly page: FirefoxPage,
     private readonly bidi: BidiConnection,
   ) {}
 
@@ -221,7 +221,7 @@ export class FfNetwork {
     this.page.notifyChange();
   }
 
-  private frameFor(contextId: string | undefined): CrFrame | undefined {
+  private frameFor(contextId: string | undefined): ChromiumFrame | undefined {
     return contextId ? this.page.frameById(contextId) : undefined;
   }
 
@@ -260,7 +260,7 @@ export class FfNetwork {
   // Every event of a request goes through its per-request queue, in arrival order. Hops are
   // addressed by request id + redirectCount.
 
-  private hop(e: any): FfRequest | undefined {
+  private hop(e: any): FirefoxRequest | undefined {
     return this.requests.get(`${e.request.request}:${e.redirectCount ?? 0}`);
   }
 
@@ -295,7 +295,7 @@ export class FfNetwork {
     this.createHop(e, previous, isNav, undefined, blocked);
   }
 
-  private createHop(e: any, previous: FfRequest | undefined, isNav: boolean, post: Buffer | undefined, blocked: boolean): void {
+  private createHop(e: any, previous: FirefoxRequest | undefined, isNav: boolean, post: Buffer | undefined, blocked: boolean): void {
     const r = e.request;
     const id = String(r.request);
     const url = String(r.url);
@@ -303,7 +303,7 @@ export class FfNetwork {
     const req = new Request(
       this, NO_CDP, `${id}:${count}`, url, String(r.method), headersFromBidi(r.headers), post, resourceTypeOf(r),
       this.frameFor(e.context), isNav, previous, (e.timestamp ?? Date.now()) / 1000, (e.timestamp ?? Date.now()) / 1000,
-    ) as FfRequest;
+    ) as FirefoxRequest;
     req.bidiId = id;
     req.redirectCount = count;
     req.timingInfo = timingOf(r.timings);
@@ -312,7 +312,7 @@ export class FfNetwork {
     if (blocked) void this.intercept(req);
   }
 
-  private register(req: FfRequest, navigation: string | null | undefined): void {
+  private register(req: FirefoxRequest, navigation: string | null | undefined): void {
     this.requests.set(req.id, req);
     if (req.isNavigation && navigation && !this.documentRequests.has(navigation)) this.documentRequests.set(navigation, req);
     if (req.resourceType_ !== 'eventsource') this.inflight.set(req, Date.now());
@@ -331,7 +331,7 @@ export class FfNetwork {
     });
   }
 
-  private setResponse(req: FfRequest, r: any, replace = false): void {
+  private setResponse(req: FirefoxRequest, r: any, replace = false): void {
     if (req.response_ && !replace) return;
     const res = new Response(req, Number(r.status), String(r.statusText ?? ''), headersFromBidi(r.headers), String(r.url ?? req.url_), undefined, undefined, false);
     res.encodedLength = Number(r.bodySize ?? r.bytesReceived ?? 0) || 0;
@@ -372,7 +372,7 @@ export class FfNetwork {
     });
   }
 
-  private finish(req: FfRequest, failure: string | undefined): void {
+  private finish(req: FirefoxRequest, failure: string | undefined): void {
     if (req.finished) return;
     req.finished = true;
     this.inflight.delete(req);
@@ -393,7 +393,7 @@ export class FfNetwork {
   }
 
   // -------------------------------------------------- interception
-  private async intercept(req: FfRequest): Promise<void> {
+  private async intercept(req: FirefoxRequest): Promise<void> {
     const ctx = this.page.ffContext();
     const backend = bidiRouteBackend(this.bidi, req.bidiId, req, () => ctx.latency());
     const routed = this.page.routeEntries().length + ctx.routeEntries().length > 0 || ctx.hasClientCertificates();

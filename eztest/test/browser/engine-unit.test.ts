@@ -231,14 +231,14 @@ describe('actionability', () => {
        <input id=cb type=checkbox><div id=dv>text</div><fieldset disabled><input id=fi></fieldset>
        <button id=ad aria-disabled=true>x</button><span id=pe style="pointer-events:none">pe</span>`,
     );
-    expect(await act('#h', 'click')).toEqual({ ok: false, reason: 'element is not visible', retry: true });
-    expect(await act('#d', 'click')).toEqual({ ok: false, reason: 'element is not enabled', retry: true });
+    expect(await act('#h', 'click')).toEqual({ ok: false, reason: 'the element is hidden', retry: true });
+    expect(await act('#d', 'click')).toEqual({ ok: false, reason: 'the element is disabled', retry: true });
     expect(await act('#d', 'hover')).toMatchObject({ ok: true });
-    expect(await act('#ro', 'fill')).toEqual({ ok: false, reason: 'element is not editable (readonly)', retry: true });
-    expect(await act('#cb', 'fill')).toEqual({ ok: false, reason: 'input of type "checkbox" cannot be filled', retry: false });
+    expect(await act('#ro', 'fill')).toEqual({ ok: false, reason: 'the element is read-only', retry: true });
+    expect(await act('#cb', 'fill')).toEqual({ ok: false, reason: 'an <input type=checkbox> takes no typed text', retry: false });
     expect(await act('#dv', 'fill')).toMatchObject({ ok: false, retry: false });
-    expect(await act('#fi', 'fill')).toMatchObject({ ok: false, reason: 'element is not enabled' });
-    expect(await act('#ad', 'click')).toMatchObject({ ok: false, reason: 'element is not enabled' });
+    expect(await act('#fi', 'fill')).toMatchObject({ ok: false, reason: 'the element is disabled' });
+    expect(await act('#ad', 'click')).toMatchObject({ ok: false, reason: 'the element is disabled' });
     expect(await act('#pe', 'click')).toMatchObject({ ok: false, reason: 'element does not receive pointer events (pointer-events: none)' });
     expect(await act('#dv', 'bogus')).toEqual({ ok: false, reason: 'unknown action "bogus"', retry: false });
   });
@@ -250,7 +250,7 @@ describe('actionability', () => {
        <button id=m style="animation:slide 2s linear infinite">Moving</button>
        <div style="height:3000px"></div><button id=far>Far</button>`,
     );
-    expect(await act('#m', 'click')).toMatchObject({ ok: false, reason: 'element is not stable (it is moving or resizing)', retry: true });
+    expect(await act('#m', 'click')).toMatchObject({ ok: false, reason: 'the element is still moving or resizing', retry: true });
     const r = await act('#far', 'click');
     expect(r.ok).toBe(true);
     const inView = await ev<boolean>(page, `const r = document.getElementById('far').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight;`);
@@ -378,18 +378,18 @@ describe('value helpers', () => {
     ]);
   });
 
-  it('setChecked clicks only when needed; elementState reads it', async () => {
+  it('setChecked clicks only when needed; checkState reads it', async () => {
     await load(page, '<input id=c type=checkbox><div id=sw role=switch aria-checked=false tabindex=0></div><input id=r type=radio checked><p id=p>x</p>');
     await page.evaluate(`document.getElementById('sw').addEventListener('click', (e) => e.target.setAttribute('aria-checked', String(e.target.getAttribute('aria-checked') !== 'true')))`);
     const r = await ev<unknown[]>(
       page,
       `const c = document.getElementById('c'); let changes = 0; c.addEventListener('change', () => changes++);
-       return [E.setChecked(c, true), E.setChecked(c, true), changes, E.elementState(c, 'checked'),
-               E.setChecked(document.getElementById('sw'), true), E.elementState(document.getElementById('sw'), 'checked'),
+       return [E.setChecked(c, true), E.setChecked(c, true), changes, E.checkState(c, 'checked'),
+               E.setChecked(document.getElementById('sw'), true), E.checkState(document.getElementById('sw'), 'checked'),
                E.setChecked(document.getElementById('r'), false)];`,
     );
     expect(r).toEqual([{ ok: true, value: true }, { ok: true, value: false }, 1, true, { ok: true, value: true }, true, { ok: false, reason: 'cannot uncheck a radio button', retry: false }]);
-    await expect(ev(page, `return E.elementState(document.getElementById('p'), 'checked');`)).rejects.toThrow(/Not a checkbox or radio button/);
+    await expect(ev(page, `return E.checkState(document.getElementById('p'), 'checked');`)).rejects.toThrow(/not a checkbox or radio button/);
   });
 
   it('dispatchEvent builds the right event class with bubbling defaults', async () => {
@@ -413,8 +413,8 @@ describe('value helpers', () => {
       `const d = document.getElementById('d');
        document.getElementById('i').focus();
        return [E.innerText(d), E.elementText(d), E.normalizeWhitespace(' a \\u00a0 b '), E.matchesText('Hello World', 'o w'),
-         E.elementState(document.getElementById('i'), 'focused'), E.elementState(document.getElementById('i'), 'editable'),
-         E.elementState(document.getElementById('b'), 'editable'), E.elementState(d, 'attached')];`,
+         E.checkState(document.getElementById('i'), 'focused'), E.checkState(document.getElementById('i'), 'editable'),
+         E.checkState(document.getElementById('b'), 'editable'), E.checkState(d, 'attached')];`,
     );
     expect(r).toEqual(['Hello World', 'Hello World x', 'a b', true, true, true, false, true]);
   });

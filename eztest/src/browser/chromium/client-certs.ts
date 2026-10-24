@@ -16,7 +16,7 @@ import { request as httpsRequest } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import type { ClientCertificate } from '../types.js';
-import type { CrBrowserContext } from './browser.js';
+import type { ChromiumContext } from './browser.js';
 import type { ContinueOptions, Request } from './network.js';
 
 export type CertHandler = (req: Request, overrides: ContinueOptions, fulfill: (status: number, headers: Record<string, string>, body: Buffer) => Promise<void>) => Promise<void>;
@@ -39,7 +39,7 @@ function decode(body: Buffer, encoding: string | undefined): Buffer {
   return body;
 }
 
-export function clientCertificateFetcher(certs: ClientCertificate[], ctx: CrBrowserContext): CertFetcher {
+export function clientCertificateFetcher(certs: ClientCertificate[], ctx: ChromiumContext): CertFetcher {
   const byOrigin = new Map<string, ClientCertificate>();
   for (const c of certs) byOrigin.set(normOrigin(c.origin), c);
   return (url: string) => {

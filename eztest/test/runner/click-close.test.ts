@@ -11,7 +11,7 @@ const opts = { outputDir: '.' } as RunOptions;
 function fakeLocator(closed: boolean): Locator {
   return {
     click: async () => {
-      throw new Error('locator.click: Target page, context or browser has been closed');
+      throw new Error('locator.click: the page, context or browser was closed before this finished');
     },
     page: () => ({ isClosed: () => closed }),
   } as unknown as Locator;
@@ -23,6 +23,6 @@ describe('click on a self-closing window', () => {
   });
 
   it('still fails when the page is open (a real click failure)', async () => {
-    await expect(performAction(step, fakeLocator(false), { page: {} } as StepContext, opts, 1000)).rejects.toThrow(/Target page/);
+    await expect(performAction(step, fakeLocator(false), { page: {} } as StepContext, opts, 1000)).rejects.toThrow(/was closed before this finished/);
   });
 });

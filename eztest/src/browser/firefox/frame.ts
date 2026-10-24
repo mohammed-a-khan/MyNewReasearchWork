@@ -1,18 +1,18 @@
 /**
  * A Firefox frame: a WebDriver BiDi browsing context. The frame API,
- * lifecycle bookkeeping and waiting come from CrFrame (engine-independent);
+ * lifecycle bookkeeping and waiting come from ChromiumFrame (engine-independent);
  * this class supplies the BiDi halves: navigation (browsingContext.navigate),
- * the utility world (a sandbox realm) and the owner element.
+ * the engine world (a sandbox realm) and the owner element.
  */
 import { readFile } from 'node:fs/promises';
-import { UTILITY_WORLD_NAME } from '../injected/contract.js';
-import { CrFrame } from '../chromium/frame.js';
+import { ENGINE_WORLD_NAME } from '../injected/contract.js';
+import { ChromiumFrame } from '../chromium/frame.js';
 import type { ElementHandle } from '../chromium/handles.js';
-import type { CrPage, TargetSession } from '../chromium/page.js';
+import type { ChromiumPage, TargetSession } from '../chromium/page.js';
 import type { Deadline } from '../util.js';
 import { rewriteError } from '../errors.js';
 import type { BidiConnection } from './connection.js';
-import type { FfRealm } from './realm.js';
+import type { FirefoxRealm } from './realm.js';
 import { netErrorText } from './network.js';
 import { targetSessionUnavailable } from './stubs.js';
 
@@ -21,7 +21,7 @@ const SESSION = targetSessionUnavailable() as TargetSession;
 /** Sandbox that stands in for the main world when the page runs without JavaScript. */
 export const PAGE_WORLD_NAME = '__eztest_page_world__';
 
-export class FfFrame extends CrFrame {
+export class FirefoxFrame extends ChromiumFrame {
   /** Firefox rewrites such documents fine (the workaround is for a Chromium bug). */
   protected override objectFramesBreakRewrite(): boolean {
     return false;
@@ -35,7 +35,7 @@ export class FfFrame extends CrFrame {
   readonly downloadNavigations = new Set<string>();
 
   constructor(
-    page: CrPage,
+    page: ChromiumPage,
     id: string,
     private readonly bidi: BidiConnection,
   ) {
@@ -43,15 +43,15 @@ export class FfFrame extends CrFrame {
   }
 
   /** The realm of a world, if it exists right now. */
-  realm(world: 'main' | 'utility'): FfRealm | undefined {
-    const r = this.contexts[world] as FfRealm | undefined;
+  realm(world: 'main' | 'engine'): FirefoxRealm | undefined {
+    const r = this.contexts[world] as FirefoxRealm | undefined;
     return r && !r.disposed ? r : undefined;
   }
 
-  protected override async createUtilityWorld(): Promise<unknown> {
+  protected override async createEngineWorld(): Promise<unknown> {
     // Addressing the sandbox creates it; its realm arrives as script.realmCreated (and in the result).
-    const res = await this.bidi.send('script.evaluate', { expression: '0', target: { context: this.id, sandbox: UTILITY_WORLD_NAME }, awaitPromise: false, resultOwnership: 'none' });
-    (this._page as unknown as { onRealmCreated(e: unknown): void }).onRealmCreated({ realm: res.realm, context: this.id, type: 'window', sandbox: UTILITY_WORLD_NAME });
+    const res = await this.bidi.send('script.evaluate', { expression: '0', target: { context: this.id, sandbox: ENGINE_WORLD_NAME }, awaitPromise: false, resultOwnership: 'none' });
+    (this._page as unknown as { onRealmCreated(e: unknown): void }).onRealmCreated({ realm: res.realm, context: this.id, type: 'window', sandbox: ENGINE_WORLD_NAME });
     return res;
   }
 
@@ -81,7 +81,7 @@ export class FfFrame extends CrFrame {
   override async addScriptTag(options: { url?: string; path?: string; content?: string; type?: string }): Promise<ElementHandle> {
     const inline = !options.url && (options.content !== undefined || options.path !== undefined) && (!options.type || options.type === 'text/javascript');
     if (!inline || !this._page.context().options.bypassCSP) return super.addScriptTag(options);
-    const main = (await this.context('main')) as FfRealm;
+    const main = (await this.context('main')) as FirefoxRealm;
     await main.evaluate(() => {
       const w = window as unknown as { __ezCspBlocked?: boolean };
       w.__ezCspBlocked = false;
@@ -100,10 +100,10 @@ export class FfFrame extends CrFrame {
     return el;
   }
 
-  override async ownerElement(world: 'main' | 'utility'): Promise<ElementHandle | undefined> {
-    const parent = this.parent as FfFrame | undefined;
+  override async ownerElement(world: 'main' | 'engine'): Promise<ElementHandle | undefined> {
+    const parent = this.parent as FirefoxFrame | undefined;
     if (!parent) return undefined;
-    const ctx = (await parent.context(world)) as FfRealm;
+    const ctx = (await parent.context(world)) as FirefoxRealm;
     return ctx.ownerElementOf(this.id);
   }
 
@@ -124,11 +124,11 @@ export class FfFrame extends CrFrame {
       res = await this.bidi.send('browsingContext.navigate', { context: this.id, url: target, wait: 'none' }) as typeof res;
     } catch (e) {
       const m = (e as Error).message;
-      if (/invalid argument/i.test(m) && /url/i.test(m)) throw new Error('page.goto: Protocol error (browsingContext.navigate): Cannot navigate to invalid URL');
-      if (/download/i.test(m)) throw new Error('page.goto: Download is starting');
+      if (/invalid argument/i.test(m) && /url/i.test(m)) throw new Error(`page.goto: "${target}" is not a URL the browser can open (give a full URL, or set baseURL for relative ones)`);
+      if (/download/i.test(m)) throw new Error(`page.goto: ${target} started a download instead of opening a page (use page.waitForEvent('download') to catch it)`);
       // The document request's own error (route.abort reason, network error) is the precise one.
-      if (this.lastFailure && this.lastFailure.at >= started) throw new Error(`page.goto: ${this.lastFailure.text} at ${target}`);
-      if (/\b(NS|SEC|SSL|MOZILLA_PKIX)_[A-Z0-9_]+|deniedPortAccess/.test(m)) throw new Error(`page.goto: ${netErrorText(m)} at ${target}`);
+      if (this.lastFailure && this.lastFailure.at >= started) throw new Error(`page.goto: could not load ${target} (${this.lastFailure.text})`);
+      if (/\b(NS|SEC|SSL|MOZILLA_PKIX)_[A-Z0-9_]+|deniedPortAccess/.test(m)) throw new Error(`page.goto: could not load ${target} (${netErrorText(m)})`);
       throw rewriteError(e as Error, 'page.goto');
     }
     if (sameDocument || !res.navigation) return undefined;
@@ -136,9 +136,9 @@ export class FfFrame extends CrFrame {
   }
 
   protected override navigationError(loaderId: string, api: string, url: string | undefined): Error | undefined {
-    if (this.downloadNavigations.has(loaderId)) return new Error(`${api}: Download is starting`);
+    if (this.downloadNavigations.has(loaderId)) return new Error(`${api}: the navigation started a download instead of opening a page (use page.waitForEvent('download') to catch it)`);
     const text = this.failedNavigations.get(loaderId);
     if (text === undefined) return undefined;
-    return new Error(`${api}: ${text} at ${url ?? this.url()}`);
+    return new Error(`${api}: could not load ${url ?? this.url()} (${text})`);
   }
 }

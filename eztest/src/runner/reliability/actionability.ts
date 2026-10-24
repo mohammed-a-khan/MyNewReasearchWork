@@ -14,6 +14,7 @@
  */
 import type { Locator } from '../../browser/index.js';
 import { EzTestError, sleep } from '../../core/index.js';
+import { isClosedError } from '../../browser/errors.js';
 import { pageFunction } from '../../heal/fingerprint.js';
 
 export interface ActionabilityProbe {
@@ -167,7 +168,7 @@ export async function waitActionable(loc: Locator, o: WaitActionableOptions): Pr
     } catch (e) {
       // Element gone between resolve and probe (SPA re-render), or the page navigated.
       const msg = (e as Error).message;
-      if (/Target (?:page, context or browser )?(?:has been )?closed/i.test(msg)) throw e;
+      if (isClosedError(e) || /Target (?:page, context or browser )?(?:has been )?closed/i.test(msg)) throw e;
       causes.add('detached');
       return { ok: false, waitedMs: Date.now() - t0, causes: [...causes], last: { attached: false, visible: false, enabled: false, stable: false, animating: 0 } };
     }

@@ -9,7 +9,7 @@ for (const [name, poll] of [['d365', d365Poll], ['salesforce', sfPoll]] as const
       let n = 0;
       const v = await poll(async () => {
         n += 1;
-        if (n === 1) throw new Error('locator.allInnerTexts: Execution context was destroyed, most likely because of a navigation');
+        if (n === 1) throw new Error('locator.allInnerTexts: the page\'s JavaScript context went away (most often because the page navigated)');
         return 'ok';
       }, 2000);
       expect(v).toBe('ok');

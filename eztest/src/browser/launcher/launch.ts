@@ -3,7 +3,8 @@
  *
  * - The protocol runs over `--remote-debugging-pipe` (fd 3 = commands to the
  *   browser, fd 4 = messages from it). No TCP port is opened.
- * - Each launch gets a fresh temporary profile, removed on close.
+ * - Each launch gets a fresh temporary profile, removed on close, on exit and
+ *   on SIGINT / SIGTERM / SIGHUP (see temp-dirs.ts; stale ones are swept).
  * - The browser is started in its own process group (POSIX) so close() can
  *   take down every helper process (renderers, GPU, zygote) at once.
  * - `--no-sandbox` is NOT added by default. It is added only when running as
@@ -15,16 +16,15 @@
  *   args yourself.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { debugLog } from '../debug.js';
 import { PipeTransport, WebSocketTransport, type Transport } from '../transport/transport.js';
 import { redactUrl } from '../transport/websocket.js';
 import { findChromium, type FoundBrowser } from './find.js';
 import { settleWithin } from '../util.js';
+import { makeTempDir, removeTrackedTempDirsSync, sweepStaleTempDirsOnce, trackTempDir, untrackTempDir } from './temp-dirs.js';
 
 export interface LaunchProcessOptions {
   executablePath?: string;
@@ -49,6 +49,8 @@ export interface LaunchProcessOptions {
   devtools?: boolean;
   /** Called with stderr lines (e.g. for logs). */
   onStderr?: (line: string) => void;
+  /** Kill the browser and remove its temporary profile on these signals (each default true). */
+  handleSignals?: SignalHandling;
 }
 
 export interface LaunchedProcess {
@@ -107,31 +109,94 @@ export function sandboxFromEnv(v = process.env.EZTEST_CHROMIUM_SANDBOX): boolean
   return !/^(0|false|no|off)$/i.test(v.trim());
 }
 
-/** Every live browser, so a crashing test process does not leave browsers behind. */
-const live = new Set<{ pid?: number; userDataDir?: string; temp: boolean }>();
+/** Which termination signals a launch wants handled (launch options handleSIGINT / handleSIGTERM / handleSIGHUP, default true). */
+export interface SignalHandling {
+  SIGINT?: boolean;
+  SIGTERM?: boolean;
+  SIGHUP?: boolean;
+}
+
+interface LiveBrowser {
+  pid?: number;
+  userDataDir?: string;
+  temp: boolean;
+  signals: Required<SignalHandling>;
+}
+
+const HANDLED_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+type HandledSignal = (typeof HANDLED_SIGNALS)[number];
+const SIGNAL_NUMBER: Record<HandledSignal, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
+
+/** Every live browser, so a crashing, exiting or interrupted process does not leave browsers or profiles behind. */
+const live = new Set<LiveBrowser>();
 let exitHookInstalled = false;
+const signalHooks = new Map<HandledSignal, () => void>();
+
+function removeProfile(b: LiveBrowser): void {
+  if (!b.temp || !b.userDataDir) return;
+  try {
+    rmSync(b.userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  } catch {
+    /* best effort; a later sweep removes it */
+  }
+  untrackTempDir(b.userDataDir);
+}
+
+/** Kill every live browser and remove every temporary profile and download folder of this process, now. */
+export function cleanupBrowsersNow(only?: (b: LiveBrowser) => boolean): void {
+  for (const b of [...live]) {
+    if (only && !only(b)) continue;
+    killTree(b.pid);
+    removeProfile(b);
+    live.delete(b);
+  }
+  // Download folders and other tracked dirs belong to the browsers just killed; with some browsers
+  // left running (they opted out of this signal) they stay.
+  if (!live.size) removeTrackedTempDirsSync();
+}
+
 function installExitHook(): void {
   if (exitHookInstalled) return;
   exitHookInstalled = true;
-  process.on('exit', () => {
-    for (const b of live) {
-      killTree(b.pid);
-      if (b.temp && b.userDataDir) {
-        try {
-          rmSync(b.userDataDir, { recursive: true, force: true });
-        } catch {
-          /* best effort */
-        }
-      }
-    }
-  });
+  process.on('exit', () => cleanupBrowsersNow());
 }
 
-/** Internal: remember a launched browser so it is killed (and its temporary profile removed) when this process exits. */
-export function trackLiveBrowser(record: { pid?: number; userDataDir?: string; temp: boolean }): () => void {
-  live.add(record);
+/**
+ * On SIGINT / SIGTERM / SIGHUP: kill the browsers that handle that signal and remove their
+ * temporary directories. When nothing else listens for the signal, the signal is raised again
+ * so the process ends the way it would have without EZTest (exit status 128 + signal number);
+ * a host that listens itself (the `eztest run` command) decides how to finish.
+ */
+function installSignalHook(sig: HandledSignal): void {
+  if (signalHooks.has(sig)) return;
+  const handler = () => {
+    debugLog('browser', `${sig}: closing ${live.size} browser(s) and removing temporary profiles`);
+    cleanupBrowsersNow((b) => b.signals[sig]);
+    if (process.listenerCount(sig) <= 1) {
+      process.removeListener(sig, handler);
+      signalHooks.delete(sig);
+      try {
+        process.kill(process.pid, sig);
+      } catch {
+        process.exit(128 + SIGNAL_NUMBER[sig]);
+      }
+    }
+  };
+  signalHooks.set(sig, handler);
+  process.on(sig, handler);
+}
+
+/** Internal: remember a launched browser so it is killed (and its temporary profile removed) when this process exits or is interrupted. */
+export function trackLiveBrowser(record: { pid?: number; userDataDir?: string; temp: boolean }, signals: SignalHandling = {}): () => void {
+  const entry: LiveBrowser = { ...record, signals: { SIGINT: signals.SIGINT ?? true, SIGTERM: signals.SIGTERM ?? true, SIGHUP: signals.SIGHUP ?? true } };
+  live.add(entry);
+  if (record.temp && record.userDataDir) trackTempDir(record.userDataDir);
   installExitHook();
-  return () => live.delete(record);
+  for (const sig of HANDLED_SIGNALS) if (entry.signals[sig] && (process.platform !== 'win32' || sig === 'SIGINT')) installSignalHook(sig);
+  sweepStaleTempDirsOnce();
+  return () => {
+    live.delete(entry);
+  };
 }
 
 /** Kill a process and its process group (all helper processes). */
@@ -181,7 +246,7 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
   const headless = opts.headless ?? !opts.devtools;
   const found = findChromium({ executablePath: opts.executablePath, channel: opts.channel, headlessShell: headless && process.env.EZTEST_HEADLESS_SHELL !== '0' });
   const temp = !opts.userDataDir;
-  const userDataDir = opts.userDataDir ?? mkdtempSync(join(tmpdir(), 'eztest-profile-'));
+  const userDataDir = opts.userDataDir ?? makeTempDir('profile');
   const args = chromiumCommandLine(opts, found, userDataDir);
   debugLog('browser', `launch ${found.executablePath} ${args.join(' ')}`);
   const env = { ...process.env, ...(opts.env ?? {}) };
@@ -191,9 +256,7 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
     stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  const record = { pid: child.pid, userDataDir, temp };
-  live.add(record);
-  installExitHook();
+  const untrack = trackLiveBrowser({ pid: child.pid, userDataDir, temp }, opts.handleSignals);
   const stderrTail: string[] = [];
   const onLine = (line: string) => {
     if (!line) return;
@@ -212,7 +275,7 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
   const exited = new Promise<number | null>((resolve) => {
     child.once('exit', (code) => {
       debugLog('browser', `process ${child.pid} exited with ${code}`);
-      live.delete(record);
+      untrack();
       resolve(code);
     });
     child.once('error', () => resolve(null));
@@ -222,8 +285,8 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
     child.once('error', (e) => resolve(e));
   });
   if (spawnError) {
-    live.delete(record);
-    if (temp) await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
+    untrack();
+    if (temp) await removeDir(userDataDir);
     throw new Error(`Failed to start the browser at ${found.executablePath}: ${spawnError.message}`);
   }
   const stdio = child.stdio as unknown as [unknown, Readable, Readable, Writable, Readable];
@@ -238,7 +301,7 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
       const done = await settleWithin(exited.then(() => true), 3000, false);
       killTree(child.pid);
       if (!done) await settleWithin(exited, 2000, undefined);
-      live.delete(record);
+      untrack();
       if (temp) await removeDir(userDataDir);
     }
   };
@@ -264,6 +327,7 @@ export async function removeDir(dir: string): Promise<void> {
   for (let i = 0; i < 5; i++) {
     try {
       await rm(dir, { recursive: true, force: true });
+      untrackTempDir(dir);
       return;
     } catch {
       await new Promise((r) => setTimeout(r, 200 * (i + 1)));

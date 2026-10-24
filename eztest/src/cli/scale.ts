@@ -604,7 +604,7 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
     .option('--expires <date>', 'expiry date (ISO)')
     .option('--config <file>', 'server config')
     .action(async (o: { name: string; grant: string[]; expires?: string; config?: string }) => {
-      const { loadServerConfig, createToken, AuditLog, ROLES } = await import('../server/index.js');
+      const { loadServerConfig, createToken, AuditLog, auditKeyFileFor, ROLES } = await import('../server/index.js');
       const cfg = await loadServerConfig({ file: o.config, cwd: io.cwd, env: io.env });
       const store = await openServerStore(cfg);
       try {
@@ -614,7 +614,7 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
           return { project, role: role as (typeof ROLES)[number] };
         });
         const { token: t, record } = await createToken(store, { name: o.name, grants, createdBy: `cli:${process.env.USER ?? 'admin'}`, expiresAt: o.expires });
-        await new AuditLog(store).append({ actor: `cli:${process.env.USER ?? 'admin'}`, action: 'token.create', target: record.id, details: { name: o.name, grants } });
+        await new AuditLog(store, auditKeyFileFor(cfg)).append({ actor: `cli:${process.env.USER ?? 'admin'}`, action: 'token.create', target: record.id, details: { name: o.name, grants } });
         io.out(t);
         io.err(`token ${record.id} created for ${grants.map((g) => `${g.project}:${g.role}`).join(', ')}; it is shown once - store it as a CI secret`);
       } finally {
@@ -626,12 +626,14 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
     .description('verify the audit log hash chain')
     .option('--config <file>', 'server config')
     .action(async (o: { config?: string }) => {
-      const { loadServerConfig, AuditLog } = await import('../server/index.js');
-      const store = await openServerStore(await loadServerConfig({ file: o.config, cwd: io.cwd, env: io.env }));
+      const { loadServerConfig, AuditLog, auditKeyFileFor } = await import('../server/index.js');
+      const cfg = await loadServerConfig({ file: o.config, cwd: io.cwd, env: io.env });
+      const store = await openServerStore(cfg);
       try {
-        const v = await new AuditLog(store).verify();
+        const v = await new AuditLog(store, auditKeyFileFor(cfg)).verify();
         io.out(`${v.ok ? 'VALID' : 'TAMPERED'}: ${v.entries} audit entries, head ${v.head.slice(0, 16)}...`);
         for (const p of v.problems) io.err(`  ${p}`);
+        for (const w of v.warnings) io.err(`  warning: ${w}`);
         process.exitCode = v.ok ? 0 : 1;
       } finally {
         await store.close();

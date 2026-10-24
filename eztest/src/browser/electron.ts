@@ -9,8 +9,8 @@ import { TypedEmitter } from './events.js';
 import { TimeoutError } from './errors.js';
 import { CDPConnection, type CDPSession } from './transport/connection.js';
 import { WebSocketTransport } from './transport/transport.js';
-import { CrBrowser, type ChromiumBrowserType, type CrBrowserContext } from './chromium/browser.js';
-import type { CrPage } from './chromium/page.js';
+import { ChromiumBrowser, type ChromiumBrowserType, type ChromiumContext } from './chromium/browser.js';
+import type { ChromiumPage } from './chromium/page.js';
 import { KEEP_NAMES_SHIM, deserializeValue, functionSource, pageCodec, serializeArgument } from './serializer.js';
 import { settleWithin, withTimeout } from './util.js';
 
@@ -27,7 +27,7 @@ export interface ElectronLaunchOptions {
 
 export interface ElectronEvents {
   close: ElectronApplication;
-  window: CrPage;
+  window: ChromiumPage;
   console: unknown;
 }
 
@@ -36,7 +36,7 @@ const CODEC = `(${pageCodec.toString()})()`;
 export class ElectronApplication extends TypedEmitter<ElectronEvents> {
   constructor(
     private readonly proc: ChildProcess,
-    private readonly browser: CrBrowser,
+    private readonly browser: ChromiumBrowser,
     private readonly node: CDPSession,
     private readonly nodeConnection: CDPConnection,
   ) {
@@ -45,15 +45,15 @@ export class ElectronApplication extends TypedEmitter<ElectronEvents> {
     proc.once('exit', () => this.emitEvent('close', this));
   }
 
-  context(): CrBrowserContext {
+  context(): ChromiumContext {
     return this.browser.defaultContext();
   }
 
-  windows(): CrPage[] {
+  windows(): ChromiumPage[] {
     return this.context().pages();
   }
 
-  async firstWindow(options: { timeout?: number } = {}): Promise<CrPage> {
+  async firstWindow(options: { timeout?: number } = {}): Promise<ChromiumPage> {
     const existing = this.windows()[0];
     if (existing) return existing;
     return this.waitForEvent('window', { timeout: options.timeout ?? 30_000 });
@@ -125,7 +125,7 @@ export class ElectronLauncher {
       proc.stdout?.on('data', onData);
       proc.once('exit', (code) => reject(new Error(`Electron exited with code ${code} before it was ready:\n${buf.slice(-2000)}`)));
       proc.once('error', reject);
-    }), timeout, () => `electron.launch: Timeout ${timeout}ms exceeded waiting for the DevTools endpoints`).catch((e) => {
+    }), timeout, () => `electron.launch: timed out after ${timeout} ms waiting for the DevTools endpoints`).catch((e) => {
       proc.kill('SIGKILL');
       throw e instanceof TimeoutError ? e : e;
     });
@@ -134,7 +134,7 @@ export class ElectronLauncher {
     await nodeConnection.root.send('Runtime.enable').catch(() => undefined);
     await nodeConnection.root.send('Runtime.runIfWaitingForDebugger').catch(() => undefined);
     const transport = await WebSocketTransport.connect(endpoints.devtools, timeout);
-    const browser = await CrBrowser.create(new CDPConnection(transport), undefined, 0, this.type);
+    const browser = await ChromiumBrowser.create(new CDPConnection(transport), undefined, 0, this.type);
     const ctx = browser.defaultContext();
     if (options.recordVideo) Object.assign(ctx.options, { recordVideo: options.recordVideo });
     return new ElectronApplication(proc, browser, nodeConnection.root, nodeConnection);

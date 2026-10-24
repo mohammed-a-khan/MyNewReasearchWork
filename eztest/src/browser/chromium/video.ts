@@ -10,7 +10,7 @@ import { writeFile } from 'node:fs/promises';
 import type { RecordVideoOptions } from '../types.js';
 import { encodeWebM, videoChaptersVtt, type VideoChapter, type VideoFrame } from '../video/webm.js';
 import { deferred } from '../util.js';
-import type { CrPage } from './page.js';
+import type { ChromiumPage } from './page.js';
 
 export class Video {
   private readonly file: string;
@@ -23,7 +23,7 @@ export class Video {
   /** Step marks: when (seconds) and the step text, for WebVTT chapters. */
   private readonly marks: Array<{ at: number; text: string }> = [];
 
-  constructor(private readonly page: CrPage, private readonly opts: RecordVideoOptions) {
+  constructor(private readonly page: ChromiumPage, private readonly opts: RecordVideoOptions) {
     this.file = join(opts.dir, `${randomUUID().replace(/-/g, '')}.webm`);
   }
 

@@ -40,6 +40,7 @@ import {
   setControl,
   toIsoDate,
   valuesEqual,
+  waitForListViewHeader,
   waitForModal,
   type FieldIo,
   type SfDateFormat,
@@ -300,6 +301,8 @@ export function createSalesforceSteps(opts: SalesforceStepsOptions): Record<Sale
       const d = await resolver.resolveObject(str(step, ctx, 'object'));
       const t = timeout(step);
       if (!onListView(page, d.name)) await gotoTab(page, ctx, step, d);
+      // The header (and its New button) renders after the URL changes: read it once it is there.
+      if (!(await waitForListViewHeader(page, t))) throw new SalesforceUiError(`The ${d.labelPlural} list view did not finish loading within ${t} ms (no list view header)`, 'SF_TAB_FAILED');
       const btn = page.locator('lst-list-view-manager-header a[title="New"], lst-list-view-manager-header button[name="New"]');
       if ((await btn.count()) !== 1) throw new SalesforceUiError(`No "New" button on the ${d.labelPlural} list view (the user may not be allowed to create ${d.labelPlural})`, 'SF_NO_CREATE');
       await btn.click({ timeout: t });

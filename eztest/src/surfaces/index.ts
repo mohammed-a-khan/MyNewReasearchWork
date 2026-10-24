@@ -1,5 +1,6 @@
 export * from './api.js';
 export * from './api-tls.js';
+export * from './proxy.js';
 export * from './jsonpath.js';
 export * from './assertions.js';
 export * from './graphql.js';

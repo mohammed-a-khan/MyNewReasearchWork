@@ -10,7 +10,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { EzTestError, NotSupportedError, renderTemplate, type CompareOp, type Step } from '../core/index.js';
 import { cachedSpec, validateAgainstDefinition } from '../contracts/openapi.js';
 import type { ContractRecorder } from '../contracts/consumer.js';
-import { getPath, validateSchema } from '../surfaces/index.js';
+import { envProxyFetch, getPath, validateSchema } from '../surfaces/index.js';
 import { compareOp } from '../runner/conditions-advanced.js';
 import { maskDeep } from '../runner/dom.js';
 import { safeName } from '../runner/evidence.js';
@@ -47,6 +47,8 @@ export interface IntegrationRuntimeOptions {
   templateSyntax?: 'dollar' | 'mustache';
   /** How far back file waits look at modification times (default 10 minutes). */
   fileLookbackMs?: number;
+  /** Cleanup problems (a consumer group the broker kept, ...). Default: a process warning. */
+  onWarning?: (message: string) => void;
 }
 
 interface JourneyState {
@@ -493,6 +495,39 @@ export class Integration implements IntegrationRuntime {
     return { ...(step.captureAs ? { captured: { [step.captureAs]: v } } : {}), evidence: [ref.id] };
   }
 
+  /**
+   * Watch for a batch job's completion file (batch.jobs.<name>.doneFile): the files matching the
+   * pattern before the job starts are noted, and the job is done when a new one appears (or a noted
+   * one changes). Remote clocks are never compared with ours.
+   */
+  private async doneFileWatch(job: string, d: { sftp: string; dir: string; pattern: string }, vars: Record<string, unknown>): Promise<{ server: string; wait(ms: number, totalMs?: number): Promise<RemoteFile> }> {
+    const server = renderTemplate(d.sftp, vars);
+    const dir = renderTemplate(d.dir, vars);
+    const pattern = renderTemplate(d.pattern, vars);
+    const s = this.sshSession(server, 'sftp');
+    const re = fileMatcher(pattern);
+    const matching = async () => (await s.list(dir)).filter((f) => !f.isDirectory && re.test(f.name));
+    const before = new Map((await matching()).map((f) => [f.name, `${f.modifiedAt}:${f.size}`]));
+    return {
+      server,
+      wait: async (ms: number, totalMs = ms) => {
+        const deadline = Date.now() + ms;
+        let seen: RemoteFile[] = [];
+        for (;;) {
+          seen = await matching();
+          const fresh = seen.find((f) => before.get(f.name) !== `${f.modifiedAt}:${f.size}`);
+          if (fresh) return fresh;
+          if (Date.now() >= deadline) break;
+          await new Promise((r) => setTimeout(r, Math.min(this.opts.files?.pollMs ?? 1000, Math.max(0, deadline - Date.now()))));
+        }
+        throw new EzTestError(
+          `Batch job "${job}" finished, but its completion file (matching "${pattern}" in ${dir} on SFTP ${server}) did not appear within ${msText(totalMs)} of the job starting${seen.length ? ` (only files that were there before the job: ${seen.map((f) => f.name).slice(0, 5).join(', ')})` : ''}`,
+          'BATCH_NOT_DONE',
+        );
+      },
+    };
+  }
+
   private async batchRun(step: Step, a: Args, ctx: StepContext): Promise<IntegrationOutcome> {
     const name = ctx.interpolate(String(a.job));
     const job = this.opts.batch?.jobs?.[name];
@@ -505,14 +540,24 @@ export class Integration implements IntegrationRuntime {
       if (!host) throw new EzTestError(`batch.jobs.${name}: no SSH host "${job.ssh}" in files.ssh`, 'BATCH_CONFIG');
       const command = renderTemplate(job.command, vars);
       if (!commandAllowed(command, host.allowCommands ?? [])) throw new EzTestError(`Batch job "${name}" runs "${command}", which is not in files.ssh.${job.ssh}.allowCommands`, 'SSH_NOT_ALLOWED');
+      const started = Date.now();
+      // The completion file: what is there before the job starts does not count.
+      const done = job.doneFile ? await this.doneFileWatch(name, job.doneFile, vars) : undefined;
       const r = await this.sshSession(job.ssh, 'ssh').exec(command, timeout);
-      return this.commandOutcome(step, ctx, `batch job ${name}`, r, job.successExitCode ?? 0);
+      const out = await this.commandOutcome(step, ctx, `batch job ${name}`, r, job.successExitCode ?? 0);
+      if (!done) return out;
+      const file = await done.wait(Math.max(0, timeout - (Date.now() - started)), timeout);
+      const rec = { name: file.name, path: file.path, modifiedAt: file.modifiedAt, server: done.server };
+      const ref = await ctx.evidence.store('data', `batch/${safeName(ctx.journey.id)}/${safeName(step.id)}-done.json`, JSON.stringify({ job: name, doneFile: rec }, null, 2), { journeyId: ctx.journey.id, stepId: step.id, description: `batch job ${name}: completion file` });
+      const captured = out.captured && step.captureAs ? { [step.captureAs]: { ...(out.captured[step.captureAs] as Record<string, unknown>), doneFile: rec } } : undefined;
+      if (captured && step.captureAs) ctx.ledger.set(step.captureAs, captured[step.captureAs]);
+      return { ...(captured ? { captured } : {}), evidence: [...(out.evidence ?? []), ref.id] };
     }
     // HTTP job: start, then poll the status URL until a success or failure status.
     const headers: Record<string, string> = { 'content-type': 'application/json', ...(job.asRole && this.opts.apiAuth ? await this.opts.apiAuth(job.asRole, ctx) : {}) };
     const [method, url] = /^(GET|POST|PUT|PATCH)\s+(\S+)$/i.test(job.start.trim()) ? job.start.trim().split(/\s+/) : ['POST', job.start];
     const started = Date.now();
-    const res = await fetch(resolveUrl(renderTemplate(url, vars), ctx.baseUrl), { method: method.toUpperCase(), headers, ...(job.body !== undefined ? { body: renderTemplate(JSON.stringify(job.body), vars) } : {}) });
+    const res = await envProxyFetch(resolveUrl(renderTemplate(url, vars), ctx.baseUrl), { method: method.toUpperCase(), headers, ...(job.body !== undefined ? { body: renderTemplate(JSON.stringify(job.body), vars) } : {}) });
     const startBody = (await res.json().catch(() => ({}))) as unknown;
     if (!res.ok) throw new EzTestError(`Batch job "${name}" did not start: HTTP ${res.status}`, 'BATCH_FAILED');
     const jobId = getPath(startBody, job.idPath ?? '$.id');
@@ -520,7 +565,7 @@ export class Integration implements IntegrationRuntime {
     let status = '';
     let last: unknown;
     while (Date.now() - started < timeout) {
-      const r = await fetch(statusUrl, { headers });
+      const r = await envProxyFetch(statusUrl, { headers });
       last = await r.json().catch(() => ({}));
       status = String(getPath(last, job.statusPath ?? '$.status') ?? '').toUpperCase();
       if ((job.success ?? []).map((s) => s.toUpperCase()).includes(status) || (job.failure ?? []).map((s) => s.toUpperCase()).includes(status)) break;
@@ -584,7 +629,11 @@ export class Integration implements IntegrationRuntime {
   async close(): Promise<void> {
     for (const s of this.openSubs) await s.close().catch(() => undefined);
     this.openSubs.clear();
-    for (const d of this.drivers.values()) await d.close().catch(() => undefined);
+    const warn = this.opts.onWarning ?? ((m: string) => process.emitWarning(m, 'EZTestMessaging'));
+    for (const d of this.drivers.values()) {
+      await d.close().catch((e: Error) => warn(`closing ${d.kind} broker "${d.name}" failed: ${e.message}`));
+      for (const w of (d as { closeWarnings?: string[] }).closeWarnings?.splice(0) ?? []) warn(w);
+    }
     for (const s of this.ssh.values()) s.close();
     for (const c of this.grpcClients.values()) c.close();
     this.drivers.clear();

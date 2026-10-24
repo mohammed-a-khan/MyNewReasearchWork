@@ -4,6 +4,11 @@
  * message. Listening on an exchange binds a private, auto-deleted queue;
  * listening on a queue consumes from it, acknowledges only the messages a
  * step matched, and returns the rest to the queue when the subscription closes.
+ *
+ * Queues belong to the application: a missing queue is an error
+ * (AMQP_QUEUE_MISSING) unless the broker config says `declare: true`, and a
+ * permission refusal from the broker is reported as such (BUS_AUTH), never
+ * taken for a missing queue.
  */
 import { randomUUID } from 'node:crypto';
 import { BusError, BusSubscription, decodePayload, loadClient, payloadText, type BusDestination, type BusDriver, type BusMessage, type OutgoingMessage, type PublishReceipt, type SubscribeOptions } from './types.js';
@@ -13,7 +18,9 @@ export interface AmqpOptions {
   url: string;
   /** Exchange type asserted when publishing to an exchange that does not exist (default: do not assert). */
   exchangeType?: 'topic' | 'direct' | 'fanout' | 'headers';
-  /** Declare queues that do not exist yet (durable) before using them (default true). */
+  /** Declare queues that do not exist yet (durable) before using them (default false: a missing queue is an error). */
+  declare?: boolean;
+  /** Older name of `declare`. */
   assertQueues?: boolean;
   client?: unknown;
 }
@@ -44,29 +51,65 @@ export class AmqpBusDriver implements BusDriver {
 
   private async confirmChannel(): Promise<Any> {
     if (this.confirm) return this.confirm;
-    this.confirm = await (await this.connection()).createConfirmChannel();
-    this.confirm.on('error', () => {
-      this.confirm = undefined;
+    const ch = await (await this.connection()).createConfirmChannel();
+    ch.on('error', (e: Error) => {
+      // The broker closes the channel on a refusal: keep why, the publish reports it.
+      this.confirmError = e;
+      if (this.confirm === ch) this.confirm = undefined;
     });
-    return this.confirm;
+    ch.on('close', () => {
+      if (this.confirm === ch) this.confirm = undefined;
+    });
+    this.confirm = ch;
+    return ch;
   }
+
+  private confirmError?: Error;
 
   private readonly knownQueues = new Set<string>();
 
-  /** Declare a queue that does not exist yet (durable); an existing queue is used as it is. */
+  /** A broker error as EZTest reports it: a refusal is a permission problem, a 404 a missing queue. */
+  private brokerError(e: unknown, what: string, queue?: string): BusError {
+    const err = e as { code?: number; message?: string };
+    const msg = err.message ?? String(e);
+    if (err.code === 403 || /ACCESS[_-]REFUSED/i.test(msg)) {
+      return new BusError(`RabbitMQ broker "${this.name}" refused ${what}: ${msg}. The user of messaging.brokers.${this.name} needs permission for it (rabbitmqctl set_permissions).`, 'BUS_AUTH', queue ? { queue } : undefined);
+    }
+    if (queue && (err.code === 404 || /NOT[_-]FOUND/i.test(msg))) {
+      return new BusError(`RabbitMQ queue "${queue}" does not exist on broker "${this.name}". Create it (the application normally declares it), or set declare: true on messaging.brokers.${this.name} to let EZTest declare it.`, 'AMQP_QUEUE_MISSING', { queue });
+    }
+    return new BusError(`RabbitMQ broker "${this.name}": ${what} failed: ${msg}`, 'BUS_ERROR');
+  }
+
+  private get declares(): boolean {
+    return this.opts.declare ?? this.opts.assertQueues ?? false;
+  }
+
+  /**
+   * The queue must exist: checked (passively) once per driver. With `declare: true` a missing
+   * queue is declared (durable); otherwise it is an error.
+   */
   private async ensureQueue(name: string): Promise<void> {
-    if (this.knownQueues.has(name) || this.opts.assertQueues === false) return;
+    if (this.knownQueues.has(name)) return;
     const conn = await this.connection();
     const probe = await conn.createChannel();
     probe.on('error', () => undefined);
     try {
       await probe.checkQueue(name);
       await probe.close().catch(() => undefined);
-    } catch {
+    } catch (e) {
+      const err = this.brokerError(e, `access to queue "${name}"`, name);
+      if (err.code !== 'AMQP_QUEUE_MISSING' || !this.declares) throw err;
       // checkQueue closes the channel on 404: declare the queue on a fresh one.
       const ch = await conn.createChannel();
-      await ch.assertQueue(name, { durable: true });
-      await ch.close().catch(() => undefined);
+      ch.on('error', () => undefined);
+      try {
+        await ch.assertQueue(name, { durable: true });
+      } catch (e2) {
+        throw this.brokerError(e2, `declaring queue "${name}"`);
+      } finally {
+        await ch.close().catch(() => undefined);
+      }
     }
     this.knownQueues.add(name);
   }
@@ -81,13 +124,20 @@ export class AmqpBusDriver implements BusDriver {
       contentType: msg.contentType ?? (looksJson(msg.payload) ? 'application/json' : 'text/plain'),
     };
     const body = Buffer.from(typeof msg.payload === 'string' ? msg.payload : msg.payload);
-    if (dest.type === 'exchange') {
-      if (this.opts.exchangeType) await ch.assertExchange(dest.name, this.opts.exchangeType, { durable: true });
-      ch.publish(dest.name, dest.routingKey ?? msg.key ?? '', body, props);
-    } else {
-      ch.sendToQueue(dest.name, body, props);
+    this.confirmError = undefined;
+    try {
+      if (dest.type === 'exchange') {
+        if (this.opts.exchangeType) await ch.assertExchange(dest.name, this.opts.exchangeType, { durable: true });
+        ch.publish(dest.name, dest.routingKey ?? msg.key ?? '', body, props);
+      } else {
+        ch.sendToQueue(dest.name, body, props);
+      }
+      await ch.waitForConfirms();
+    } catch (e) {
+      // Let the channel's own close reason (ACCESS_REFUSED, NOT_FOUND) arrive before reporting.
+      await new Promise((r) => setTimeout(r, 20));
+      throw this.brokerError(this.confirmError ?? e, `publishing to ${dest.type} "${dest.name}"`, dest.type === 'queue' ? dest.name : undefined);
     }
-    await ch.waitForConfirms();
     return { messageId };
   }
 
@@ -109,7 +159,7 @@ export class AmqpBusDriver implements BusDriver {
     const ownQueue = dest.type === 'exchange';
     await ch.prefetch(500);
     const deliveries = new Map<BusMessage, Any>();
-    const { consumerTag } = await ch.consume(queue, (m: Any) => {
+    const consuming = ch.consume(queue, (m: Any) => {
       if (!m) return;
       const p = m.properties ?? {};
       const headers: Record<string, string> = {};
@@ -123,6 +173,13 @@ export class AmqpBusDriver implements BusDriver {
       else deliveries.set(bm, m);
       sub.push(bm);
     }, { noAck: false });
+    let consumerTag: string;
+    try {
+      ({ consumerTag } = await consuming);
+    } catch (e) {
+      this.channels.delete(ch);
+      throw this.brokerError(e, `consuming from queue "${queue}"`, ownQueue ? undefined : queue);
+    }
     if (!ownQueue) {
       sub.onTake = (bm) => {
         const d = deliveries.get(bm);

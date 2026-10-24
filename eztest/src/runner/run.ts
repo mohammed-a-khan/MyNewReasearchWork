@@ -1,6 +1,7 @@
 /** runJourneys: the top-level executor. */
 import { bindJourney } from '../elements/bind.js';
 import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import type { Browser } from '../browser/index.js';
@@ -38,6 +39,7 @@ import type { HealthCheckResult, RunHealth } from '../core/index.js';
 import { driverFor, noDriverJourney, platformOf, type PlatformDriver } from './platform.js';
 import { bddRecord } from './bdd-run.js';
 import { bddAllJourneys, clearBddAllState } from './bdd-all.js';
+import { RunCancelledError, registerPartialRunWriter } from './cancel.js';
 
 /** Run the Gherkin BeforeAll / AfterAll hook journeys of a run's scenarios (tagged hook, bdd). */
 async function runBddAllHooks(journeys: Journey[], kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv): Promise<JourneyResult[]> {
@@ -326,6 +328,16 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     return r;
   };
   const results: JourneyResult[] = new Array(journeys.length);
+  // Cancelled and unable to wind down (a second signal, the grace period ran out): run.json as it stands.
+  const unregisterPartial = registerPartialRunWriter(() => {
+    const now = Array.from(results, (r, i) => r ?? cancelledJourney(journeys[i], envOf(journeys[i]).browserName));
+    const partial: RunResult = {
+      runId, startedAt, finishedAt: nowIso(), durationMs: Date.now() - started, journeys: now, summary: summarize(now),
+      environment: { node: process.version, platform: process.platform, browser: targets.map((t) => t.id).join(','), ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}) },
+      cancelled: { reason: cancelReason(options.signal), at: nowIso(), partial: true },
+    };
+    writeFileSync(join(runDir, 'run.json'), JSON.stringify(partial, null, 2));
+  });
   // Dependencies (Depends on:): prerequisites first, dependents skipped when a prerequisite did not pass.
   const plan = planDependencies(journeys);
   const done = new Set<number>();
@@ -384,6 +396,8 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   };
   /** A journey is finished: record it, let dependents go, feed the circuit breaker. */
   const settle = async (idx: number, r: JourneyResult, emitEnd: boolean) => {
+    // A journey that was running when the run was cancelled: its failure is the cancel, not the product.
+    if (cancelledBySignal(options.signal) && (r.status === 'failed' || r.status === 'error') && r.error?.name !== 'CancelledError') r = asCancelled(r, cancelReason(options.signal));
     results[idx] = r;
     done.add(idx);
     queue.changed();
@@ -434,7 +448,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
           await store.save();
           deferred.push({ idx, j, attempts, ...(ho ? { seed: ho.seed, summary: ho.summary } : {}) });
         } else {
-          await settle(idx, await finalize(j, attempts, ho?.summary), true);
+          await settle(idx, withLostLocks(await finalize(j, attempts, ho?.summary), item.locksLost?.(), logger), true);
         }
       } finally {
         await item.release();
@@ -485,6 +499,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     for (const b of [...browsers.values(), ...retired]) await b.close().catch(() => undefined);
     extensions?.close();
     options.signal?.removeEventListener('abort', disarm);
+    unregisterPartial();
   }
 
   const proposals = collectHealProposals({ runId, journeys: results }, journeys);
@@ -513,6 +528,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     health.circuit = { ...breaker.open, notRun: results.filter((r) => r.error?.name === 'EnvironmentUnavailable').length };
   }
   if (health.preflight || health.circuit) run.health = health;
+  if (cancelledBySignal(options.signal)) run.cancelled = { reason: cancelReason(options.signal), at: nowIso() };
   if (multiBrowser) run.browsers = browserSummaries(results, wanted, browsers);
   // Ledgers can hold secrets (credentials, secret shared-store values): masked in the stored run.
   if (options.mask) for (const r of results) r.ledger = maskDeep(r.ledger, options.mask) as Record<string, unknown>;
@@ -521,6 +537,33 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   options.events?.emit({ type: 'run:end', runId });
   logger.info('run end', { runId, ...run.summary });
   return run;
+}
+
+/** A journey whose resource locks were lost while it ran: recorded on its result (and logged), never silent. */
+function withLostLocks(r: JourneyResult, lost: string[] | undefined, logger: { warn(m: string, d?: Record<string, unknown>): void }): JourneyResult {
+  if (!lost?.length) return r;
+  (r.reliability ??= {}).locksLost = lost;
+  logger.warn('resource lock lost while the journey ran', { journeyId: r.journeyId, locks: lost });
+  return r;
+}
+
+/** Was the run cancelled from outside (a signal, see cancel.ts), as opposed to stopped early (--max-failures)? */
+function cancelledBySignal(signal: AbortSignal | undefined): boolean {
+  return !!signal?.aborted && signal.reason instanceof RunCancelledError;
+}
+
+/** The reason of an aborted run signal ("SIGTERM", ...). */
+function cancelReason(signal: AbortSignal | undefined): string {
+  const r = signal?.reason;
+  if (r instanceof RunCancelledError) return r.signal;
+  if (typeof r === 'string') return r;
+  return 'aborted';
+}
+
+/** A journey that was running when the run was cancelled: kept with its steps, recorded as cancelled. */
+function asCancelled(r: JourneyResult, reason: string): JourneyResult {
+  const was = r.error?.message ?? r.steps.find((s) => s.error)?.error?.message;
+  return { ...r, status: 'skipped', error: { message: `Run cancelled (${reason}) while the journey was running${was ? `: ${was.split('\n')[0]}` : ''}`, name: 'CancelledError' } };
 }
 
 /** Per-browser summaries of a cross-browser run (the combined one is RunResult.summary). */

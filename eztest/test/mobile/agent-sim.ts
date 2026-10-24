@@ -32,6 +32,10 @@ export class AgentSimulator {
   /** Commands the simulator refuses with "not supported". */
   unsupported = new Set<string>();
   shutdowns = 0;
+  /** The session token the agent was started with (like the real agents, it then answers nothing without it). */
+  token?: string;
+  /** Requests refused for a missing or wrong token. */
+  refused = 0;
   private server?: Server;
   port = 0;
 
@@ -152,6 +156,10 @@ export class AgentSimulator {
         };
         const ok = (value: unknown = null) => send(200, { value });
         const err = (status: number, code: string, message: string) => send(status, { error: { code, message } });
+        if (this.token !== undefined && req.headers['x-eztest-agent-token'] !== this.token) {
+          this.refused++;
+          return err(401, 'unauthorized', 'missing or wrong session token');
+        }
         try {
           const route = `${req.method} ${path.replace(/^\/element\/[^/]+/, '/element/:id').replace(/\/attribute\/.+$/, '/attribute/:name')}`;
           if (this.unsupported.has(route)) return err(501, 'not supported', `${route} is not supported on this device`);

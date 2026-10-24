@@ -67,7 +67,7 @@ describe('row step', () => {
     expect(await q(page, [{ row: 'Acme' }, { role: 'button', name: 'Edit', exact: true }])).toEqual(['e2']);
     expect(await q(page, [{ row: 'Yan' }, { role: 'button', name: 'Open' }])).toEqual(['ce2']);
     expect(await q(page, [{ row: 'Bob' }])).toEqual(['r3']);
-    // A substring can hit several rows (the header "Action" too): strict mode then reports them.
+    // A substring can hit several rows (the header "Action" too): the single-match check then reports them.
     expect((await q(page, [{ row: 'A' }])).length).toBeGreaterThan(2);
   });
 });

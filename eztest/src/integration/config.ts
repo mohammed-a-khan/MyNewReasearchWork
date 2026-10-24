@@ -34,8 +34,16 @@ export const BrokerSchema = z.discriminatedUnion('type', [
     ssl: z.boolean().optional(),
     sasl: z.object({ mechanism: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']), username: z.string().min(1), password: secret }).optional(),
     groupPrefix: z.string().optional(),
+    /** Create missing topics (default false: publishing to or waiting on a missing topic is an error). */
+    createTopics: z.boolean().optional(),
   }),
-  z.object({ type: z.literal('amqp'), url: z.string().min(1), exchangeType: z.enum(['topic', 'direct', 'fanout', 'headers']).optional(), assertQueues: z.boolean().optional() }),
+  z.object({
+    type: z.literal('amqp'), url: z.string().min(1), exchangeType: z.enum(['topic', 'direct', 'fanout', 'headers']).optional(),
+    /** Declare missing queues (durable) before using them (default false: a missing queue is an error). */
+    declare: z.boolean().optional(),
+    /** Older name of `declare`. */
+    assertQueues: z.boolean().optional(),
+  }),
   z.object({
     type: z.literal('mqtt'), url: z.string().min(1), username: z.string().optional(), password: secret.optional(), clientId: z.string().optional(),
     protocolVersion: z.union([z.literal(4), z.literal(5)]).optional(), qos: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
@@ -82,8 +90,12 @@ export const SftpServerSchema = z.object({
   /** Private key file (relative to the project). */
   privateKey: z.string().optional(),
   passphrase: secret.optional(),
-  /** Expected host key SHA-256 fingerprint (base64, as `ssh-keygen -lf` prints after "SHA256:"); recommended outside test labs. */
+  /** Expected host key SHA-256 fingerprint (base64, as `ssh-keygen -lf` prints after "SHA256:"); checked instead of known_hosts. */
   hostKeySha256: z.string().optional(),
+  /** known_hosts file host keys are checked against (relative to the project). Default .eztest/known_hosts. */
+  knownHosts: z.string().optional(),
+  /** Accept and record the key of a host known_hosts does not list yet. Default false: an unknown host is refused. */
+  trustOnFirstUse: z.boolean().optional(),
   /** Base directory remote paths are relative to. */
   root: z.string().optional(),
 });
@@ -106,7 +118,10 @@ export const BatchJobSchema = z.union([
     ssh: z.string().min(1),
     command: z.string().min(1),
     successExitCode: z.number().int().default(0),
-    /** Optional completion check: a file that appears when the job is done. */
+    /**
+     * Optional completion check: after the command succeeds, wait (within the step's time) for a
+     * new file matching `pattern` (glob, ${var}s allowed) in `dir` on the files.sftp server `sftp`.
+     */
     doneFile: z.object({ sftp: z.string(), dir: z.string(), pattern: z.string() }).optional(),
   }),
   z.object({

@@ -45,6 +45,7 @@ import { importFiles, importFormats, verifyImported, writeImported, writeImportA
 import { loadImporterPlugins, parseImporterOptions } from './importer-plugins.js';
 import type { ReportFormat } from '../report/index.js';
 import { DEFAULT_PLACEHOLDER, validateExamplesSource, fastRunOptions } from '../runner/index.js';
+import { installRunCancellation } from '../runner/cancel.js';
 import { registerLintCommand } from './lint.js';
 import { registerVisualCommands } from '../lenses/visual-cli.js';
 import { registerSecurityCommands } from './security.js';
@@ -273,9 +274,10 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       let runId = '';
       const events = new EventBus();
       // --max-failures: cancel the run once enough journeys failed; journeys not started are skipped.
-      const cancel = o.maxFailures ? new AbortController() : undefined;
+      // SIGINT / SIGTERM / SIGHUP cancel it too (src/runner/cancel.ts): partial run.json, exit 130 / 143 / 129.
+      const cancel = new AbortController();
       let failures = 0;
-      if (cancel) {
+      if (o.maxFailures) {
         events.on((e: EzEvent) => {
           if (e.type === 'journey:end' && (e.status === 'failed' || e.status === 'error') && ++failures >= o.maxFailures && !cancel.signal.aborted) {
             out(`max failures reached (${failures}): cancelling the rest of the run`);
@@ -317,7 +319,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
           library,
           ...(o.trace ? { trace: true } : {}),
           ...(locks ? { locks } : {}),
-          ...(cancel ? { signal: cancel.signal } : {}),
+          signal: cancel.signal,
           ...(o.retryStrategy ? { retryStrategy: o.retryStrategy } : {}),
           screenshots: o.screenshots ?? cfg.screenshots ?? 'every-step',
           lenses: lensesFromConfig(cfg.lenses, io.cwd, { updateBaselines: !!o.updateBaselines, branchBaselines: cfg.vcs.branchScope.baselines, defaultBranch: cfg.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(cfg) }),
@@ -331,13 +333,21 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         },
       });
       let run: RunResult;
+      const interrupt = installRunCancellation({ controller: cancel, log: (l) => io.err(l) });
       try {
         run = await engine.run(journeys);
       } finally {
         await engine.close();
         addons.off();
+        interrupt.dispose();
       }
       const runDir = join(engine.runOptions.outputDir, run.runId);
+      if (interrupt.cancelledBy) {
+        plugins.off();
+        io.err(`run cancelled by ${interrupt.cancelledBy}: ${run.summary.total} journeys, ${run.summary.passed} passed, ${run.summary.failed} failed, ${run.summary.skipped} skipped; partial results in ${join(runDir, 'run.json')}`);
+        process.exitCode = interrupt.exitCode;
+        return;
+      }
       await recordSelection(runDir, prepared);
       const s = run.summary;
       if (log) log.info('run summary', { runId: run.runId, ...s, runDir });

@@ -199,7 +199,7 @@ describe('shared store on the results server', () => {
     expect((await b.load('db-password')).value).toBe('pw-SERVER-secret-9');
     const raw = await s.req('GET', '/api/projects/payments/store/sit/db-password', { token: tester });
     expect(raw.text).not.toContain('pw-SERVER-secret-9');
-    expect(raw.json).toMatchObject({ secret: true, sealed: expect.stringMatching(/^EZS1:/) });
+    expect(raw.json).toMatchObject({ secret: true, sealed: expect.stringMatching(/^EZS2:/) });
     const plain = await s.req('PUT', '/api/projects/payments/store/sit/bad', { token: tester, body: { secret: true, value: 'plain' } });
     expect(plain.status).toBe(400);
     const db = await readFile(join(s.dataDir, 'eztest.db'));

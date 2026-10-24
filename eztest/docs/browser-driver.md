@@ -29,7 +29,7 @@ firefox/           the WebDriver BiDi engine (see "Firefox engine")
 chromium/          the CDP engine
   browser.ts       Browser, BrowserContext (Target.createBrowserContext), downloads, BrowserType
   page.ts          Page, its target sessions (page + out-of-process iframes), events, emulation, screenshots
-  frame.ts         Frame: lifecycle, execution contexts (main world + isolated utility world), navigation
+  frame.ts         Frame: lifecycle, execution contexts (main world + isolated engine world), navigation
   exec-context.ts  evaluate via Runtime.callFunctionOn with the tagged-JSON codec (serializer.ts)
   handles.ts       JSHandle, ElementHandle
   network.ts       Request / Response / Route / WebSocket, Fetch-domain interception, HTTP auth
@@ -58,7 +58,7 @@ tracing.ts har.ts request.ts electron.ts devices.ts video/webm.ts zip-writer.ts
   (`browser` logs launches and targets, `*` everything; `EZTEST_DEBUG_MAX`
   caps the line length).
 - **Worlds.** Locators and actions run in an isolated world
-  (`__eztest_utility__`) where the selector engine and the driver helpers are
+  (`__eztest_engine_world__`) where the selector engine and the driver helpers are
   installed. Page scripts cannot see or change them. `evaluate()` runs in the
   page's main world.
 - **Evaluate.** Arguments and results travel as tagged JSON: `undefined`,
@@ -75,10 +75,12 @@ tracing.ts har.ts request.ts electron.ts devices.ts video/webm.ts zip-writer.ts
 - **Actions.** Each attempt re-resolves the locator (strict: exactly one
   element), asks the engine whether the action can happen, scrolls into view,
   takes the click point from the engine, adds the iframe offsets, and sends
-  real input events. A click waits for a navigation it starts to commit.
-  Timeouts end with `locator.click: Timeout 5000ms exceeded.` and a call log
-  naming what was waited for (for example `div#cover intercepts pointer
-  events`).
+  real input events. A click waits for a navigation it starts to commit,
+  also one the page starts after async work (the context's
+  `navigationWindow`, default 150 ms of quiet, at most 2 s); one that never
+  commits fails the click. Timeouts end with `locator.click: timed out after
+  5000 ms` and what EZTest was doing (for example `div#cover covers the
+  element and would receive the pointer event`).
 
 ### Supported browsers
 
@@ -225,19 +227,19 @@ firefox/
   connection.ts    BiDi message correlation ({id, method, params} / success / error / event)
   launch.ts        binary lookup, user.js preferences, process start, ws URL from stderr
   install.ts       eztest install-browsers firefox: Mozilla archive + SHA512SUMS
-  browser.ts       FfBrowser (session, subscriptions, event routing), FfBrowserContext (user context), FirefoxBrowserType
-  page.ts          FfPage: frame tree, lifecycle, realms, dialogs, console, bindings, screenshots, PDF
-  frame.ts         FfFrame: navigate, utility sandbox, owner element
-  realm.ts         FfRealm: evaluate / callUtility over script.callFunction, LocalValue / RemoteValue mapping
+  browser.ts       FirefoxBrowser (session, subscriptions, event routing), FirefoxContext (user context), FirefoxBrowserType
+  page.ts          FirefoxPage: frame tree, lifecycle, realms, dialogs, console, bindings, screenshots, PDF
+  frame.ts         FirefoxFrame: navigate, engine sandbox, owner element
+  realm.ts         FirefoxRealm: evaluate / callEngine over script.callFunction, LocalValue / RemoteValue mapping
   network.ts       requests, responses, bodies, interception, auth, net error names
   input.ts         keyboard / mouse / wheel / touch over input.performActions
 ```
 
-**Design.** The engine-independent code is shared, not copied: `FfPage`,
-`FfFrame`, `FfBrowserContext` and `FfRealm` subclass the classes in
+**Design.** The engine-independent code is shared, not copied: `FirefoxPage`,
+`FirefoxFrame`, `FirefoxContext` and `FirefoxRealm` subclass the classes in
 `chromium/` (which hold the page, frame, context and handle API) and
 override their protocol members; the Chromium classes route their few CDP
-calls through hooks for this (`createUtilityWorld`, `startNavigation`,
+calls through hooks for this (`createEngineWorld`, `startNavigation`,
 `navigationError`, `requestMainWorld`, `getProperties`, `releaseHandle`,
 `contentFrameOf`, `setInputFilePaths`, `RouteBackend`, `runRouteChain`,
 `browserVp8Encoder`). `locator.ts` and `actions.ts` are unchanged on
@@ -282,7 +284,7 @@ GPG-verified; it comes over HTTPS from the same server.
 | BrowserContext | user context (`browser.createUserContext`, with `acceptInsecureCerts` and `proxy`) |
 | Page | top-level browsing context, each in its own window (`browsingContext.create {type: window}`), so it is never a throttled background tab |
 | Frame | child browsing context (`contextCreated` / `contextDestroyed`) |
-| main world / utility world | window realm / sandbox realm `__eztest_utility__` (`script.realmCreated`), selector engine installed on first use |
+| main world / engine world | window realm / sandbox realm `__eztest_engine_world__` (`script.realmCreated`), selector engine installed on first use |
 | JSHandle / ElementHandle | `handle` (resultOwnership root, freed with `script.disown`) / `sharedId` (valid in every realm of the document, so moving an element between worlds is free) |
 | evaluate | `script.callFunction` with our tagged JSON as LocalValue / RemoteValue arrays and objects; by-value results carry exceptions with name, message and stack |
 | addInitScript | `script.addPreloadScript` (page: `contexts`, context: `userContexts`) |
@@ -540,7 +542,7 @@ source with tsx or EZTest's testkit (`npm test`), it bundles `page/main.ts` in m
 process with esbuild (a devDependency). This works the same way as the
 Studio client bundle. The result is an IIFE expression, about 36 KiB
 minified, that evaluates to a fresh engine object. The driver stores that
-object at `globalThis.__eztestEngine` in the utility world.
+object at `globalThis.__eztestEngine` in the engine world.
 
 To switch the driver from its interim stub to this engine, change the one
 line in `src/browser/injected/index.ts` to
@@ -702,7 +704,7 @@ apply:
   - `dispatchEvent(el, type, init)`, which creates the right event class
     (Mouse, Pointer, Keyboard, Focus, Input, Drag, Touch, Wheel or Custom)
     with bubbling, cancelable and composed defaults.
-- `elementState(el, state)` and `ariaSnapshot(el)` complete the driver
+- `checkState(el, state)` and `ariaSnapshot(el)` complete the driver
   contract.
 
 ### Tests and numbers

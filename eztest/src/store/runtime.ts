@@ -24,7 +24,7 @@ import { MASK } from '../config/masker.js';
 import type { ActionOutcome } from '../runner/actions.js';
 import { loadSourceRows } from '../runner/examples-source.js';
 import type { StepContext } from '../runner/types.js';
-import { StoreCipher, isSealed, storeKeyFrom } from './cipher.js';
+import { StoreCipher, isLegacySealed, isSealed, newStoreSalt, storeKeyFrom } from './cipher.js';
 import { itemIdFor } from './file.js';
 import { formatOutputs } from './pipeline.js';
 import {
@@ -84,6 +84,8 @@ export interface LoadResult {
 interface Claim { namespace: string; pool: string; id: string; owner: string; keep: boolean }
 
 const RESERVED = '__eztest';
+/** Where a store keeps its random cipher salt (namespace "default"). */
+export const STORE_SALT_KEY = `${RESERVED}.cipher-salt`;
 
 const toText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -143,6 +145,45 @@ export class SharedStore implements StoreStepRuntime {
     return (this.cipherInstance ??= new StoreCipher(this.secretKey));
   }
 
+  private sealerPromise?: Promise<StoreCipher>;
+
+  /**
+   * The cipher that seals new values: with this store's random salt, read from the store (created
+   * on first use). Values carry their salt, so opening needs only the key.
+   */
+  private sealer(): Promise<StoreCipher> {
+    this.cipher(); // the key must be there
+    return (this.sealerPromise ??= (async () => {
+      const e = await this.backend.get('default', STORE_SALT_KEY);
+      let salt: Buffer = typeof (e?.value as { salt?: unknown })?.salt === 'string' ? Buffer.from((e!.value as { salt: string }).salt, 'base64') : Buffer.alloc(0);
+      if (salt.length < 16) {
+        salt = newStoreSalt();
+        const now = new Date().toISOString();
+        await this.backend.put({ namespace: 'default', key: STORE_SALT_KEY, value: { salt: salt.toString('base64'), note: 'random salt of this store\'s secret values (not a secret)' }, createdAt: now, updatedAt: now });
+      }
+      return new StoreCipher(this.secretKey!, salt);
+    })().catch((err) => {
+      this.sealerPromise = undefined;
+      throw err;
+    }));
+  }
+
+  /**
+   * Re-seal every secret value still in the older format (fixed salt) with this store's own salt.
+   * Returns how many were migrated. Loading such a value migrates it too.
+   */
+  async migrateSealedValues(namespace?: string): Promise<number> {
+    let n = 0;
+    for (const e of await this.backend.list(namespace)) {
+      if (!e.secret || !isLegacySealed(e.sealed)) continue;
+      const value = this.cipher().open(e.sealed);
+      await this.backend.put({ ...e, sealed: (await this.sealer()).seal(value), updatedAt: new Date().toISOString() });
+      n++;
+    }
+    if (n) this.logger.info(`shared store: re-sealed ${n} secret value(s) with the store's own salt`);
+    return n;
+  }
+
   private secret(v: unknown): void {
     const t = toText(v);
     if (t) this.o.addSecret?.(t);
@@ -169,7 +210,7 @@ export class SharedStore implements StoreStepRuntime {
     const now = new Date();
     if (o.secret) this.secret(value);
     const entry: StoredEntry = {
-      namespace, key, ...(o.secret ? { sealed: this.cipher().seal(value), secret: true } : { value }),
+      namespace, key, ...(o.secret ? { sealed: (await this.sealer()).seal(value), secret: true } : { value }),
       ...(o.pipeline ? { pipeline: true } : {}), ...(ttl ? { expiresAt: new Date(now.getTime() + ttl).toISOString() } : {}),
       createdAt: now.toISOString(), updatedAt: now.toISOString(), ...(o.by ? { updatedBy: o.by } : {}), ...(o.source ? { source: o.source } : {}),
     };
@@ -190,7 +231,16 @@ export class SharedStore implements StoreStepRuntime {
     const imported = this.written.has(id) ? undefined : this.imports.get(id);
     if (imported && !isExpired(imported)) return { value: this.open(imported), from: 'import' };
     const e = await this.backend.get(namespace, key);
-    if (e && !isExpired(e)) return { value: this.open(e), from: 'store', entry: e };
+    if (e && !isExpired(e)) {
+      const value = this.open(e);
+      // A value sealed in the older format (fixed salt) is re-sealed with the store's salt.
+      if (e.secret && isLegacySealed(e.sealed)) {
+        const sealed = (await this.sealer()).seal(value);
+        await this.backend.put({ ...e, sealed, updatedAt: new Date().toISOString() });
+        return { value, from: 'store', entry: { ...e, sealed } };
+      }
+      return { value, from: 'store', entry: e };
+    }
     const envName = envVariableName(key);
     const fromEnv = this.env[envName];
     if (!e && fromEnv !== undefined && fromEnv !== '' && !/^\$\(|^\$\[/.test(fromEnv)) {
@@ -233,10 +283,11 @@ export class SharedStore implements StoreStepRuntime {
 
   async poolAdd(pool: string, values: unknown[], o: { namespace?: string; secret?: boolean; by?: string } = {}): Promise<{ added: number; skipped: number }> {
     checkKey('pool', pool);
+    const sealer = o.secret ? await this.sealer() : undefined;
     const items: NewPoolItem[] = values.map((value) => {
-      if (o.secret) {
+      if (sealer) {
         this.secret(value);
-        return { id: itemIdFor({ value }), sealed: this.cipher().seal(value), secret: true };
+        return { id: itemIdFor({ value }), sealed: sealer.seal(value), secret: true };
       }
       return { value };
     });

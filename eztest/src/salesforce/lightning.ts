@@ -24,7 +24,7 @@ export type Root = Page | Locator;
 const POLL = 100;
 
 /** Poll `fn` until it returns a value (not undefined) or the deadline passes. */
-const NAVIGATION_RACE = /Execution context was destroyed|Cannot find context with specified id|frame (?:was|got) detached/i;
+const NAVIGATION_RACE = /JavaScript context went away|frame was removed from the page|Execution context was destroyed|Cannot find context with specified id|frame (?:was|got) detached/i;
 
 export async function poll<T>(fn: () => Promise<T | undefined>, timeoutMs: number): Promise<T | undefined> {
   const end = Date.now() + timeoutMs;
@@ -92,6 +92,19 @@ export function currentRecordId(page: Page): string | undefined {
 
 export function onListView(page: Page, object: string): boolean {
   return new RegExp(`^/lightning/o/${object}/(?:list|home)$`).test(new URL(page.url()).pathname);
+}
+
+/**
+ * Wait until the list view header has rendered (its title is visible): Lightning builds it after
+ * the URL already says "list view", and the New button appears with it. Reading the buttons
+ * before that reads an empty header. False when it did not render within `timeoutMs`.
+ */
+export async function waitForListViewHeader(page: Page, timeoutMs: number): Promise<boolean> {
+  return page
+    .locator('lst-list-view-manager-header .slds-page-header__title, lst-list-view-manager-header h1')
+    .first()
+    .waitFor({ state: 'visible', timeout: timeoutMs })
+    .then(() => true, () => false);
 }
 
 export function onRecordView(page: Page): boolean {

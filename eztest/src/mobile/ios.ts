@@ -13,7 +13,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NotSupportedError } from '../core/index.js';
-import { AgentClient, waitForAgent, type AgentCommandLog, type AgentStatus } from './agent.js';
+import { AgentClient, newAgentToken, waitForAgent, type AgentCommandLog, type AgentStatus } from './agent.js';
 import { DeviceError, type DeviceSession, type FindStrategy, type Gesture, type Rect, type WebViewInfo, type WebViewSession } from './session.js';
 import { UsbmuxClient, type UsbmuxEndpoint } from './usbmux.js';
 
@@ -39,6 +39,8 @@ export interface IosConnectOptions {
   agentUrl?: string;
   /** Device-side agent port. Default 8790. */
   agentPort?: number;
+  /** Session token of an agent started by hand. An agent EZTest starts (xctestrun) gets a fresh random one. */
+  agentToken?: string;
   /** Launch the agent with `xcodebuild test-without-building -xctestrun <file>` (built by `eztest mobile build-agent --ios`). */
   xctestrun?: string;
   usbmux?: UsbmuxEndpoint;
@@ -76,9 +78,14 @@ export class IosDevice implements DeviceSession {
       }
     }
     let xcodebuild: ChildProcess | undefined;
+    let token = o.agentToken;
     if (o.xctestrun && !o.agentUrl) {
       if (!udid) throw new DeviceError('which iOS device? set mobile.ios.udid (or boot a simulator)', 'invalid argument');
-      xcodebuild = spawn('xcodebuild', ['test-without-building', '-xctestrun', o.xctestrun, '-destination', `id=${udid}`], { stdio: 'ignore', env: { ...process.env, EZTEST_AGENT_PORT: String(port) } });
+      // xcodebuild hands TEST_RUNNER_* variables to the test runner (without the prefix).
+      token = newAgentToken();
+      xcodebuild = spawn('xcodebuild', ['test-without-building', '-xctestrun', o.xctestrun, '-destination', `id=${udid}`], {
+        stdio: 'ignore', env: { ...process.env, TEST_RUNNER_EZTEST_AGENT_PORT: String(port), TEST_RUNNER_EZTEST_AGENT_TOKEN: token },
+      });
     }
     let tunnel: { port: number; close(): Promise<void> } | undefined;
     let url = o.agentUrl;
@@ -90,7 +97,7 @@ export class IosDevice implements DeviceSession {
       tunnel = await mux.tunnel(dev.deviceId, port);
       url = `http://127.0.0.1:${tunnel.port}`;
     }
-    const agent = new AgentClient({ url, onCommand: o.onCommand });
+    const agent = new AgentClient({ url, onCommand: o.onCommand, ...(token ? { token } : {}) });
     const cleanup = async () => {
       await agent.call('POST', '/shutdown', {}, 3000).catch(() => undefined);
       xcodebuild?.kill();

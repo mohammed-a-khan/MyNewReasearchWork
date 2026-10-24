@@ -12,6 +12,7 @@
  * ever evaluated as code.
  */
 import type { BrowserContext, Page } from '../../browser/index.js';
+import { setPauseHandler } from '../../browser/pause.js';
 import {
   Condition,
   EzTestError,
@@ -160,6 +161,9 @@ export class DebugController {
   private currentIndex = -1;
   private currentActor?: string;
   private stopped = false;
+  private currentStep?: Step;
+  /** page.pause() asked for a pause at this checkpoint. */
+  private pageRequestedPause = false;
 
   constructor(private readonly opts: DebugControllerOptions = {}) {
     this.pauseOnFailure = opts.pauseOnFailure ?? true;
@@ -439,7 +443,10 @@ export class DebugController {
 
   /** @internal A journey attempt is starting on a new page. */
   attach(session: DebugJourneySession): void {
+    if (this.session && this.session.context !== session.context) setPauseHandler(this.session.context, undefined);
     this.session = session;
+    // page.pause() in this journey's pages pauses the debugger right there.
+    setPauseHandler(session.context, () => this.pauseHere());
     this.overrides.clear();
     this.editedIdx.clear();
     this.currentIndex = -1;
@@ -459,6 +466,7 @@ export class DebugController {
   detach(): void {
     const s = this.session;
     if (!s) return;
+    setPauseHandler(s.context, undefined);
     this.emit({ type: 'debug.detached', journeyId: s.journey.id, attempt: s.attempt });
     for (const l of this.pageListeners) safe(() => l(undefined));
     this.session = undefined;
@@ -473,6 +481,7 @@ export class DebugController {
   /** @internal */
   stepStarted(index: number, step: Step, actor?: string): void {
     this.currentIndex = index;
+    this.currentStep = step;
     this.currentActor = actor;
     this.emit({ type: 'debug.stepStarted', journeyId: this.session?.journey.id ?? '', stepIndex: index, stepId: step.id, intent: this.redactor.mask(step.intent), ...(actor ? { actor } : {}) });
   }
@@ -506,7 +515,19 @@ export class DebugController {
     });
   }
 
+  /** @internal page.pause() inside the debugged journey: pause right here (mid-step) until resumed. */
+  async pauseHere(): Promise<void> {
+    const step = this.currentStep;
+    if (!this.session || !step) throw new DebugStateError('page.pause(): no journey step is running under the debugger');
+    this.pageRequestedPause = true;
+    await this.checkpoint({ phase: 'before-verify', index: this.currentIndex, step, ...(this.currentActor ? { actor: this.currentActor } : {}) });
+  }
+
   private async pauseReason(cp: Checkpoint): Promise<string | undefined> {
+    if (this.pageRequestedPause) {
+      this.pageRequestedPause = false;
+      return 'page.pause()';
+    }
     if (cp.phase === 'failed') return this.pauseOnFailure ? 'failure' : undefined;
     if (this.pauseRequested) return 'pause';
     if (this.mode === 'stepInto') return 'step';

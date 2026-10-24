@@ -6,7 +6,8 @@
  * batch job runs over SSH with parameters.
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -55,8 +56,11 @@ describe.skipIf(!sftp)('SFTP batch file round trip (G16 acceptance)', () => {
       db: { connections: { ledger: { type: 'sqlite', file: join(dir, 'ledger.db') } }, queries: { inline: { ACKED: 'SELECT id, status FROM batch_items ORDER BY id' } } },
       files: { sftp: { partner: { host: sftp!.host, port: sftp!.port, username: sftp!.username, password: '${SFTP_PASSWORD}' } }, pollMs: 300 },
     }));
-    // The partner system: picks up the batch from /in and answers with an ACK file in /out.
-    partner = new SshSession('partner-side', sftp!, dir);
+    // The partner system: picks up the batch from /in and answers with an ACK file in /out. Its
+    // first connection records the server's host key in the project's .eztest/known_hosts (trust on
+    // first use, like accepting it once with ssh); the journeys then check the key strictly.
+    partner = new SshSession('partner-side', { ...sftp!, trustOnFirstUse: true }, dir);
+    await partner.list('/in');
     void (async () => {
       while (!stop) {
         const files = await partner.list('/in').catch(() => []);
@@ -107,9 +111,24 @@ describe.skipIf(!ssh)('SSH commands and batch jobs (allow-listed)', () => {
     dir = await mkdtemp(join(tmpdir(), 'eztest-ssh-'));
     await writeFile(join(dir, 'eztest.config.yaml'), toYaml({
       outputDir: 'results', healing: { enabled: false },
-      files: { ssh: { 'batch-host': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}', allowCommands: ['echo closing *', "sh -c 'exit 3'", 'echo closed *'] } } },
-      batch: { jobs: { 'close-day': { ssh: 'batch-host', command: 'echo closed $${date}' } } },
+      files: {
+        ssh: { 'batch-host': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}', allowCommands: ['echo closing *', "sh -c 'exit 3'", 'echo closed *', "sh -c 'sleep 1; touch /tmp/eztest-done-*.flag'"] } },
+        // The same machine over SFTP, where the jobs' completion files appear.
+        sftp: { 'batch-files': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}' } },
+        pollMs: 200,
+      },
+      batch: {
+        jobs: {
+          'close-day': { ssh: 'batch-host', command: 'echo closed $${date}' },
+          'close-day-with-flag': { ssh: 'batch-host', command: "sh -c 'sleep 1; touch /tmp/eztest-done-$${run}.flag'", doneFile: { sftp: 'batch-files', dir: '/tmp', pattern: 'eztest-done-$${run}.flag' } },
+          'never-flags': { ssh: 'batch-host', command: 'echo closed quietly', doneFile: { sftp: 'batch-files', dir: '/tmp', pattern: 'eztest-never-$${run}.flag' } },
+        },
+      },
     }));
+    // Record the host key once (trust on first use); the journeys check it strictly.
+    const prime = new SshSession('prime', { ...ssh!, trustOnFirstUse: true }, dir);
+    await prime.exec('true', 10_000);
+    prime.close();
   });
 
   it('runs allow-listed commands, checks exit codes and runs a batch job', async () => {
@@ -124,11 +143,70 @@ Expect response job "$.stdout" contains "closed 2026-01-31"
     expect(j.status, steps(j)).toBe('passed');
   });
 
+  it('a batch job with a doneFile waits for its completion file, and fails when it never appears', async () => {
+    const run = randomUUID().slice(0, 8);
+    const j = await runJourney(dir, `Journey: Close with flag
+Run batch job "close-day-with-flag" with run=${run} and wait up to 30 seconds as job
+`);
+    expect(j.status, steps(j)).toBe('passed');
+    expect((j.ledger.job as { doneFile?: { name: string } }).doneFile?.name).toBe(`eztest-done-${run}.flag`);
+    const never = await runJourney(dir, `Journey: Never done
+Run batch job "never-flags" with run=${run} and wait up to 3 seconds as job
+`);
+    expect(never.status).toBe('failed');
+    expect(steps(never)).toMatch(new RegExp(`Batch job "never-flags" finished, but its completion file \\(matching "eztest-never-${run}\\.flag" in /tmp on SFTP batch-files\\) did not appear within 3 s of the job starting`));
+  });
+
   it('refuses a command that is not allow-listed', async () => {
     const j = await runJourney(dir, `Journey: Not allowed
 Run command "rm -rf /tmp/x" on SSH "batch-host"
 `);
     expect(j.status).toBe('failed');
     expect(steps(j)).toMatch(/Command "rm -rf \/tmp\/x" is not in files\.ssh\.batch-host\.allowCommands/);
+  });
+
+  it('checks host keys strictly: an unknown host is refused, trustOnFirstUse records it, a changed key is refused', async () => {
+    const fresh = await mkdtemp(join(tmpdir(), 'eztest-hostkey-'));
+    const host = (extra: Record<string, unknown> = {}) => toYaml({
+      outputDir: 'results', healing: { enabled: false },
+      files: { ssh: { 'batch-host': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}', allowCommands: ['echo hi'], ...extra } } },
+    });
+    const known = join(fresh, '.eztest', 'known_hosts');
+    await writeFile(join(fresh, 'eztest.config.yaml'), host());
+    const refused = await runJourney(fresh, 'Journey: Unknown host\nRun command "echo hi" on SSH "batch-host" as out\n');
+    expect(refused.status).toBe('failed');
+    expect(steps(refused)).toMatch(/The host key of batch-host \(\[127\.0\.0\.1\]:\d+\) is not known \(ssh-\S+ SHA256:\S+\)\. Add it to .*known_hosts .*ssh-keyscan -p \d+ .*trustOnFirstUse: true/);
+    expect(existsSync(known)).toBe(false);
+    // Trust on first use: recorded, and accepted from then on with checking back on.
+    await writeFile(join(fresh, 'eztest.config.yaml'), host({ trustOnFirstUse: true }));
+    expect((await runJourney(fresh, 'Journey: First use\nRun command "echo hi" on SSH "batch-host" as out\n')).status).toBe('passed');
+    const line = (await readFile(known, 'utf8')).trim();
+    expect(line).toMatch(new RegExp(`^\\[127\\.0\\.0\\.1\\]:${ssh!.port} ssh-\\S+ [A-Za-z0-9+/=]+$`));
+    await writeFile(join(fresh, 'eztest.config.yaml'), host());
+    expect((await runJourney(fresh, 'Journey: Known now\nRun command "echo hi" on SSH "batch-host" as out\n')).status).toBe('passed');
+    // Another key of the same type for the host: the key changed, refused even with trustOnFirstUse.
+    const [name, type, key] = line.split(' ');
+    const other = Buffer.from(key, 'base64');
+    other[other.length - 1] ^= 0xff;
+    await writeFile(known, `${name} ${type} ${other.toString('base64')}\n`);
+    await writeFile(join(fresh, 'eztest.config.yaml'), host({ trustOnFirstUse: true }));
+    const changed = await runJourney(fresh, 'Journey: Changed key\nRun command "echo hi" on SSH "batch-host" as out\n');
+    expect(changed.status).toBe('failed');
+    expect(steps(changed)).toMatch(/The host key of batch-host .* changed: it presented ssh-\S+ SHA256:\S+, but .*known_hosts has another/);
+  });
+
+  it('a connection lost after setup is reported by the next operation, not swallowed', async () => {
+    const s = new SshSession('lossy', { ...ssh!, knownHosts: join(dir, '.eztest', 'known_hosts') }, dir);
+    try {
+      expect((await s.exec('echo up', 10_000)).stdout.trim()).toBe('up');
+      // Kill the server side of this session: the connection drops under the session.
+      await s.exec('kill -9 $PPID', 10_000).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 500));
+      await expect(s.exec('echo again', 10_000)).rejects.toThrow(/The SSH connection to lossy \(127\.0\.0\.1\) was (?:lost|closed by the server)/);
+      // The next operation connects afresh.
+      expect((await s.exec('echo back', 10_000)).stdout.trim()).toBe('back');
+    } finally {
+      s.close();
+    }
   });
 });

@@ -80,7 +80,7 @@ export function packEvidence(pack: string, screenshots = true): PackEvidence {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const NAVIGATION_RACE = /context was destroyed|navigat|Target closed|frame was detached|Cannot find context|Execution context|does not belong to the document|No node with given id|Cannot find object with id/i;
+const NAVIGATION_RACE = /context was destroyed|context went away|frame was removed|navigat|Target closed|frame was detached|Cannot find context|Execution context|does not belong to the document|No node with given id|Cannot find object with id/i;
 
 /** Poll `fn` until it returns a value (not undefined), or give up after `timeoutMs`. Probes caught mid-navigation count as "not yet". */
 export async function poll<T>(fn: () => Promise<T | undefined>, timeoutMs: number, intervalMs = 100): Promise<T | undefined> {

@@ -63,7 +63,7 @@ describe('Studio shared data', () => {
     expect(v.backend.name).toBe('file');
     expect(v.defaultNamespace).toBe('sit');
     expect(JSON.stringify(v)).not.toContain('tok-STUDIO-secret-1');
-    expect(JSON.stringify(v)).not.toContain('EZS1:');
+    expect(JSON.stringify(v)).not.toMatch(/EZS[12]:/);
     const byKey = Object.fromEntries(v.entries.map((e: { key: string }) => [e.key, e]));
     expect(byKey['pending-order']).toMatchObject({ value: { id: 'ORD-7' }, expired: false, source: { journeyId: 'create-order' } });
     expect(byKey['api-token']).toMatchObject({ value: '****', secret: true });

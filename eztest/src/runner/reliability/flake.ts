@@ -17,11 +17,11 @@ interface Rule {
 }
 
 const RULES: Rule[] = [
-  { re: /is covered by|intercepts pointer events|obscured|overlay|backdrop|another element would receive the click/i, cause: 'overlay', confidence: 0.9, reason: 'an overlay covered the element' },
-  { re: /not attached to the DOM|detached|re-rendered|stale element|Execution context was destroyed|lost its value/i, cause: 'detached', confidence: 0.85, reason: 'the element was re-rendered (detached) during the step' },
+  { re: /is covered by|covers the element|covered the element|obscured|overlay|backdrop|another element would receive the click/i, cause: 'overlay', confidence: 0.9, reason: 'an overlay covered the element' },
+  { re: /no longer in the page|JavaScript context went away|not attached to the DOM|detached|re-rendered|stale element|Execution context was destroyed|lost its value/i, cause: 'detached', confidence: 0.85, reason: 'the element was re-rendered (detached) during the step' },
   { re: /ERR_NAME_NOT_RESOLVED|ENOTFOUND|ECONNREFUSED|ECONNRESET|ERR_CONNECTION|socket hang up|net::ERR_|returned 5\d\d|HTTP 5\d\d|status 5\d\d/i, cause: 'network', confidence: 0.85, reason: 'a network call failed or returned 5xx' },
   { re: /DATA_|data problem|No available|already exists|duplicate key|UNIQUE constraint|lease|ORA-00001|violates .* constraint|not found in the data/i, cause: 'data', confidence: 0.8, reason: 'test data was missing, already used or conflicting' },
-  { re: /Timeout|timed out|still animating|keeps moving|not visible|is disabled|post-condition failed|did not reach|waiting for/i, cause: 'timing', confidence: 0.7, reason: 'the app was not ready in time (slow response, animation or late rendering)' },
+  { re: /Timeout|timed out|still animating|keeps moving|not visible|is hidden|is disabled|still moving|post-condition failed|did not reach|waiting for/i, cause: 'timing', confidence: 0.7, reason: 'the app was not ready in time (slow response, animation or late rendering)' },
 ];
 
 function failedLeaf(steps: StepResult[]): StepResult | undefined {

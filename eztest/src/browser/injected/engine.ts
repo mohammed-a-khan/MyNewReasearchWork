@@ -1,6 +1,6 @@
 /**
  * Node side of the page-side engine: produces the JavaScript the driver
- * evaluates in each frame's utility world (see contract.ts).
+ * evaluates in each frame's engine world (see contract.ts).
  *
  * Published package: `npm run build` writes `dist/browser/injected/engine.bundle.js`
  * (scripts/build-injected.mjs calls `buildEngineSource`) and `engineSource()`

@@ -11,11 +11,12 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { TypedEmitter } from '../events.js';
+import { routeHandledMessage } from '../messages.js';
 import type { CDPSession, ProtocolParams } from '../transport/connection.js';
 import type { URLMatch } from '../types.js';
 import { deferred, headersFromProtocol, headersToObject, mimeFor, urlMatches, type Deferred } from '../util.js';
-import type { CrFrame } from './frame.js';
-import type { CrPage } from './page.js';
+import type { ChromiumFrame } from './frame.js';
+import type { ChromiumPage } from './page.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface Header {
@@ -69,7 +70,7 @@ export class Request {
     readonly headers_: Header[],
     readonly postData_: Buffer | undefined,
     readonly resourceType_: string,
-    readonly frame_: CrFrame | undefined,
+    readonly frame_: ChromiumFrame | undefined,
     readonly isNavigation: boolean,
     readonly redirectedFrom_: Request | undefined,
     wallTime: number | undefined,
@@ -126,8 +127,8 @@ export class Request {
     return this.resourceType_;
   }
 
-  frame(): CrFrame {
-    if (!this.frame_) throw new Error('Service Worker requests do not have an associated frame.');
+  frame(): ChromiumFrame {
+    if (!this.frame_) throw new Error('request.frame: this request came from a service worker, which has no frame');
     return this.frame_;
   }
 
@@ -285,7 +286,7 @@ export class Response {
     return this.request_;
   }
 
-  frame(): CrFrame {
+  frame(): ChromiumFrame {
     return this.request_.frame();
   }
 
@@ -314,7 +315,7 @@ export class Response {
 
   async body(): Promise<Buffer> {
     const req = this.request_;
-    if (req.redirectedTo_) throw new Error('Response body is unavailable for redirect responses');
+    if (req.redirectedTo_) throw new Error('response.body: a redirect response has no body to read; read the body of the final response instead');
     const err = await this.finishedDone.promise;
     if (req.fulfilledBody) return req.fulfilledBody;
     if (err) throw err;
@@ -389,7 +390,7 @@ export function cdpRouteBackend(session: CDPSession, fetchRequestId: string, req
         responseHeaders,
         body: body.toString('base64'),
       }).catch((e: Error) => {
-        if (!/Invalid InterceptionId|Target closed|has been closed/.test(e.message)) throw e;
+        if (!/Invalid InterceptionId|Target closed|target closed|connection closed|was closed before/.test(e.message)) throw e;
       });
     },
     continue: (o) => continueRequest(session, fetchRequestId, o, request),
@@ -412,14 +413,14 @@ export class Route {
   }
 
   private claim(api: string): void {
-    if (this.done) throw new Error(`${api}: Route is already handled!`);
+    if (this.done) throw new Error(routeHandledMessage(api));
     this.done = true;
   }
 
   async abort(errorCode = 'failed'): Promise<void> {
     this.claim('route.abort');
     const reason = ABORT_REASONS[errorCode.toLowerCase()];
-    if (!reason) throw new Error(`route.abort: Invalid error code "${errorCode}"`);
+    if (!reason) throw new Error(`route.abort: "${errorCode}" is not an abort reason EZTest knows (known: ${Object.keys(ABORT_REASONS).join(', ')})`);
     await this.backend.abort(errorCode.toLowerCase());
     this.outcome.resolve({ kind: 'handled' });
   }
@@ -557,7 +558,7 @@ async function continueRequest(session: CDPSession, fetchRequestId: string, o: C
   }
   void request;
   await session.send('Fetch.continueRequest', params).catch((e: Error) => {
-    if (!/Invalid InterceptionId|Target closed|has been closed|Invalid state/.test(e.message)) throw e;
+    if (!/Invalid InterceptionId|Target closed|target closed|connection closed|was closed before|Invalid state/.test(e.message)) throw e;
   });
 }
 
@@ -576,7 +577,7 @@ export interface RouteEntry {
  * aborting, continuing or falling back to the next; then client
  * certificates; then the browser continues the request.
  */
-export async function runRouteChain(page: CrPage, req: Request, backend: RouteBackend): Promise<void> {
+export async function runRouteChain(page: ChromiumPage, req: Request, backend: RouteBackend): Promise<void> {
   const ctx = page.context();
   // Client certificates: requests to configured origins are performed from Node.
   const cert = ctx.clientCertificateFor(req.url_);
@@ -677,7 +678,7 @@ export class NetworkManager {
   private readonly authAttempts = new Set<string>();
   private readonly ignored = new Set<string>();
 
-  constructor(private readonly page: CrPage) {}
+  constructor(private readonly page: ChromiumPage) {}
 
   /** No request in flight for `quietMs` (see the networkidle rule above). */
   isIdle(quietMs: number): boolean {
@@ -698,7 +699,7 @@ export class NetworkManager {
     this.page.notifyChange();
   }
 
-  private frameFor(frameId: string | undefined): CrFrame | undefined {
+  private frameFor(frameId: string | undefined): ChromiumFrame | undefined {
     return frameId ? this.page.frameById(frameId) : undefined;
   }
 

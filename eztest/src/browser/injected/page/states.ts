@@ -106,12 +106,12 @@ export function notFillableReason(el: Element): string {
   const tag = lowerTag(el);
   if (tag === 'input') {
     const type = (el as HTMLInputElement).type.toLowerCase();
-    if (NON_TEXT_INPUTS.has(type)) return `input of type "${type}" cannot be filled`;
+    if (NON_TEXT_INPUTS.has(type)) return `an <input type=${type}> takes no typed text`;
     return '';
   }
   if (tag === 'textarea') return '';
   if ((el as HTMLElement).isContentEditable) return '';
-  return 'element is not an <input>, <textarea> or [contenteditable] element';
+  return 'the element takes no typed text (it is not an input, textarea or contenteditable)';
 }
 
 export function isReadonly(el: Element): boolean {

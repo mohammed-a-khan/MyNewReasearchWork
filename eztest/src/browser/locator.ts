@@ -5,28 +5,29 @@
  * frameLocator()) plus a selector chain for the injected engine. Nothing is
  * looked up until an action runs; every attempt re-resolves the chain, so
  * locators survive re-renders and navigations. Actions require exactly one
- * match (strict mode); count()/all()/evaluateAll() do not.
+ * match (the single-match rule); count()/all()/evaluateAll() do not.
  */
 import { writeFile } from 'node:fs/promises';
 import type { SelectorChain, SelectorStep, TextMatch } from './injected/contract.js';
 import { TimeoutError, isClosedError, isContextGoneError } from './errors.js';
+import { FRAME_GONE_TEXT, closedMessage, timeoutMessage, tooManyMatchesMessage } from './messages.js';
 import { parseSelector } from './selector-parser.js';
 import type { FilePayload, Rect } from './types.js';
 import { Deadline, isRegExp, pollDelay, quote, sleep } from './util.js';
 import * as actions from './actions.js';
-import type { CrFrame } from './chromium/frame.js';
-import type { CrPage } from './chromium/page.js';
+import type { ChromiumFrame } from './chromium/frame.js';
+import type { ChromiumPage } from './chromium/page.js';
 import type { ElementHandle, JSHandle } from './chromium/handles.js';
 import type { PageFunctionOn } from './eval-types.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export type LocatorScope =
-  | { kind: 'page'; page: CrPage }
-  | { kind: 'frame'; frame: CrFrame }
+  | { kind: 'page'; page: ChromiumPage }
+  | { kind: 'frame'; frame: ChromiumFrame }
   | { kind: 'frameLocator'; parent: LocatorScope; chain: SelectorChain; description: string };
 
-export function frameScope(frame: CrFrame): LocatorScope {
+export function frameScope(frame: ChromiumFrame): LocatorScope {
   return { kind: 'frame', frame };
 }
 
@@ -81,7 +82,7 @@ function describeText(v: string | RegExp): string {
   return isRegExp(v) ? String(v) : quote(v);
 }
 
-function scopePage(s: LocatorScope): CrPage {
+function scopePage(s: LocatorScope): ChromiumPage {
   if (s.kind === 'page') return s.page;
   if (s.kind === 'frame') return s.frame.page();
   return scopePage(s.parent);
@@ -98,19 +99,19 @@ function scopeDescription(s: LocatorScope): string {
 class FrameNotReady extends Error {}
 
 /** Resolve a scope to its frame (waiting is done by the caller's retry loop). */
-async function resolveScope(s: LocatorScope): Promise<CrFrame> {
+async function resolveScope(s: LocatorScope): Promise<ChromiumFrame> {
   if (s.kind === 'page') return s.page.mainFrame();
   if (s.kind === 'frame') {
-    if (s.frame.isDetached()) throw new Error('Frame was detached');
+    if (s.frame.isDetached()) throw new Error(FRAME_GONE_TEXT);
     return s.frame;
   }
   const parent = await resolveScope(s.parent);
-  const ctx = await parent.context('utility');
+  const ctx = await parent.context('engine');
   const els = await ctx.queryElements(s.chain);
   try {
     if (els.length === 0) throw new FrameNotReady(`waiting for ${scopeDescription(s)}`);
     if (els.length > 1) {
-      throw new Error(`strict mode violation: ${scopeDescription(s)} resolved to ${els.length} elements`);
+      throw new Error(tooManyMatchesMessage(scopeDescription(s), els.length));
     }
     const frame = await els[0].contentFrame();
     if (!frame) throw new FrameNotReady(`waiting for the content frame of ${scopeDescription(s)}`);
@@ -155,7 +156,7 @@ export class Locator {
   // ------------------------------------------------------------------ building
   locator(selector: string | Locator, options?: LocatorOptions): Locator {
     if (typeof selector !== 'string') {
-      if (scopePage(selector.scope) !== this.page()) throw new Error('Locators must belong to the same frame.');
+      if (scopePage(selector.scope) !== this.page()) throw new Error('Both locators must come from the same page; build the inner locator from this page.');
       return this.withFilters(this.derive(selector.chain, `locator(${selector.toString()})`), options);
     }
     return this.withFilters(this.derive(parseSelector(selector), `locator(${quote(selector)})`), options);
@@ -279,7 +280,7 @@ export class Locator {
     return this.scope;
   }
 
-  page(): CrPage {
+  page(): ChromiumPage {
     return scopePage(this.scope);
   }
 
@@ -293,12 +294,12 @@ export class Locator {
   }
 
   // ------------------------------------------------------------------ resolution
-  /** All matches now (utility-world handles), with their frame. */
-  async queryAll(): Promise<{ frame: CrFrame; handles: ElementHandle[] }> {
+  /** All matches now (engine-world handles), with their frame. */
+  async queryAll(): Promise<{ frame: ChromiumFrame; handles: ElementHandle[] }> {
     const frame = await resolveScope(this.scope);
     for (let attempt = 0; ; attempt++) {
       try {
-        const ctx = await frame.context('utility');
+        const ctx = await frame.context('engine');
         return { frame, handles: await ctx.queryElements(this.chain) };
       } catch (e) {
         if (attempt < 5 && (isContextGoneError(e) || (e as { contextGone?: boolean }).contextGone)) {
@@ -310,13 +311,12 @@ export class Locator {
     }
   }
 
-  private async strictViolation(frame: CrFrame, handles: ElementHandle[]): Promise<Error> {
+  private async strictViolation(frame: ChromiumFrame, handles: ElementHandle[]): Promise<Error> {
     const descs: string[] = [];
-    for (const h of handles.slice(0, 10)) descs.push(await h.context.callUtility((e, _h, el) => e.describe(el), [h]).catch(() => '<element>'));
+    for (const h of handles.slice(0, 10)) descs.push(await h.context.callEngine((e, _h, el) => e.describe(el), [h]).catch(() => '<element>'));
     for (const h of handles) void h.dispose();
     void frame;
-    const lines = descs.map((d, i) => `    ${i + 1}) ${d}`).join('\n');
-    return new Error(`strict mode violation: ${this.toString()} resolved to ${handles.length} elements:\n${lines}${handles.length > 10 ? '\n    ...' : ''}`);
+    return new Error(tooManyMatchesMessage(this.toString(), handles.length, descs, handles.length > 10));
   }
 
   /** The action target: exactly one element per attempt, or null while there is none. */
@@ -325,7 +325,7 @@ export class Locator {
       description: this.toString(),
       page: this.page(),
       resolve: async () => {
-        let res: { frame: CrFrame; handles: ElementHandle[] };
+        let res: { frame: ChromiumFrame; handles: ElementHandle[] };
         try {
           res = await this.queryAll();
         } catch (e) {
@@ -436,7 +436,7 @@ export class Locator {
     if (options.trial) return;
     await page.mouse.down();
     const box = await target.boundingBox({ timeout: options.timeout });
-    if (!box) throw new Error('locator.dragTo: target element is not visible');
+    if (!box) throw new Error('locator.dragTo: the drop target has no visible box to drop onto');
     const tx = box.x + (options.targetPosition?.x ?? box.width / 2);
     const ty = box.y + (options.targetPosition?.y ?? box.height / 2);
     await page.mouse.move(tx, ty, { steps: 5 });
@@ -455,27 +455,27 @@ export class Locator {
 
   // ------------------------------------------------------------------ reading
   async textContent(options: { timeout?: number } = {}): Promise<string | null> {
-    return this.withElement('locator.textContent', options, (r) => r.el.context.callUtility((_e, _h, el) => el.textContent, [r.el]));
+    return this.withElement('locator.textContent', options, (r) => r.el.context.callEngine((_e, _h, el) => el.textContent, [r.el]));
   }
 
   async innerText(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.innerText', options, (r) => r.el.context.callUtility((_e, h, el) => h.innerText(el), [r.el]));
+    return this.withElement('locator.innerText', options, (r) => r.el.context.callEngine((_e, h, el) => h.innerText(el), [r.el]));
   }
 
   async innerHTML(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.innerHTML', options, (r) => r.el.context.callUtility((_e, _h, el) => el.innerHTML, [r.el]));
+    return this.withElement('locator.innerHTML', options, (r) => r.el.context.callEngine((_e, _h, el) => el.innerHTML, [r.el]));
   }
 
   async getAttribute(name: string, options: { timeout?: number } = {}): Promise<string | null> {
-    return this.withElement('locator.getAttribute', options, (r) => r.el.context.callUtility((_e, _h, el, n) => el.getAttribute(n), [r.el, name]));
+    return this.withElement('locator.getAttribute', options, (r) => r.el.context.callEngine((_e, _h, el, n) => el.getAttribute(n), [r.el, name]));
   }
 
   async inputValue(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.inputValue', options, (r) => r.el.context.callUtility((_e, h, el) => h.inputValue(h.retarget(el, 'control')), [r.el]));
+    return this.withElement('locator.inputValue', options, (r) => r.el.context.callEngine((_e, h, el) => h.inputValue(h.resolveControl(el, 'control')), [r.el]));
   }
 
   private async stateNow(api: string, state: 'visible' | 'hidden'): Promise<boolean> {
-    let res: { frame: CrFrame; handles: ElementHandle[] };
+    let res: { frame: ChromiumFrame; handles: ElementHandle[] };
     try {
       res = await this.queryAll();
     } catch (e) {
@@ -490,7 +490,7 @@ export class Locator {
     }
     const h = res.handles[0];
     try {
-      return await h.context.callUtility((e, _h, el, s) => e.elementState(el, s), [h, state]);
+      return await h.context.callEngine((e, _h, el, s) => e.checkState(el, s), [h, state]);
     } finally {
       void h.dispose();
     }
@@ -505,11 +505,11 @@ export class Locator {
   }
 
   private state(api: string, s: 'enabled' | 'disabled' | 'editable' | 'checked', options: { timeout?: number }): Promise<boolean> {
-    return this.withElement(api, options, (r) => r.el.context.callUtility((e, h, el, st) => {
-      const t = st === 'checked' || st === 'editable' ? h.retarget(el, 'control') : el;
+    return this.withElement(api, options, (r) => r.el.context.callEngine((e, h, el, st) => {
+      const t = st === 'checked' || st === 'editable' ? h.resolveControl(el, 'control') : el;
       // Checkboxes and radios are editable when enabled and not read-only (they can be toggled).
-      if (st === 'editable' && t.localName === 'input' && /^(checkbox|radio)$/i.test(t.type)) return !t.disabled && !t.readOnly && !e.elementState(t, 'disabled');
-      return e.elementState(t, st);
+      if (st === 'editable' && t.localName === 'input' && /^(checkbox|radio)$/i.test(t.type)) return !t.disabled && !t.readOnly && !e.checkState(t, 'disabled');
+      return e.checkState(t, st);
     }, [r.el, s]));
   }
 
@@ -549,7 +549,7 @@ export class Locator {
   async allInnerTexts(): Promise<string[]> {
     const { handles } = await this.queryAll().catch((e) => (e instanceof FrameNotReady ? { handles: [] as ElementHandle[] } : Promise.reject(e)));
     try {
-      return await Promise.all(handles.map((h) => h.context.callUtility((_e, hp, el) => hp.innerText(el), [h])));
+      return await Promise.all(handles.map((h) => h.context.callEngine((_e, hp, el) => hp.innerText(el), [h])));
     } finally {
       for (const h of handles) void h.dispose();
     }
@@ -558,7 +558,7 @@ export class Locator {
   async allTextContents(): Promise<string[]> {
     const { handles } = await this.queryAll().catch((e) => (e instanceof FrameNotReady ? { handles: [] as ElementHandle[] } : Promise.reject(e)));
     try {
-      return await Promise.all(handles.map((h) => h.context.callUtility((_e, _h, el) => el.textContent ?? '', [h])));
+      return await Promise.all(handles.map((h) => h.context.callEngine((_e, _h, el) => el.textContent ?? '', [h])));
     } finally {
       for (const h of handles) void h.dispose();
     }
@@ -601,17 +601,17 @@ export class Locator {
           err.message = `locator.waitFor: ${err.message}`;
           throw err;
         }
-        if (n === 1) visible = await res.handles[0].context.callUtility((e, _h, el) => e.elementState(el, 'visible'), [res.handles[0]]);
+        if (n === 1) visible = await res.handles[0].context.callEngine((e, _h, el) => e.checkState(el, 'visible'), [res.handles[0]]);
         for (const h of res.handles) void h.dispose();
         if (n > 1) visible = true;
       } catch (e) {
-        if (isClosedError(e) || this.page().isClosed()) throw new Error('locator.waitFor: Target page, context or browser has been closed');
+        if (isClosedError(e) || this.page().isClosed()) throw new Error(closedMessage('locator.waitFor'));
         if (!(e instanceof FrameNotReady) && !isContextGoneError(e) && !(e as { contextGone?: boolean }).contextGone) throw e;
       }
       const ok = state === 'attached' ? n > 0 : state === 'detached' ? n === 0 : state === 'visible' ? visible : !visible;
       if (ok) return;
       if (deadline.expired()) {
-        throw new TimeoutError(`locator.waitFor: Timeout ${timeout}ms exceeded.\nCall log:\n  - waiting for ${this.toString()} to be ${state}`);
+        throw new TimeoutError(timeoutMessage('locator.waitFor', timeout, [`waiting for ${this.toString()} to be ${state}`]));
       }
       await sleep(Math.min(pollDelay(attempt), deadline.remaining()));
     }
@@ -637,7 +637,7 @@ export class Locator {
   }
 
   async evaluateAll<R, Arg = unknown, E extends SVGElement | HTMLElement = SVGElement | HTMLElement>(fn: PageFunctionOn<E[], Arg, R>, arg?: Arg): Promise<R> {
-    let res: { frame: CrFrame; handles: ElementHandle[] };
+    let res: { frame: ChromiumFrame; handles: ElementHandle[] };
     try {
       res = await this.queryAll();
     } catch (e) {
@@ -657,17 +657,17 @@ export class Locator {
 
   /** Accessible name (accname 1.2), as assistive technology announces it. */
   async accessibleName(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.accessibleName', options, (r) => r.el.context.callUtility((e, _h, el) => e.accessibleName(el), [r.el]) as Promise<string>);
+    return this.withElement('locator.accessibleName', options, (r) => r.el.context.callEngine((e, _h, el) => e.accessibleName(el), [r.el]) as Promise<string>);
   }
 
   /** Accessible description (aria-describedby, aria-description, title). */
   async accessibleDescription(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.accessibleDescription', options, (r) => r.el.context.callUtility((e, _h, el) => (typeof e.accessibleDescription === 'function' ? e.accessibleDescription(el) : ''), [r.el]) as Promise<string>);
+    return this.withElement('locator.accessibleDescription', options, (r) => r.el.context.callEngine((e, _h, el) => (typeof e.accessibleDescription === 'function' ? e.accessibleDescription(el) : ''), [r.el]) as Promise<string>);
   }
 
   /** ARIA role (explicit, else implicit from HTML-AAM); '' when the element has none. */
   async ariaRole(options: { timeout?: number } = {}): Promise<string> {
-    return this.withElement('locator.ariaRole', options, (r) => r.el.context.callUtility((e, _h, el) => e.role(el) ?? '', [r.el]) as Promise<string>);
+    return this.withElement('locator.ariaRole', options, (r) => r.el.context.callEngine((e, _h, el) => e.role(el) ?? '', [r.el]) as Promise<string>);
   }
 
   async elementHandle(options: { timeout?: number } = {}): Promise<ElementHandle> {
@@ -690,7 +690,7 @@ export class Locator {
   /** Accessibility snapshot of the element as YAML. */
   async ariaSnapshot(options: { timeout?: number } = {}): Promise<string> {
     return this.withElement('locator.ariaSnapshot', options, (r) =>
-      r.el.context.callUtility((e, _h, el) => (typeof e.ariaSnapshot === 'function' ? e.ariaSnapshot(el) : `- ${e.role(el) ?? 'generic'} ${JSON.stringify(e.accessibleName(el))}`), [r.el]),
+      r.el.context.callEngine((e, _h, el) => (typeof e.ariaSnapshot === 'function' ? e.ariaSnapshot(el) : `- ${e.role(el) ?? 'generic'} ${JSON.stringify(e.accessibleName(el))}`), [r.el]),
     );
   }
 }

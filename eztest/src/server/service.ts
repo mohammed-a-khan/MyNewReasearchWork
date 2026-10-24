@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { verifyEvidence, type RunResult } from '../core/index.js';
 import { scoreFlakiness, validateQuarantineEntry, type RunHistoryEntry, type FlakyScore } from '../insights/index.js';
 import { durationsFromRuns, type DurationTable } from '../scale/durations.js';
-import { AuditLog } from './audit.js';
+import { AuditLog, auditKeyFileFor } from './audit.js';
 import type { Principal } from './auth.js';
 import { num, optNum, optStr, type Store } from './store.js';
 
@@ -101,9 +101,9 @@ export class ResultsService {
   constructor(
     readonly store: Store,
     readonly dataDir: string,
-    readonly opts: { maxUploadBytes: number; retention: RetentionPolicy },
+    readonly opts: { maxUploadBytes: number; retention: RetentionPolicy; auditKeyFile?: string },
   ) {
-    this.audit = new AuditLog(store);
+    this.audit = new AuditLog(store, auditKeyFileFor({ dataDir, auditKeyFile: opts.auditKeyFile }));
   }
 
   runDir(project: string, runId: string): string {

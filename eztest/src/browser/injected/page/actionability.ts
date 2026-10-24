@@ -155,26 +155,26 @@ export async function actionability(el: Element, action: EngineAction, options?:
   const name = ALIASES[action] ?? action;
   const needs = NEEDS[name];
   if (!needs) return fail(`unknown action "${action}"`, false);
-  if (!el || !el.isConnected) return fail('element is not attached to the DOM', true);
+  if (!el || !el.isConnected) return fail('the element is no longer in the page', true);
 
   const force = !!options?.force;
   if (!force) {
-    if (needs.visible && !isVisible(el)) return fail('element is not visible', true);
-    if (needs.enabled && isDisabled(el)) return fail('element is not enabled', true);
+    if (needs.visible && !isVisible(el)) return fail('the element is hidden', true);
+    if (needs.enabled && isDisabled(el)) return fail('the element is disabled', true);
     if (needs.editable) {
       const why = notFillableReason(el);
       if (why) return fail(why, false);
-      if (isReadonly(el)) return fail('element is not editable (readonly)', true);
+      if (isReadonly(el)) return fail('the element is read-only', true);
     }
     if (needs.stable) {
       const win = el.ownerDocument.defaultView as Window;
       await frame(win);
-      if (!el.isConnected) return fail('element is not attached to the DOM', true);
+      if (!el.isConnected) return fail('the element is no longer in the page', true);
       const a = el.getBoundingClientRect();
       await frame(win);
-      if (!el.isConnected) return fail('element is not attached to the DOM', true);
+      if (!el.isConnected) return fail('the element is no longer in the page', true);
       const b = el.getBoundingClientRect();
-      if (!sameRect(a, b)) return fail('element is not stable (it is moving or resizing)', true);
+      if (!sameRect(a, b)) return fail('the element is still moving or resizing', true);
     }
   }
 
@@ -188,11 +188,11 @@ export async function actionability(el: Element, action: EngineAction, options?:
   if (!needs.hit) return { ok: true };
 
   const point = actionPoint(el, options);
-  if (!point) return fail('element is outside of the viewport', true);
+  if (!point) return fail('the element cannot be brought into view (it is off-screen or clipped)', true);
   if (force) return { ok: true, point };
 
   const hit = deepElementFromPoint(el.ownerDocument, point.x, point.y);
-  if (!hit) return fail('element is outside of the viewport', true);
+  if (!hit) return fail('the element cannot be brought into view (it is off-screen or clipped)', true);
   if (containsDeep(el, hit)) return { ok: true, point };
   if (labelControl(hit) === el) return { ok: true, point };
   if (containsDeep(hit, el) && style(el).pointerEvents === 'none') {

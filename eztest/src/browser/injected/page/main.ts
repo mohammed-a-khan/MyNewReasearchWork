@@ -17,7 +17,7 @@ import { isHiddenForAria, isVisible } from './visibility.js';
 
 export const ENGINE_VERSION = 'eztest-engine/1.0';
 
-function elementState(el: Element, state: ElementStateName): boolean {
+function checkState(el: Element, state: ElementStateName): boolean {
   return withCaches(() =>
     withRoleCache(() => {
       switch (state) {
@@ -35,7 +35,7 @@ function elementState(el: Element, state: ElementStateName): boolean {
         case 'checked':
         case 'unchecked': {
           const c = checkedState(el);
-          if (c === undefined) throw new Error('Not a checkbox or radio button');
+          if (c === undefined) throw new Error('The element is not a checkbox or radio button (nor an element with a checked state such as role=checkbox)');
           return state === 'checked' ? c === true : c === false;
         }
         default: throw new Error(`Unknown element state "${String(state)}"`);
@@ -91,7 +91,7 @@ export function createEngine(): EztestEngine {
     query,
     queryDetailed,
     actionability,
-    elementState,
+    checkState,
     accessibleName,
     accessibleDescription,
     role: (el) => withRoleCache(() => getRole(el)),

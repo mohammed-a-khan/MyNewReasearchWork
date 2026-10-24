@@ -3,13 +3,16 @@
  * BrowserType (launch / connectOverCDP / launchPersistentContext).
  */
 import { randomUUID } from 'node:crypto';
-import { createReadStream, mkdtempSync, type ReadStream } from 'node:fs';
+import { createReadStream, type ReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { debugLog } from '../debug.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError, isClosedError } from '../errors.js';
+import { checkLaunchOptions, signalHandlingOf } from '../launch-options.js';
+import { HarRecorder, checkRecordHar } from '../har-record.js';
+import { makeTempDir, untrackTempDir } from '../launcher/temp-dirs.js';
+import { DOWNLOADS_OFF_TEXT, bindingTakenMessage, closedMessage } from '../messages.js';
 import { routeFromHAR, type RouteFromHAROptions } from '../har.js';
 import { launchChromiumProcess, resolveBrowserWsEndpoint, stderrTailOf, type LaunchedProcess } from '../launcher/launch.js';
 import { findChromium } from '../launcher/find.js';
@@ -21,9 +24,9 @@ import type { BrowserContextOptions, ClientCertificate, Cookie, Geolocation, HTT
 import { deferred, sleep, urlMatches, withTimeout, type Deferred } from '../util.js';
 import { clientCertificateFetcher, type CertFetcher } from './client-certs.js';
 import type { Vp8Encoder } from '../video/webm.js';
-import type { CrFrame } from './frame.js';
+import type { ChromiumFrame } from './frame.js';
 import type { ContinueOptions, Request, Response, RouteEntry, RouteHandlerFn } from './network.js';
-import { CrPage, bindingSource, initScriptSource, type BindingEntry, type ConsoleMessage, type Dialog, Worker } from './page.js';
+import { ChromiumPage, bindingSource, initScriptSource, type BindingEntry, type ConsoleMessage, type Dialog, Worker } from './page.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -32,11 +35,11 @@ import { CrPage, bindingSource, initScriptSource, type BindingEntry, type Consol
 export class Download {
   private readonly done: Deferred<'completed' | 'canceled'> = deferred();
   constructor(
-    private readonly page_: CrPage,
+    private readonly page_: ChromiumPage,
     private readonly url_: string,
     private readonly suggested: string,
     private readonly file: string,
-    private readonly browser: CrBrowser,
+    private readonly browser: ChromiumBrowser,
     private readonly guid: string,
     private readonly accepted: boolean,
   ) {}
@@ -45,7 +48,7 @@ export class Download {
     if (state === 'completed') this.done.resolve('completed');
     else if (state === 'canceled') this.done.resolve('canceled');
   }
-  page(): CrPage {
+  page(): ChromiumPage {
     return this.page_;
   }
   url(): string {
@@ -55,25 +58,25 @@ export class Download {
     return this.suggested;
   }
   async path(): Promise<string | null> {
-    if (!this.accepted) throw new Error('Pass { acceptDownloads: true } when you are creating your browser context.');
+    if (!this.accepted) throw new Error(DOWNLOADS_OFF_TEXT);
     const s = await this.done.promise;
     return s === 'completed' ? this.file : null;
   }
   async failure(): Promise<string | null> {
-    if (!this.accepted) return 'Pass { acceptDownloads: true } when you are creating your browser context.';
+    if (!this.accepted) return DOWNLOADS_OFF_TEXT;
     const s = await this.done.promise;
     return s === 'completed' ? null : 'canceled';
   }
   async saveAs(path: string): Promise<void> {
-    if (!this.accepted) throw new Error('Pass { acceptDownloads: true } when you are creating your browser context.');
+    if (!this.accepted) throw new Error(DOWNLOADS_OFF_TEXT);
     const s = await this.done.promise;
-    if (s !== 'completed') throw new Error('Download was canceled');
+    if (s !== 'completed') throw new Error('download.saveAs: the download did not complete (it was canceled or failed), so there is no file to save');
     await mkdir(dirname(path), { recursive: true });
     await copyFile(this.file, path);
   }
   async createReadStream(): Promise<ReadStream> {
     const p = await this.path();
-    if (!p) throw new Error('Download failed');
+    if (!p) throw new Error('download.createReadStream: the download did not complete, so there is no file to read');
     return createReadStream(p);
   }
   async delete(): Promise<void> {
@@ -112,22 +115,22 @@ const PERMISSIONS: Record<string, string[]> = {
 };
 
 export interface ContextEvents {
-  close: CrBrowserContext;
-  page: CrPage;
+  close: ChromiumContext;
+  page: ChromiumPage;
   request: Request;
   response: Response;
   requestfinished: Request;
   requestfailed: Request;
   console: ConsoleMessage;
   dialog: Dialog;
-  weberror: { page(): CrPage; error(): Error };
+  weberror: { page(): ChromiumPage; error(): Error };
   serviceworker: Worker;
-  backgroundpage: CrPage;
+  backgroundpage: ChromiumPage;
 }
 
-export class CrBrowserContext extends TypedEmitter<ContextEvents> {
-  readonly pages_ = new Set<CrPage>();
-  protected readonly pageWaiters = new Map<string, Deferred<CrPage>>();
+export class ChromiumContext extends TypedEmitter<ContextEvents> {
+  readonly pages_ = new Set<ChromiumPage>();
+  protected readonly pageWaiters = new Map<string, Deferred<ChromiumPage>>();
   protected readonly routes: RouteEntry[] = [];
   protected readonly initScripts: string[] = [];
   protected readonly bindings = new Map<string, BindingEntry>();
@@ -146,10 +149,10 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   /** True for the browser's default context (connectOverCDP, persistent, Electron). */
   readonly isDefault: boolean;
   /** Owner page for browser.newPage() contexts (closed with the page). */
-  ownerPage?: CrPage;
+  ownerPage?: ChromiumPage;
 
   constructor(
-    protected readonly browser_: CrBrowser,
+    protected readonly browser_: ChromiumBrowser,
     readonly id: string | undefined,
     readonly options: BrowserContextOptions,
   ) {
@@ -162,6 +165,19 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     this.tracing = new Tracing(this);
     this.request = new APIRequestContext(this);
     if (options.clientCertificates?.length) this.certFetcher = clientCertificateFetcher(options.clientCertificates, this);
+    if (options.recordHar) checkRecordHar(options.recordHar);
+  }
+
+  /** recordHar: records the requests of every page of this context; the HAR is written on close(). */
+  protected har?: HarRecorder;
+
+  /** Internal: start the recordHar recorder (once; existing pages included). */
+  protected startHarRecording(): void {
+    if (this.har || !this.options.recordHar) return;
+    const har = new HarRecorder(this.options.recordHar);
+    this.har = har;
+    for (const p of this.pages_) har.attach(p);
+    this.on('page', (p) => har.attach(p));
   }
 
   protected override eventTimeout(): number {
@@ -170,6 +186,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
 
   /** Internal: apply options that live in the browser (downloads, permissions, storage state). */
   async initialize(): Promise<void> {
+    this.startHarRecording();
     await this.applyDownloadBehavior();
     if (this.options.permissions?.length) await this.grantPermissions(this.options.permissions);
     if (this.options.storageState) await this.loadStorageState(this.options.storageState);
@@ -190,11 +207,11 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     }).catch(() => undefined);
   }
 
-  browser(): CrBrowser {
+  browser(): ChromiumBrowser {
     return this.browser_;
   }
 
-  pages(): CrPage[] {
+  pages(): ChromiumPage[] {
     return [...this.pages_].filter((p) => p.initialized && !p.isClosed());
   }
 
@@ -267,19 +284,19 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   }
 
   // ------------------------------------------------------------------ pages
-  async newPage(): Promise<CrPage> {
-    if (this.closed) throw new TargetClosedError('browserContext.newPage: Target page, context or browser has been closed');
-    if (this.ownerPage) throw new Error('Please use browser.newContext() for multi-page scripts');
+  async newPage(): Promise<ChromiumPage> {
+    if (this.closed) throw new TargetClosedError(closedMessage('browserContext.newPage'));
+    if (this.ownerPage) throw new Error('This context belongs to browser.newPage() and holds one page; create a context with browser.newContext() to open more pages');
     const { targetId } = await this.browser_.connection.root.send('Target.createTarget', { url: 'about:blank', ...(this.id ? { browserContextId: this.id } : {}) });
     return this.waitForPage(targetId);
   }
 
-  protected waitForPage(targetId: string): Promise<CrPage> {
+  protected waitForPage(targetId: string): Promise<ChromiumPage> {
     const ready = [...this.pages_].find((p) => p.targetId === targetId && p.initialized);
     if (ready) return Promise.resolve(ready);
     let d = this.pageWaiters.get(targetId);
     if (!d) {
-      d = deferred<CrPage>();
+      d = deferred<ChromiumPage>();
       this.pageWaiters.set(targetId, d);
     }
     return withTimeout(d.promise, 30_000, () => 'Timed out waiting for the new page to start');
@@ -288,7 +305,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   /** Internal: a page target attached. */
   async onPageAttached(session: CDPSession, info: any): Promise<void> {
     const opener = info.openerId ? this.browser_.pageByTargetId(info.openerId) : undefined;
-    const page = new CrPage(this, session, info.targetId, opener);
+    const page = new ChromiumPage(this, session, info.targetId, opener);
     this.pages_.add(page);
     try {
       await page.initialize();
@@ -308,12 +325,12 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     if (opener) opener.emitEvent('popup', page);
   }
 
-  onPageClosed(page: CrPage): void {
+  onPageClosed(page: ChromiumPage): void {
     this.pages_.delete(page);
     if (this.ownerPage === page) void this.close();
   }
 
-  onFrameNavigated(page: CrPage, frame: CrFrame): void {
+  onFrameNavigated(page: ChromiumPage, frame: ChromiumFrame): void {
     this.tracing.onNavigation(page, frame);
   }
 
@@ -338,7 +355,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
 
   async addCookies(cookies: SetCookie[]): Promise<void> {
     const out = cookies.map((c) => {
-      if (!c.url && !(c.domain && c.path)) throw new Error(`Cookie should have a url or a domain/path pair`);
+      if (!c.url && !(c.domain && c.path)) throw new Error(`addCookies: cookie "${c.name}" needs either a url or both a domain and a path`);
       const base: Record<string, unknown> = { name: c.name, value: c.value };
       if (c.url) {
         const u = new URL(c.url);
@@ -425,7 +442,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     const mapped = new Set<string>();
     for (const p of permissions) {
       const m = PERMISSIONS[p];
-      if (!m) throw new Error(`Unknown permission: ${p}`);
+      if (!m) throw new Error(`grantPermissions: "${p}" is not a permission EZTest knows (known: ${Object.keys(PERMISSIONS).join(', ')})`);
       m.forEach((x) => mapped.add(x));
     }
     await this.browser_.connection.root.send('Browser.grantPermissions', {
@@ -442,7 +459,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   async setGeolocation(geolocation: Geolocation | null): Promise<void> {
     if (geolocation) {
       const { latitude, longitude } = geolocation;
-      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) throw new Error(`Invalid geolocation ${JSON.stringify(geolocation)}`);
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) throw new Error(`setGeolocation: latitude must be -90..90 and longitude -180..180 (got ${JSON.stringify(geolocation)})`);
     }
     this.geo = geolocation ?? undefined;
     for (const p of this.pages()) {
@@ -487,8 +504,8 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   }
 
   async exposeBinding(name: string, callback: BindingEntry['callback'], _options: { handle?: boolean } = {}): Promise<void> {
-    if (this.bindings.has(name)) throw new Error(`Function "${name}" has been already registered`);
-    for (const p of this.pages()) if (p.bindings.has(name)) throw new Error(`Function "${name}" has been already registered in one of the pages`);
+    if (this.bindings.has(name)) throw new Error(bindingTakenMessage(name));
+    for (const p of this.pages()) if (p.bindings.has(name)) throw new Error(bindingTakenMessage(name, ' on one of the pages'));
     const entry: BindingEntry = { name, callback, source: bindingSource(name) };
     this.bindings.set(name, entry);
     for (const p of this.pages()) await p.installBinding(entry);
@@ -522,11 +539,11 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
   }
 
   /** A raw protocol session attached to a page's (or frame's) target. */
-  async newCDPSession(target: CrPage | CrFrame): Promise<CDPSession> {
+  async newCDPSession(target: ChromiumPage | ChromiumFrame): Promise<CDPSession> {
     let targetId: string;
-    if (target instanceof CrPage) targetId = target.targetId;
+    if (target instanceof ChromiumPage) targetId = target.targetId;
     else {
-      const f = target as CrFrame;
+      const f = target as ChromiumFrame;
       targetId = f.session.isMain ? f.page().targetId : f.id;
     }
     const conn = this.browser_.connection;
@@ -540,13 +557,15 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     return [...this.serviceWorkers_];
   }
 
-  backgroundPages(): CrPage[] {
+  backgroundPages(): ChromiumPage[] {
     return [];
   }
 
   // ------------------------------------------------------------------ close
   async close(_options: { reason?: string } = {}): Promise<void> {
     if (this.closed) return;
+    // The HAR first, while the pages can still give their response bodies.
+    const harError = await this.har?.save().then(() => undefined, (e: unknown) => e);
     this.closed = true;
     const pages = [...this.pages_];
     const videos = pages.map((p) => p.video()).filter((v): v is NonNullable<typeof v> => !!v);
@@ -561,6 +580,7 @@ export class CrBrowserContext extends TypedEmitter<ContextEvents> {
     await Promise.all(videos.map((v) => v.finished().catch(() => undefined)));
     this.browser_.contextClosed(this);
     this.emitEvent('close', this);
+    if (harError) throw harError;
   }
 
   isClosed(): boolean {
@@ -584,12 +604,12 @@ function toCookie(c: any): Cookie {
 // ---------------------------------------------------------------------- browser
 
 export interface BrowserEvents {
-  disconnected: CrBrowser;
+  disconnected: ChromiumBrowser;
 }
 
-export class CrBrowser extends TypedEmitter<BrowserEvents> {
-  readonly contexts_ = new Map<string, CrBrowserContext>();
-  private defaultContext_?: CrBrowserContext;
+export class ChromiumBrowser extends TypedEmitter<BrowserEvents> {
+  readonly contexts_ = new Map<string, ChromiumContext>();
+  private defaultContext_?: ChromiumContext;
   private version_ = '';
   private userAgent_ = '';
   readonly downloadsDir: string;
@@ -605,7 +625,7 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
     downloadsPath?: string,
   ) {
     super();
-    this.downloadsDir = downloadsPath ?? mkdtempSync(join(tmpdir(), 'eztest-downloads-'));
+    this.downloadsDir = downloadsPath ?? makeTempDir('downloads');
     connection.on('disconnected', () => this.didDisconnect());
     const root = connection.root;
     root.on('Target.attachedToTarget', (e: any) => void this.onAttached(e));
@@ -618,8 +638,8 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
   }
 
   /** Connect a CDP connection and set up auto-attach. */
-  static async create(connection: CDPConnection, proc: LaunchedProcess | undefined, slowMo: number, type: ChromiumBrowserType, downloadsPath?: string): Promise<CrBrowser> {
-    const b = new CrBrowser(connection, proc, slowMo, type, downloadsPath);
+  static async create(connection: CDPConnection, proc: LaunchedProcess | undefined, slowMo: number, type: ChromiumBrowserType, downloadsPath?: string): Promise<ChromiumBrowser> {
+    const b = new ChromiumBrowser(connection, proc, slowMo, type, downloadsPath);
     const v = await connection.root.send('Browser.getVersion');
     b.version_ = String(v.product).replace(/^[^/]*\//, '');
     b.userAgent_ = String(v.userAgent).replace('HeadlessChrome/', 'Chrome/');
@@ -631,18 +651,18 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
     return this.userAgent_;
   }
 
-  pageByTargetId(targetId: string): CrPage | undefined {
+  pageByTargetId(targetId: string): ChromiumPage | undefined {
     for (const c of this.allContexts()) for (const p of c.pages_) if (p.targetId === targetId) return p;
     return undefined;
   }
 
-  private allContexts(): CrBrowserContext[] {
+  private allContexts(): ChromiumContext[] {
     return [...this.contexts_.values(), ...(this.defaultContext_ ? [this.defaultContext_] : [])];
   }
 
   /** The default (non-incognito) context, created on first use. */
-  defaultContext(): CrBrowserContext {
-    if (!this.defaultContext_) this.defaultContext_ = new CrBrowserContext(this, undefined, { viewport: null });
+  defaultContext(): ChromiumContext {
+    if (!this.defaultContext_) this.defaultContext_ = new ChromiumContext(this, undefined, { viewport: null });
     return this.defaultContext_;
   }
 
@@ -682,7 +702,7 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
   }
 
   private onDownloadWillBegin(e: any): void {
-    let page: CrPage | undefined;
+    let page: ChromiumPage | undefined;
     for (const c of this.allContexts()) for (const p of c.pages_) if (p.frameById(e.frameId)) page = p;
     if (!page) return;
     const accepted = page.context().options.acceptDownloads !== false;
@@ -691,32 +711,32 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
     page.onDownload(d, e.frameId);
   }
 
-  contextClosed(ctx: CrBrowserContext): void {
+  contextClosed(ctx: ChromiumContext): void {
     if (ctx.id) this.contexts_.delete(ctx.id);
   }
 
   // ------------------------------------------------------------------ public API
-  async newContext(options: BrowserContextOptions = {}): Promise<CrBrowserContext> {
-    if (!this.connected) throw new TargetClosedError('browser.newContext: Target page, context or browser has been closed');
+  async newContext(options: BrowserContextOptions = {}): Promise<ChromiumContext> {
+    if (!this.connected) throw new TargetClosedError(closedMessage('browser.newContext'));
     const proxy = options.proxy;
     const { browserContextId } = await this.connection.root.send('Target.createBrowserContext', {
       disposeOnDetach: true,
       ...(proxy ? { proxyServer: proxy.server, ...(proxy.bypass ? { proxyBypassList: proxy.bypass } : {}) } : {}),
     });
-    const ctx = new CrBrowserContext(this, browserContextId, options);
+    const ctx = new ChromiumContext(this, browserContextId, options);
     this.contexts_.set(browserContextId, ctx);
     await ctx.initialize();
     return ctx;
   }
 
-  async newPage(options: BrowserContextOptions = {}): Promise<CrPage> {
+  async newPage(options: BrowserContextOptions = {}): Promise<ChromiumPage> {
     const ctx = await this.newContext(options);
     const page = await ctx.newPage();
     ctx.ownerPage = page;
     return page;
   }
 
-  contexts(): CrBrowserContext[] {
+  contexts(): ChromiumContext[] {
     return [...(this.defaultContext_ && this.defaultContext_.pages().length ? [this.defaultContext_] : []), ...this.contexts_.values()];
   }
 
@@ -752,6 +772,7 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
           this.connection.close();
         }
         await rm(this.downloadsDir, { recursive: true, force: true }).catch(() => undefined);
+        untrackTempDir(this.downloadsDir);
         this.didDisconnect();
       })();
     }
@@ -791,8 +812,8 @@ export class CrBrowser extends TypedEmitter<BrowserEvents> {
  * A VP8 encoder that runs in the browser under test: WebCodecs VideoEncoder in
  * a scratch page (its own context) on a secure origin whose document we serve.
  */
-export function browserVp8Encoder(newContext: () => Promise<{ newPage(): Promise<CrPage> }>): Vp8Encoder {
-  let encoderPage: Promise<CrPage> | undefined;
+export function browserVp8Encoder(newContext: () => Promise<{ newPage(): Promise<ChromiumPage> }>): Vp8Encoder {
+  let encoderPage: Promise<ChromiumPage> | undefined;
   return async (frames, size) => {
     if (!encoderPage) {
       encoderPage = (async () => {
@@ -873,8 +894,10 @@ export class ChromiumBrowserType {
     return findChromium().executablePath;
   }
 
-  async launch(options: LaunchOptions = {}): Promise<CrBrowser> {
+  async launch(options: LaunchOptions = {}): Promise<ChromiumBrowser> {
+    checkLaunchOptions(options, 'browserType.launch');
     const proc = await launchChromiumProcess({
+      handleSignals: signalHandlingOf(options),
       executablePath: options.executablePath,
       channel: options.channel,
       headless: options.headless,
@@ -889,9 +912,9 @@ export class ChromiumBrowserType {
     const connection = new CDPConnection(proc.transport);
     try {
       return await withTimeout(
-        CrBrowser.create(connection, proc, options.slowMo ?? 0, this, options.downloadsPath),
+        ChromiumBrowser.create(connection, proc, options.slowMo ?? 0, this, options.downloadsPath),
         options.timeout ?? 180_000,
-        () => `browserType.launch: Timeout ${options.timeout ?? 180_000}ms exceeded.\n${stderrTailOf(proc)}`,
+        () => `browserType.launch: timed out after ${options.timeout ?? 180_000} ms waiting for the browser to start\n${stderrTailOf(proc)}`,
       );
     } catch (e) {
       await proc.kill().catch(() => undefined);
@@ -908,13 +931,13 @@ export class ChromiumBrowserType {
    * request and the WebSocket handshake. Closing the returned browser closes only the contexts
    * created through it and disconnects; the browser keeps running.
    */
-  async connectOverCDP(endpointURL: string | { endpointURL?: string; wsEndpoint?: string }, options: ConnectOverCDPOptions = {}): Promise<CrBrowser> {
+  async connectOverCDP(endpointURL: string | { endpointURL?: string; wsEndpoint?: string }, options: ConnectOverCDPOptions = {}): Promise<ChromiumBrowser> {
     const url = typeof endpointURL === 'string' ? endpointURL : (endpointURL.wsEndpoint ?? endpointURL.endpointURL ?? '');
     const timeout = options.timeout ?? 30_000;
     const ws = await resolveBrowserWsEndpoint(url, options.headers, timeout);
     const transport = await WebSocketTransport.connect(ws, timeout, options.headers);
     const connection = new CDPConnection(transport);
-    const b = await withTimeout(CrBrowser.create(connection, undefined, options.slowMo ?? 0, this), timeout, () => `connectOverCDP: Timeout ${timeout}ms exceeded talking to the browser`).catch((e: unknown) => {
+    const b = await withTimeout(ChromiumBrowser.create(connection, undefined, options.slowMo ?? 0, this), timeout, () => `connectOverCDP: timed out after ${timeout} ms talking to the browser`).catch((e: unknown) => {
       transport.close();
       throw e;
     });
@@ -924,8 +947,10 @@ export class ChromiumBrowserType {
   }
 
   /** Launch with a persistent profile and return its default context. */
-  async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions = {}): Promise<CrBrowserContext> {
+  async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions = {}): Promise<ChromiumContext> {
+    checkLaunchOptions(options, 'browserType.launchPersistentContext');
     const proc = await launchChromiumProcess({
+      handleSignals: signalHandlingOf(options),
       executablePath: options.executablePath,
       channel: options.channel,
       headless: options.headless,
@@ -937,7 +962,7 @@ export class ChromiumBrowserType {
       proxy: options.proxy,
     });
     const connection = new CDPConnection(proc.transport);
-    const b = await CrBrowser.create(connection, proc, options.slowMo ?? 0, this, options.downloadsPath);
+    const b = await ChromiumBrowser.create(connection, proc, options.slowMo ?? 0, this, options.downloadsPath);
     const ctx = b.defaultContext();
     Object.assign(ctx.options, options);
     await ctx.initialize();

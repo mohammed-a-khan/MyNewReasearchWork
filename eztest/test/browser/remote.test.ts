@@ -46,7 +46,13 @@ function startBrowser(bin: string, args: string[], announce: RegExp): Promise<{ 
   const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let exited = false;
   proc.once('exit', () => { exited = true; });
-  cleanups.push(() => { if (!exited) proc.kill('SIGKILL'); });
+  // Kill and wait for the exit, so the profile is no longer written to when it is removed.
+  cleanups.push(async () => {
+    if (exited) return;
+    const gone = new Promise<void>((r) => proc.once('exit', () => r()));
+    proc.kill('SIGKILL');
+    await Promise.race([gone, new Promise((r) => setTimeout(r, 5000))]);
+  });
   return new Promise((resolve, reject) => {
     let buf = '';
     const timer = setTimeout(() => reject(new Error(`no endpoint from ${bin}: ${buf.slice(-500)}`)), 60_000);
@@ -126,7 +132,7 @@ describe.skipIf(onFirefox)('remote Chrome over its DevTools endpoint (CDP)', () 
   let httpBase: string;
   beforeAll(async () => {
     const profile = mkdtempSync(join(tmpdir(), 'eztest-remote-chrome-'));
-    cleanups.push(() => rmSync(profile, { recursive: true, force: true }));
+    cleanups.push(() => rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
     chrome = await startBrowser(findChromium().executablePath, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
       ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), 'about:blank',
@@ -214,7 +220,7 @@ describe('remote Firefox over WebDriver BiDi', () => {
   beforeAll(async () => {
     if (!firefoxPath) return;
     const profile = mkdtempSync(join(tmpdir(), 'eztest-remote-ff-'));
-    cleanups.push(() => rmSync(profile, { recursive: true, force: true }));
+    cleanups.push(() => rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
     ff = await startBrowser(firefoxPath, ['--headless', '--no-remote', '--remote-debugging-port=0', '--profile', profile, 'about:blank'], /WebDriver BiDi listening on (ws:\/\/\S+)/);
   });
 
