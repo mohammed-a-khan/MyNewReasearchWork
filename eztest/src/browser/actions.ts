@@ -154,6 +154,7 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
     const page = target.page;
     const release = await holdModifiers(page, o.modifiers);
     const navBefore = { starts: page.navStarts, ends: page.navEnds };
+    const pressesBefore = page.mouse.pressesSent + page.touchscreen.touchesSent;
     try {
       if (action === 'hover') await page.mouse.move(x, y);
       else if (action === 'tap') await page.touchscreen.tap(x, y);
@@ -168,9 +169,18 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
         }
         await page.mouse.click(x, y, { button: o.button, clickCount: action === 'dblclick' ? 2 : (o.clickCount ?? 1), delay: o.delay });
       }
+    } catch (e) {
+      // The press reached the page and the page went away while the input command was in flight
+      // (its handler ran window.close()): the browser detaches the target before it acknowledges the
+      // command, so the command fails "target closed". The click happened; its outcome is the close.
+      if (isClosedError(e as Error) && page.mouse.pressesSent + page.touchscreen.touchesSent > pressesBefore) return { done: undefined };
+      throw e;
     } finally {
-      await release();
+      await release().catch((e: Error) => {
+        if (!isClosedError(e) && !page.isClosed()) throw e;
+      });
     }
+    if (page.isClosed()) return { done: undefined };
     if (!o.noWaitAfter && action !== 'hover') await page.waitForInitiatedNavigation(navBefore, timeoutFor(target, o));
     return { done: undefined };
   });

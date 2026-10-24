@@ -146,6 +146,8 @@ const BUTTON_BITS: Record<MouseButton, number> = { left: 1, right: 2, middle: 4 
 export class Mouse {
   x = 0;
   y = 0;
+  /** Presses sent to the page (counted before the command is acknowledged: a press can close the page). */
+  pressesSent = 0;
   protected buttons = new Set<MouseButton>();
 
   constructor(private readonly session: () => CDPSession, protected readonly keyboard: Keyboard, protected readonly slowMo: () => number) {}
@@ -179,6 +181,7 @@ export class Mouse {
   async down(options: { button?: MouseButton; clickCount?: number } = {}): Promise<void> {
     const button = options.button ?? 'left';
     this.buttons.add(button);
+    this.pressesSent++;
     await this.session().send('Input.dispatchMouseEvent', {
       type: 'mousePressed', x: this.x, y: this.y, button, buttons: this.buttonMask(), clickCount: options.clickCount ?? 1, modifiers: this.keyboard.modifiers(),
     });
@@ -217,10 +220,14 @@ export class Mouse {
 }
 
 export class Touchscreen {
+  /** Touches sent to the page (counted before the command is acknowledged). */
+  touchesSent = 0;
+
   constructor(private readonly session: () => CDPSession, protected readonly keyboard: Keyboard, protected readonly hasTouch: () => boolean) {}
 
   async tap(x: number, y: number): Promise<void> {
     if (!this.hasTouch()) throw new Error('hasTouch must be enabled on the browser context before using the touchscreen.');
+    this.touchesSent++;
     const modifiers = this.keyboard.modifiers();
     await this.session().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }], modifiers });
     await this.session().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [], modifiers });

@@ -171,6 +171,7 @@ export class FfMouse extends Mouse {
   override async down(options: { button?: MouseButton; clickCount?: number } = {}): Promise<void> {
     const button = options.button ?? 'left';
     this.buttons.add(button);
+    this.pressesSent++;
     await this.send([{ type: 'pointerDown', button: BUTTONS[button] }]);
   }
 
@@ -188,6 +189,7 @@ export class FfMouse extends Mouse {
     const button = BUTTONS[options.button ?? 'left'];
     const actions: unknown[] = [{ type: 'pointerMove', x: p.x, y: p.y, origin: 'viewport', duration: 0 }];
     for (let i = 0; i < count; i++) actions.push({ type: 'pointerDown', button }, { type: 'pointerUp', button });
+    this.pressesSent++;
     await this.send(actions);
     this.x = x;
     this.y = y;
@@ -210,6 +212,7 @@ export class FfTouchscreen extends Touchscreen {
 
   override async tap(x: number, y: number): Promise<void> {
     if (!this.hasTouch()) throw new Error('hasTouch must be enabled on the browser context before using the touchscreen.');
+    this.touchesSent++;
     await this.target.performActions([{
       type: 'pointer', id: 'ez-touch', parameters: { pointerType: 'touch' },
       actions: [{ type: 'pointerMove', x, y, origin: 'viewport', duration: 0 }, { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 }],

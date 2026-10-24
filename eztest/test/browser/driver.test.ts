@@ -431,6 +431,23 @@ describe('dialogs, downloads, popups and frames', () => {
     });
   });
 
+  it('a click whose handler closes the page resolves (the close can beat the input acknowledgement)', async () => {
+    await withPage(async (page) => {
+      await page.goto(`${demo.url}/lab/tabs`);
+      // The page closes on mousedown ("Close now") or on click ("Send back"), while the input command is
+      // still in flight; repeated, so the race between the close and the acknowledgement goes both ways.
+      for (let i = 0; i < 6; i++) {
+        for (const name of ['Close now', 'Send back']) {
+          const [popup] = await Promise.all([page.waitForEvent('popup'), page.locator('#open-popup').click()]);
+          await popup.waitForLoadState();
+          await Promise.all([popup.waitForEvent('close'), popup.getByRole('button', { name }).click()]);
+          expect(popup.isClosed()).toBe(true);
+        }
+      }
+      expect(await page.locator('#popup-result').textContent()).toBe('Popup says hi');
+    });
+  });
+
   it('works inside nested frames and out-of-process iframes', async () => {
     await withPage(async (page) => {
       await page.goto(`${demo.url}/lab/frames`);
