@@ -156,6 +156,9 @@ describe('recorder composer: mouse, keyboard and downloads', () => {
       { kind: 'press', key: 'Escape' },
       { kind: 'press', key: 'Tab', el: el({ tag: 'input', field: true, role: 'textbox', label: 'Search', counts: { roleName: 0, label: 1, placeholder: 0, placeholderAsLabel: 0, text: 0, testId: 0, id: 0 } }) },
       { kind: 'press', key: 'a' },
+      { kind: 'press', key: 'b' },
+      { kind: 'press', key: 'Space' },
+      { kind: 'press', key: 'c' },
       { kind: 'click', el: link('report.pdf') },
       { kind: 'download', filename: 'report.pdf' },
     ]);
@@ -166,7 +169,7 @@ describe('recorder composer: mouse, keyboard and downloads', () => {
       'Drag #column-a to #column-b',
       'Press Escape',
       'Press Tab in the Search field',
-      'Press a',
+      'Type "ab c" on the keyboard',
       'Download the "report.pdf" link as reportFile',
       '  Expect download reportFile exists',
     ]);

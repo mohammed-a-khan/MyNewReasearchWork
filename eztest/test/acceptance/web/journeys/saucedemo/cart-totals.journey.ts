@@ -10,7 +10,7 @@ journey('Sauce Demo: the checkout adds up', { tags: ['@saucedemo', '@code'], bas
   await ui.open('/');
   await ui.fill('the Username field', 'standard_user');
   await ui.fill('the Password field', vars.text('password'));
-  await ui.click('the "Login" button', { expect: { url: '/inventory.html' } });
+  await ui.click('the "Login" button', { expect: { url: '/inventory.html', text: 'Sauce Labs Backpack' } });
 
   const products = await step('Read every product and its price', async () => {
     const names = await ui.texts('testid=inventory-item-name');

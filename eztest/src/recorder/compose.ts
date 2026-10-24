@@ -248,7 +248,33 @@ export class JourneyComposer {
       }
       case 'check': return this.action('check', ev);
       case 'uncheck': return this.action('uncheck', ev);
-      case 'press': return this.action('press', ev, ev.key);
+      case 'press': {
+        // Letters typed on the page itself (not in a field) read as text: `Type "abc" on the keyboard`.
+        const ch = ev.key === 'Space' ? ' ' : ev.key;
+        if (!ev.el && ch.length === 1) {
+          const last = this.drafts[this.drafts.length - 1];
+          const prev = last && !last.step.target && stable(last.frames ?? []) === stable(ev.frames ?? []) && last.postconditions.length === 0
+            ? last.step.action === 'keyboard' && last.step.args?.op === 'type' ? last.step.value ?? ''
+              : last.step.action === 'press' && (last.step.value === 'Space' || (last.step.value ?? '').length === 1) ? (last.step.value === 'Space' ? ' ' : last.step.value ?? '')
+                : undefined
+            : undefined;
+          if (prev !== undefined) {
+            try {
+              const line = `Type ${quoteText(literalValue(prev + ch))} on the keyboard`;
+              const step = parseIntent(line);
+              if (step.action === 'keyboard' && step.value === literalValue(prev + ch)) {
+                last.step = step;
+                this.lastActionT = ev.t;
+                this.opts.onStep?.(line);
+                return;
+              }
+            } catch {
+              // a press step of its own
+            }
+          }
+        }
+        return this.action('press', ev, ev.key);
+      }
       case 'upload': {
         if (ev.files.length === 0) {
           this.warn(`The file selection of ${buildTarget(ev.el).label} was cleared; not recorded.`);

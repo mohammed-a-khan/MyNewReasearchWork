@@ -148,7 +148,7 @@ export function expectPassed(run: RunResult): void {
 export async function replay(source: RecordingResult | string | Journey, variables: Record<string, string> = {}): Promise<RunResult> {
   const journey = typeof source === 'string' ? parseEzScript(source) : 'journey' in source ? parseEzScript(source.ez) : source;
   const outputDir = await mkdtemp(join(tmpdir(), 'eztest-accept-web-'));
-  return runJourneys([journey], { outputDir, variables, screenshots: 'on-failure' });
+  return runJourneys([journey], { outputDir, variables, screenshots: 'on-failure', browser: BROWSER });
 }
 
 /**
@@ -158,7 +158,7 @@ export async function replay(source: RecordingResult | string | Journey, variabl
 export async function runProject(site: string, files: string[], opts: { vars?: Record<string, string> } = {}): Promise<RunResult> {
   const dir = await mkdtemp(join(tmpdir(), `eztest-accept-${site}-`));
   await cp(join(HERE, 'journeys', site), join(dir, 'journeys'), { recursive: true });
-  await writeFile(join(dir, 'eztest.config.yaml'), `journeysDir: journeys\nscreenshots: on-failure\nheadless: true\n`);
+  await writeFile(join(dir, 'eztest.config.yaml'), `journeysDir: journeys\nscreenshots: on-failure\nheadless: true\nbrowser: ${BROWSER}\n`);
   const { loadJourneys } = await import('../../../src/cli/journeys.js');
   const loaded = await loadJourneys(files.map((f) => join(dir, 'journeys', f)), dir);
   expect(loaded.errors ?? [], JSON.stringify(loaded.errors ?? [])).toEqual([]);

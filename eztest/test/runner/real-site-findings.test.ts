@@ -103,6 +103,81 @@ describe('FINDING (parabank.parasoft.com): "the First Name field" in a form laid
   });
 });
 
+describe('FINDING (demoqa.com under load): a click before the page wired its buttons opened no tab', () => {
+  it('clicks once more when the first click changed nothing, and never twice when it did', async () => {
+    const { createServer } = await import('node:http');
+    const { runJourneys } = await import('../../src/runner/index.js');
+    const { parseEzScript } = await import('../../src/intent/index.js');
+    const { FAST, tempDir } = await import('./fixtures.js');
+    const pages: Record<string, string> = {
+      // The buttons work only after 1.5 s, like a server-rendered page whose scripts are still loading.
+      '/late': `<!doctype html><button id="tab">New Tab</button><button id="say">Say hello</button><p id="out"></p><script>
+        setTimeout(() => {
+          document.getElementById('tab').onclick = () => window.open('/sample');
+          document.getElementById('say').onclick = () => { document.getElementById('out').textContent = 'Hello'; };
+        }, 1500);</script>`,
+      '/sample': '<!doctype html><h1>Sample</h1>',
+      '/count': `<!doctype html><button onclick="n.textContent = String(Number(n.textContent) + 1)">Add</button><p id="n">0</p>`,
+    };
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(pages[new URL(req.url ?? '/', 'http://x').pathname] ?? '');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const ez = `Journey: Late buttons\nBase URL: http://127.0.0.1:${port}\n\nOpen /late\nClick the "Say hello" button\n  Expect the page contains "Hello"\nClick the "New Tab" button and switch to the new tab\n  Expect the page contains "Sample"\nOpen /count\nClick the "Add" button\n  Expect the text of #n is "1"\nWait 2.5 seconds\nExpect the text of #n is "1"\n`;
+      const run = await runJourneys([parseEzScript(ez)], { ...FAST, outputDir: await tempDir('eztest-dead-click-') });
+      const j = run.journeys[0];
+      expect(j.steps.map((s) => `${s.status} ${s.intent}${s.error ? `: ${s.error.message}` : ''}`).filter((l) => !l.startsWith('passed'))).toEqual([]);
+      expect(j.status).toBe('passed');
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe('FINDING (automationexercise.com): a full-screen Google ad after a link click stopped the journey', () => {
+  it('closes the ad the way a person does, and the link then goes where it was going', async () => {
+    const { createServer } = await import('node:http');
+    const { runJourneys } = await import('../../src/runner/index.js');
+    const { parseEzScript } = await import('../../src/intent/index.js');
+    const { FAST, tempDir } = await import('./fixtures.js');
+    // Google's vignette: the click is held back, #google_vignette is added to the address, a full-screen ad shows
+    // until its "Close" button in the ad's frame is clicked, then the page goes to the link.
+    const ad = `<div id='dismiss-button' role='button' aria-label='Close ad' onclick='parent.closeAd()' style='width:80px;height:30px'>Close</div>`;
+    const pages: Record<string, string> = {
+      '/': `<!doctype html><a href="/products" id="p">Products</a>
+        <ins class="adsbygoogle" style="display:none"></ins><script>
+        const ins = document.querySelector('ins');
+        document.getElementById('p').addEventListener('click', (e) => {
+          e.preventDefault();
+          location.hash = 'google_vignette';
+          ins.setAttribute('data-vignette-loaded', 'true');
+          ins.style.cssText = 'display:block;position:fixed;inset:0;width:100vw;height:100vh;background:#000;z-index:99';
+          ins.innerHTML = ${JSON.stringify(`<iframe srcdoc="${ad.replace(/"/g, '&quot;')}" style="width:300px;height:100px"></iframe>`)};
+        });
+        window.closeAd = () => { ins.style.display = 'none'; location.href = '/products'; };
+        </script>`,
+      '/products': '<!doctype html><h1>All Products</h1>',
+    };
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(pages[new URL(req.url ?? '/', 'http://x').pathname] ?? '');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const ez = `Journey: Ad in the way\nBase URL: http://127.0.0.1:${port}\n\nOpen /\nClick the "Products" link\n  Expect the URL contains "/products"\n  Expect the page contains "All Products"\n`;
+      const run = await runJourneys([parseEzScript(ez)], { ...FAST, outputDir: await tempDir('eztest-vignette-') });
+      const j = run.journeys[0];
+      expect(j.steps.map((s) => `${s.status} ${s.intent}${s.error ? `: ${s.error.message}` : ''}`).filter((l) => !l.startsWith('passed'))).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+});
+
 describe('FINDING (the-internet nested frames): a frame named "frame-top" was taken for a CSS selector', () => {
   it('looks a frame name up as a name; selectors still work', () => {
     expect(frameSelectorCandidates('frame-top')[0]).toBe('iframe[name="frame-top"]');

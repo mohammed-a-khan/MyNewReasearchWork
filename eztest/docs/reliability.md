@@ -67,6 +67,22 @@ React and Vue have no public quiescence API, so for them the request counter
 `ignoreUrls`. Reaching `timeoutMs` (10 s) is not an error: the step goes ahead
 and the wait is recorded with cause `network`.
 
+### Clicks the page did not see yet
+
+A server-rendered page shows its buttons before its scripts wire them; a click then does nothing. A click
+that must have an effect (it has post-conditions, or opens a tab) is watched: when nothing at all happens
+within 2 s (no change in the element's document, no navigation, request, new tab, dialog or download) and
+its post-conditions do not already hold, it is clicked once more and the log says so. Checkboxes, radio
+buttons, switches, selects, labels and file inputs are never clicked twice.
+
+### Ads and consent walls in front of the page
+
+Google's full-screen "vignette" ad (shown after a link click, the address ending in `#google_vignette`)
+and Google's consent dialog (Funding Choices) are closed before each action and while post-conditions
+are polled, with a line in the log; the link then goes where it was going. The recorder ignores what is
+done inside ad frames. An app's own dialogs and banners are never dismissed automatically: they are part
+of what is tested.
+
 ### Re-render safety
 
 - **Lost values.** After `fill` and `select` the runner waits for the app to

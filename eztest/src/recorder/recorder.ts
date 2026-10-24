@@ -139,6 +139,9 @@ async function frameChainWithRetry(frame: Frame): Promise<string[]> {
   }
 }
 
+/** Frames of ad networks: what happens in them is never a step. */
+const AD_FRAME = /^https?:\/\/(?:[^/]*\.)?(?:doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.[a-z.]+|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com)\//i;
+
 const FLUSH_EXPR = 'window.__ezRecorder && window.__ezRecorder.flush ? window.__ezRecorder.flush() : []';
 const DETACH_EXPR = 'window.__ezRecorder ? (window.__ezRecorder.binding = null, true) : false';
 
@@ -248,6 +251,8 @@ export class Recorder {
     if (this.stopped || this.stopping) return;
     const ev = payload as PageEvent;
     if (!ev || typeof ev !== 'object' || typeof (ev as { kind?: unknown }).kind !== 'string') return;
+    // Closing an ad (Google's full-screen vignette) is not part of the journey: the runner closes those itself.
+    for (let f: Frame | null = source.frame; f; f = f.parentFrame()) if (AD_FRAME.test(f.url())) return;
     // A popup can report its first action before the context's "page" event reaches us.
     if (!this.tabs.has(source.page)) this.onNewPage(source.page);
     const tab = this.tabs.get(source.page) ?? 1;

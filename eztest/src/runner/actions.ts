@@ -71,6 +71,82 @@ function key(step: Step, fallback?: string): string {
   return k;
 }
 
+/** How long a click may take to show any effect before it is taken for a click the page did not see yet. */
+const DEAD_CLICK_MS = 2000;
+
+/**
+ * Watch whether a click has any effect at all: a change anywhere in the element's document, a navigation, a
+ * request, a new tab, a dialog or a download. Undefined when the element is a control whose effect is invisible
+ * to that (a checkbox, a select, a file input), so it is never clicked twice.
+ */
+async function watchEffects(target: Locator, ctx: StepContext): Promise<{ changed(ms: number): Promise<boolean>; stop(): void } | undefined> {
+  const page = ctx.page;
+  let ready: boolean;
+  try {
+    ready = await target.evaluate((el) => {
+      const tag = el.tagName.toLowerCase();
+      const type = ((el as HTMLInputElement).type || '').toLowerCase();
+      if (tag === 'select' || tag === 'option' || tag === 'label' || (tag === 'input' && type !== 'button' && type !== 'submit' && type !== 'image' && type !== 'reset')) return false;
+      if (el.closest('label') || el.closest('summary') || el.getAttribute('role') === 'checkbox' || el.getAttribute('role') === 'switch' || el.getAttribute('role') === 'radio') return false;
+      const w = el.ownerDocument.defaultView as unknown as { __ezEffects?: number; __ezEffectsMo?: MutationObserver };
+      w.__ezEffects = 0;
+      w.__ezEffectsMo?.disconnect();
+      w.__ezEffectsMo = new MutationObserver(() => { w.__ezEffects = (w.__ezEffects ?? 0) + 1; });
+      w.__ezEffectsMo.observe(el.ownerDocument, { subtree: true, childList: true, attributes: true, characterData: true });
+      return true;
+    }, undefined, { timeout: 2000 });
+  } catch {
+    return undefined;
+  }
+  if (!ready) return undefined;
+  let other = false;
+  const onAny = () => { other = true; };
+  const onNav = (f: { parentFrame(): unknown }) => { if (!f.parentFrame()) other = true; };
+  const url = page.url();
+  const pages = ctx.session?.pages.lastNumber;
+  page.on('request', onAny);
+  page.on('dialog', onAny);
+  page.on('download', onAny);
+  page.on('framenavigated', onNav);
+  const stop = () => {
+    page.off('request', onAny);
+    page.off('dialog', onAny);
+    page.off('download', onAny);
+    page.off('framenavigated', onNav);
+    void target.evaluate((el) => {
+      const w = el.ownerDocument.defaultView as unknown as { __ezEffectsMo?: MutationObserver };
+      w.__ezEffectsMo?.disconnect();
+    }, undefined, { timeout: 1000 }).catch(() => undefined);
+  };
+  const changed = async (ms: number): Promise<boolean> => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      if (other || page.isClosed() || page.url() !== url || (pages !== undefined && ctx.session!.pages.lastNumber !== pages)) return true;
+      let n: number | undefined;
+      try {
+        n = await target.evaluate((el) => (el.ownerDocument.defaultView as unknown as { __ezEffects?: number }).__ezEffects ?? 0, undefined, { timeout: 1000 });
+      } catch {
+        return true; // gone, or the page moved on: the click did something
+      }
+      if (n === undefined || n > 0) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(150);
+    }
+  };
+  return { changed, stop };
+}
+
+/** Whether all of a step's post-conditions hold right now (a click that needed no change). */
+async function expectationsHold(step: Step, ctx: StepContext): Promise<boolean> {
+  const { evaluateConditionOnce } = await import('./conditions.js');
+  const env = { page: ctx.page, ledger: ctx.ledger, vars: () => ctx.vars(), interpolate: (t: string) => ctx.interpolate(t), ...(ctx.session ? { session: ctx.session, frames: ctx.session.frames } : {}) };
+  for (const c of step.postconditions) {
+    const r = await evaluateConditionOnce(c, env).catch(() => undefined);
+    if (!r?.passed) return false;
+  }
+  return true;
+}
+
 /** Perform a step's action. `loc` is the resolved target for target actions. */
 export async function performAction(step: Step, loc: Locator | undefined, ctx: StepContext, opts: RunOptions, timeout: number): Promise<ActionOutcome> {
   const { page } = ctx;
@@ -101,13 +177,24 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       // "Click X and switch to the new tab": wait for the popup/tab the click opens and make it current.
       const since = a.newPage && ctx.session ? ctx.session.pages.lastNumber : undefined;
       const target = need();
-      try {
-        await target.click({ timeout, ...(button ? { button } : {}), ...extra });
-      } catch (e) {
-        // A button that closes its own window (OAuth/payment popups, "Send back") can close the page
-        // before the driver finishes the click; the click happened, so this is not a failure.
-        if (!target.page().isClosed()) throw e;
+      const doClick = async () => {
+        try {
+          await target.click({ timeout, ...(button ? { button } : {}), ...extra });
+        } catch (e) {
+          // A button that closes its own window (OAuth/payment popups, "Send back") can close the page
+          // before the driver finishes the click; the click happened, so this is not a failure.
+          if (!target.page().isClosed()) throw e;
+        }
+      };
+      // A click that must have an effect (it has expectations, or opens a tab) is watched: one that changed nothing
+      // at all was too early (a server-rendered page whose scripts have not wired the button yet) and is repeated once.
+      const watch = (step.postconditions.length || since !== undefined) && !a.modifiers && !a.clickCount ? await watchEffects(target, ctx) : undefined;
+      await doClick();
+      if (watch && !(await watch.changed(DEAD_CLICK_MS)) && !(since === undefined && (await expectationsHold(step, ctx)))) {
+        ctx.logger.warn(`"${step.intent}": the click changed nothing on the page (its scripts were probably still starting); clicked again`, { stepId: step.id });
+        await doClick();
       }
+      watch?.stop();
       if (since !== undefined && ctx.session) {
         const entry = await ctx.session.pages.waitForNewPage(timeout, since);
         if (a.newPage !== 'wait') ctx.session.pages.activate(entry);

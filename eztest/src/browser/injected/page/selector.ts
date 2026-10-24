@@ -222,6 +222,7 @@ export function visualLabel(el: Element): string {
   if (!VISUAL_LABEL_TAGS.has(tag)) return '';
   if (tag === 'input' && NO_LABEL_TYPES.has(((el as HTMLInputElement).type || 'text').toLowerCase())) return '';
   if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el as HTMLInputElement).labels?.length) return '';
+  if (normalizeWhitespace(el.getAttribute('placeholder') || '')) return '';
   const clean = (s: string) => normalizeWhitespace(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, '');
   const cell = el.parentElement?.closest('td,th');
   if (cell && !clean(textWithoutControls(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
@@ -241,6 +242,7 @@ export function visualLabel(el: Element): string {
         if (box) return '';
         continue;
       }
+      if (lowerTag(n) === 'legend') return '';
     }
     const t = clean(n.nodeType === 3 ? (n as Text).data : isElement(n) ? textWithoutControls(n) : '');
     if (t) return t.length <= 60 ? t : '';

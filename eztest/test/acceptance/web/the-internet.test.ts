@@ -99,6 +99,7 @@ describe.skipIf(!ONLINE)('the-internet.herokuapp.com', () => {
         await page.goto(`${SITE}/iframe`);
         const editor = page.frameLocator('#mce_0_ifr').locator('body');
         await expect.poll(() => editor.getAttribute('contenteditable'), { timeout: 30_000 }).toBe('true');
+        await settle(2000); // the editor's toolbar finishes drawing; a person waits for it too
         await click(page, editor);
         await page.keyboard.press('Control+A');
         await type(page, 'Typed by a person');
@@ -160,7 +161,7 @@ describe.skipIf(!ONLINE)('the-internet.herokuapp.com', () => {
       const lines = bodyOf(r);
       expect(lines.slice(0, 4)).toEqual([
         'Open /hovers',
-        'Hover over the 2nd "User Avatar" image',
+        'Hover over the "User Avatar" image in the row containing "name: user2"',
         'Click the "View profile" link',
         '  Expect URL contains "/users/2"',
       ]);

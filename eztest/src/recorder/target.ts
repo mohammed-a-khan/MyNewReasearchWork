@@ -41,6 +41,15 @@ const SAFE_UNQUOTED = /^[\p{L}\p{N}][\p{L}\p{N} _-]*$/u;
 const SAFE_TESTID = /^[^\s"'`\\]+$/;
 const SAFE_ID = /^[A-Za-z][\w-]*$/;
 
+/**
+ * Ids a framework makes up and numbers per page load (jQuery UI's ui-id-3, Ember's ember123, React Select's
+ * react-select-2-option-1, MUI's mui-17, long numbers or hashes): different on the next run, so not a description.
+ */
+export function generatedId(id: string): boolean {
+  return /^(?:ui-id-\d+|ember\d+|react-select-\d+\b.*|mui-\d+|:r[0-9a-z]+:|downshift-\d+.*|headlessui-.*-\d+|radix-.*)$/i.test(id) ||
+    /\d{5,}/.test(id) || /[0-9a-f]{8,}/i.test(id.replace(/^[a-z]+[-_]/i, '')) && /\d/.test(id);
+}
+
 /** The element kind used for the description. */
 export function kindOf(info: ElementInfo): TargetKind {
   if (info.tag === 'select') return 'combobox';
@@ -172,7 +181,7 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
   }
   if (human) descriptions.push(human);
   if (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) descriptions.push(`testid=${info.testId}`);
-  if (info.id && c.id === 1 && SAFE_ID.test(info.id)) descriptions.push(`#${info.id}`);
+  if (info.id && c.id === 1 && SAFE_ID.test(info.id) && !generatedId(info.id)) descriptions.push(`#${info.id}`);
   if (kind === 'generic' && info.text && c.text === 1) {
     const q = tryQuote(info.text);
     if (q) descriptions.push(`the ${q} text`);

@@ -278,6 +278,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (!LABELLABLE[t]) return '';
       if (t === 'input' && /^(hidden|submit|button|reset|image)$/.test(inputType(el))) return '';
       if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el.labels && el.labels.length)) return '';
+      if (norm(el.getAttribute('placeholder'))) return '';
       var clean = function (s) { return norm(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, ''); };
       var cell = el.parentElement && el.parentElement.closest ? el.parentElement.closest('td,th') : null;
       if (cell && !clean(controlsText(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
@@ -293,6 +294,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (n.nodeType === 1) {
           if (LABELLABLE[lower(n)] || n.querySelector('input,select,textarea')) return '';
           if (lower(n) === 'br') { if (box) return ''; continue; }
+          if (lower(n) === 'legend') return '';
         }
         var nt = clean(n.nodeType === 3 ? n.data : n.nodeType === 1 ? controlsText(n) : '');
         if (nt) return nt.length <= 60 ? nt : '';
@@ -576,8 +578,9 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (c.contains(el) || el.contains(c) || NO_TEXT_TAGS[lower(c)]) continue;
         var t = visibleText(c);
         if (!t || t.length > 40 || out.indexOf(t) >= 0) continue;
+        // The words of one element ("name: user2"), not of a block holding several ("name: user2 View profile").
         var inner = false;
-        for (var j = 0; j < c.children.length; j++) if (visibleText(c.children[j]) === t) { inner = true; break; }
+        for (var j = 0; j < c.children.length; j++) if (visibleText(c.children[j])) { inner = true; break; }
         if (!inner) out.push(t);
       }
       return out;
@@ -1009,7 +1012,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
             return;
           }
         }
-        if (isField(el)) { var ev = fillEvent(el); if (ev) send(ev); }
+        // Only typed text: a value the page's own script put there (a picked suggestion) comes from the click before.
+        if (isField(el) && pending.has(el)) { var ev = fillEvent(el); if (ev) send(ev); }
       }, true);
       W.addEventListener('focusout', function (e) { sendPending(editHost(targetOf(e))); }, true);
       // Leaving a frame (a rich-text editor's iframe) moves focus out of its window, not out of an element in it.
@@ -1118,6 +1122,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (e.detail === 0 && Date.now() - lastEnter < 1000) return;
         var el = actionable(raw);
         if (!el) return;
+        // Typing still pending in a field happened before this click (a suggestion list keeps the focus in its field).
+        pending.forEach(function (p) { if (p !== el && !p.contains(el)) sendPending(p); });
         var tag = lower(el);
         if (tag === 'select' || tag === 'option' || tag === 'textarea') return;
         if (tag === 'input' && (isField(el) || NON_FIELD_TYPES[inputType(el)] && !BUTTON_TYPES[inputType(el)])) return;

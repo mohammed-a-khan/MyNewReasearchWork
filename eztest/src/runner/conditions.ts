@@ -11,6 +11,7 @@ import { describeCandidate, rootFor, targetLocators } from './locate.js';
 import { evaluateAdvancedCondition, framesOf } from './conditions-advanced.js';
 import type { BrowserSession } from './session.js';
 import { activeSurface } from './surface.js';
+import { dismissInterstitials } from './reliability/interstitials.js';
 import { AdaptiveDeadline, type Extension, type Probeable } from './reliability/load.js';
 
 /**
@@ -234,6 +235,8 @@ export async function evaluateConditions(conds: Condition[], env: ConditionEnv, 
       }
     }
     if (results.every((r) => r.passed) || (await deadline.reached())) return results;
+    // A full-screen ad after a link click holds the navigation back until someone closes it.
+    if (env.page && env.session && (await dismissInterstitials(env.page))) continue;
     await sleep(Math.min(150, Math.max(10, deadline.remaining())));
   }
 }
