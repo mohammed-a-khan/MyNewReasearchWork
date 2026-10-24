@@ -1,0 +1,20 @@
+Journey: Motor rating scenario <caseId> (<note>)
+Id: quote-matrix-motor
+Tags: @portal @rating @data-driven @regression
+Role: motorist
+Risk: 4
+Requirements: RATE-1, RATE-5
+Description: One run per row of the workbook's "Motor" sheet whose runFlag is Y and whose driver is not a fleet case.
+
+Log in
+Run journey "quote-on-portal" with product="<product>", sumInsured=<sumInsured>, regionLabel="<regionLabel>", riskAge=<riskAge>, noClaimsYears=<noClaimsYears> and store the result as rated
+Run journey "expected-premium" with product="<product>", sumInsured=<sumInsured>, region="<region>", riskAge=<riskAge>, noClaimsYears=<noClaimsYears> and store the result as expected
+Expect ${rated.premium.totalPremium} == ${expected.total}
+Expect ${rated.premium.loadingPct} == ${expected.loadingPct}
+If number("<riskAge>") < 25 then
+  Expect ${rated.premium.loadingPct} == 30
+Otherwise
+  Expect ${rated.premium.loadingPct} == 0
+End
+
+Examples: from data "data/rating-matrix.xlsx" sheet "Motor" where runFlag = Y and riskAge < 60

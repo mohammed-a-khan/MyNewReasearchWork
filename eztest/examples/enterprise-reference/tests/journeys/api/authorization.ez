@@ -1,0 +1,25 @@
+Journey: The partner API enforces OAuth2 scopes
+Id: api-authorization
+Tags: @api @security @regression
+Risk: 5
+Requirements: SEC-2, SEC-3
+
+# No token at all
+Call API "GET ${API_URL}/v1/claims/CLM-100001" with errors allowed and store as anonymous
+Expect the anonymous response status is 401
+Capture the header "www-authenticate" of anonymous as challenge
+Expect ${challenge} contains "Bearer"
+
+# The reporting partner may read but not write
+Call API "GET ${API_URL}/v1/claims/CLM-100001" as reporting and store as readOnly
+Expect the readOnly response status is 200
+Call API "POST ${API_URL}/v1/claims" with body '{"policyId":"POL-H-100231","type":"WATER","incidentDate":"2026-10-01","amountClaimed":100,"description":"Scope test, must be refused"}' as reporting and store as write
+Expect the write response status is 403
+Expect response write "$.error" equals "insufficient_scope"
+Call API "POST ${API_URL}/v1/batch/jobs" with body '{"businessDate":"2026-10-23"}' as reporting and store as batch
+Expect the batch response status is 403
+
+# A wrong client secret gets no token
+Call API "POST ${API_URL}/oauth/token" with form grant_type=client_credentials, client_id=broker-gateway, client_secret=wrong and store as badToken
+Expect the badToken response status is 401
+Expect response badToken "$.error" equals "invalid_client"

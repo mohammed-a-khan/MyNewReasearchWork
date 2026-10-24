@@ -1,0 +1,14 @@
+Journey: Security findings on the legacy ClaimDesk are recorded for the risk register
+Id: security-claimdesk
+Tags: @security @nonfunctional @backoffice @known-risk
+Role: adjuster
+Risk: 3
+Requirements: SEC-5
+Lenses: security:warn
+Description: ClaimDesk predates the security header standard (risk RISK-118, remediation planned). The lens records the findings as evidence on every step without failing the journey.
+
+Log in
+Open ${BACKOFFICE_URL}/queue
+  Expect the page contains "Claims queue"
+Open ${BACKOFFICE_URL}/claims/CLM-100005
+  Expect the page contains "Review claim CLM-100005"

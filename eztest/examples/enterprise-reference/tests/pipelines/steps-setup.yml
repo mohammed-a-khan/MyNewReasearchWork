@@ -1,0 +1,39 @@
+# Shared setup for every job: Node, dependencies, browsers, and the secrets file the suite reads.
+steps:
+  - task: NodeTool@0
+    inputs: { versionSpec: '22.x' }
+  - script: npm ci && npm run build && npx eztest install-browsers
+    workingDirectory: eztest
+    displayName: Install EZTest and Chrome for Testing
+  # Secret variables reach a script only when mapped: write them once into the suite's .env (ignored by
+  # version control, on this agent only), which eztest run and eztest load run both read and reports mask.
+  - script: |
+      {
+        echo "LARKSPUR_AMELIA_PASSWORD=$LARKSPUR_AMELIA_PASSWORD"
+        echo "LARKSPUR_AMELIA_TOTP=$LARKSPUR_AMELIA_TOTP"
+        echo "LARKSPUR_ROHAN_PASSWORD=$LARKSPUR_ROHAN_PASSWORD"
+        echo "LARKSPUR_ROHAN_TOTP=$LARKSPUR_ROHAN_TOTP"
+        echo "LARKSPUR_BRAMBLE_PASSWORD=$LARKSPUR_BRAMBLE_PASSWORD"
+        echo "LARKSPUR_BRAMBLE_TOTP=$LARKSPUR_BRAMBLE_TOTP"
+        echo "LARKSPUR_ADJUSTER_PASSWORD=$LARKSPUR_ADJUSTER_PASSWORD"
+        echo "LARKSPUR_BROKER_CLIENT_SECRET=$LARKSPUR_BROKER_CLIENT_SECRET"
+        echo "LARKSPUR_REPORTING_CLIENT_SECRET=$LARKSPUR_REPORTING_CLIENT_SECRET"
+        echo "EZTEST_MASTER_KEY=$EZTEST_MASTER_KEY"
+        echo "LARKSPUR_API_URL=$(LARKSPUR_API_URL)"
+      } > .env
+    workingDirectory: $(suiteDir)
+    displayName: Secrets into the suite's .env
+    env:
+      LARKSPUR_AMELIA_PASSWORD: $(LARKSPUR_AMELIA_PASSWORD)
+      LARKSPUR_AMELIA_TOTP: $(LARKSPUR_AMELIA_TOTP)
+      LARKSPUR_ROHAN_PASSWORD: $(LARKSPUR_ROHAN_PASSWORD)
+      LARKSPUR_ROHAN_TOTP: $(LARKSPUR_ROHAN_TOTP)
+      LARKSPUR_BRAMBLE_PASSWORD: $(LARKSPUR_BRAMBLE_PASSWORD)
+      LARKSPUR_BRAMBLE_TOTP: $(LARKSPUR_BRAMBLE_TOTP)
+      LARKSPUR_ADJUSTER_PASSWORD: $(LARKSPUR_ADJUSTER_PASSWORD)
+      LARKSPUR_BROKER_CLIENT_SECRET: $(LARKSPUR_BROKER_CLIENT_SECRET)
+      LARKSPUR_REPORTING_CLIENT_SECRET: $(LARKSPUR_REPORTING_CLIENT_SECRET)
+      EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
+  - script: npx eztest doctor -e $(EZTEST_ENV) --no-browser
+    workingDirectory: $(suiteDir)
+    displayName: Doctor (config layers, databases, roles)

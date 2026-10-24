@@ -1,0 +1,34 @@
+Journey: GraphQL claim graph agrees with REST and the database; a GraphQL error is caught
+Id: graphql-claim-graph
+Tags: @api @graphql @integration @regression
+Risk: 3
+Requirements: API-6, API-7
+
+Run code "steps/claims.steps.ts#seedClaim" with policyId="POL-M-200455", type="GLASS", amount="385.20" as seeded
+Set variable claimId to seeded.claimId
+
+Run GraphQL query "query($id: ID!) { claim(id: $id) { id status amountClaimed policy { id product deductible holder { fullName region } } documents { filename } } }" on ${API_URL}/graphql with variables '{"id":"${claimId}"}' as broker and store as graph
+Expect response graph "$.data.claim.status" equals "SUBMITTED"
+Expect response graph "$.data.claim.policy.product" equals "MOTOR"
+Expect response graph "$.data.claim.policy.holder.fullName" equals "Amelia Hart"
+
+Call API "GET ${API_URL}/v1/claims/${claimId}" as broker and store as rest
+Capture "$.data.claim.amountClaimed" from graph as graphAmount
+Expect response rest "$.amountClaimed" equals "${graphAmount}"
+Get the first row of query "SELECT p.deductible, c.amount_claimed FROM claims c JOIN policies p ON p.id = c.policy_id WHERE c.id = '${claimId}'" on claims as db
+Expect response graph "$.data.claim.policy.deductible" equals "${db.deductible}"
+
+# A mutation: rate a quote and compare with the underwriting manual
+Run GraphQL mutation "mutation($q: QuoteInput) { createQuote(input: $q) { quoteId premium { netPremium tax totalPremium } } }" on ${API_URL}/graphql with variables '{"q":{"product":"MOTOR","sumInsured":21000,"region":"METRO","riskAge":23,"noClaimsYears":1}}' as broker and store as rated
+Run journey "expected-premium" with product="MOTOR", sumInsured=21000, region="METRO", riskAge=23, noClaimsYears=1 and store the result as expected
+Expect response rated "$.data.createQuote.premium.totalPremium" equals "${expected.total}"
+Expect response rated "$.data.createQuote.premium.tax" equals "${expected.tax}"
+
+# Errors are part of the contract too: an unknown field fails the step, the journey handles it
+Try
+  Send GraphQL query '{ claim(id: "CLM-100001") { id fraudScore } }' to ${API_URL}/graphql as broker and store as bad
+On failure
+  Set variable graphError to error
+End
+Expect ${graphError} contains 'Cannot query field "fraudScore"'
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup

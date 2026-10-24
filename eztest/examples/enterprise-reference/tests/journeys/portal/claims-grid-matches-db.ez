@@ -1,0 +1,33 @@
+Journey: The virtualized My claims grid shows exactly the database's rows
+Id: claims-grid-matches-db
+Tags: @portal @grid @integration @regression
+Role: commercial
+Risk: 4
+Requirements: PORTAL-7, PORTAL-8
+Description: 420 claims in a virtualized ARIA grid (only ~18 rows exist in the DOM at a time). Every row, every column is compared with the database; then filter, sort and row navigation.
+
+Run query "CUSTOMER_CLAIMS_AS_SHOWN" on claims with customer_id="C-1003" as dbRows
+Count the rows of query "SELECT id FROM claims WHERE customer_id = 'C-1003'" on claims as total
+Count the rows of query "SELECT id FROM claims WHERE customer_id = 'C-1003' AND status = 'REJECTED'" on claims as rejected
+
+Log in
+Click the "My claims" link
+  Expect the page contains "${total} claims"
+Capture all rows of the My claims grid as uiRows
+Expect rows uiRows equal rows dbRows by key "Claim"
+
+# The grid's own filtering and sorting agree with the data
+Expect the My claims grid to have ${rejected} rows where Status is "Rejected"
+Select "Rejected" from the "Status filter" dropdown
+  Expect the page contains "${rejected} claims"
+Sort the My claims grid by Amount descending
+Expect the Amount column of the My claims grid to be sorted descending
+Get the first row of query "SELECT id, printf('%.2f', amount_claimed) AS amount FROM claims WHERE customer_id = 'C-1003' AND status = 'REJECTED' ORDER BY amount_claimed DESC LIMIT 1" on claims as biggest
+Expect the Amount of the row where Claim is "${biggest.id}" in the My claims grid to be "${biggest.amount}"
+
+# Open a claim from deep inside the virtualized list
+Select "All statuses" from the "Status filter" dropdown
+Scroll the My claims grid to the row where Claim is "CLM-100003"
+In the My claims grid, click "CLM-100003" in the row where Claim is "CLM-100003"
+  Expect the URL contains "/app/claims/CLM-100003"
+Expect testid=claim-policy has text "POL-H-109000"

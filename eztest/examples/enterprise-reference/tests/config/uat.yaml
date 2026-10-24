@@ -1,0 +1,13 @@
+# uat: business acceptance. Read-mostly: journeys tagged @destructive are excluded by the pipeline,
+# the batch is never triggered from tests, and the readiness gate is stricter.
+environment: uat
+vars:
+  PORTAL_URL: ${LARKSPUR_PORTAL_URL:-https://mycover.uat.larkspur.test}
+  BACKOFFICE_URL: ${LARKSPUR_BACKOFFICE_URL:-https://claimdesk.uat.larkspur.test}
+  API_URL: ${LARKSPUR_API_URL:-https://api.uat.larkspur.test}
+  SOAP_URL: ${LARKSPUR_SOAP_URL:-https://legacy.uat.larkspur.test}
+concurrency: 3
+retries: 0
+messaging:
+  brokers:
+    events: { type: kafka, brokers: ["${KAFKA_BROKERS:-kafka-1.uat.larkspur.test:9092}"], clientId: eztest-larkspur-uat }

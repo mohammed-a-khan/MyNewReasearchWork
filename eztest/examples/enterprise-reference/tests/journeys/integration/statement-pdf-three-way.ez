@@ -1,0 +1,25 @@
+Journey: The settlement statement PDF agrees with the claim screen and the database
+Id: statement-pdf-three-way
+Tags: @documents @portal @integration @regression
+Role: policyholder
+Risk: 5
+Requirements: DOC-1, DOC-2
+
+Run code "steps/claims.steps.ts#seedApprovedClaim" with policyId="POL-H-100231", type="FIRE", amount="7300", approved="6880.55" as seeded
+Set variable claimId to seeded.claimId
+
+Log in
+Open /app/claims/${claimId}
+  Expect testid=claim-status has text "Approved"
+Capture the text of testid=claim-policy as claimPolicy
+Capture the text of testid=claim-approved as claimApproved
+Capture the text of testid=claim-payout as claimPayout
+Expect ${claimPayout} == ${seeded.payout}
+Download the "Download statement" link as statement
+Expect the download statement is named "statement-${claimId}.pdf"
+Expect the download statement has type "pdf"
+
+# Field by field, PDF vs screen vs database; the statement's lines must foot to the settlement amount
+Compare document statement to the claim using statement-vs-claim and store as statementCheck
+
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup

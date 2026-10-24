@@ -1,0 +1,72 @@
+Journey: A claim filed on the portal reaches the API, the database, Kafka and the customer's inbox
+Id: claim-submit-ui-to-api-db
+Tags: @portal @claims @integration @regression @kafka @email
+Role: policyholder
+Risk: 5
+Requirements: FNOL-1, FNOL-2, FNOL-5, NOTIF-1, EVT-1
+Variables: amount=2450.75, policy=POL-H-100231
+
+Set variable incidentDate to format(addDays(today(), -6), "YYYY-MM-DD")
+Set variable story to "Burst pipe under the kitchen sink, run " + unique("K")
+Start listening on Kafka topic "larkspur.claims.events" on events as claimEvents
+
+Log in
+Click the "Make a claim" link
+  Expect the page contains "Make a claim"
+Select "POL-H-100231 - Home" from the Policy dropdown
+Select "Water damage" from the "Claim type" dropdown
+Fill the "Incident date" field with ${incidentDate}
+  Expect the page contains "Reporting deadline"
+Fill the "Amount claimed (GBP)" field with ${amount}
+Fill the "What happened?" field with "${story}"
+Upload "fixtures/kitchen-water-damage.png" and "fixtures/plumber-invoice.txt" to the "Supporting documents" field
+  Expect the page contains "plumber-invoice.txt"
+
+# The coverage guide opens in a popup window
+Click the "Coverage guide" link and switch to the popup
+  Expect the page contains "Coverage guide: Home insurance"
+Expect the page contains "Claims must be reported within 30 days"
+Close the popup
+Switch back to the main tab
+
+# The declaration lives in an iframe and tells the form through postMessage
+In the "Declaration" frame
+  Check the "I agree to the declaration" checkbox
+  Click the "Confirm declaration" button
+    Expect the page contains "Declaration confirmed."
+End
+
+Click the "Submit claim" button
+  Expect the URL matches "/app/claims/CLM-\d+"
+  Expect the page contains "submitted"
+Capture the text of css=h1 matching "CLM-\d+" as claimId
+Expect the "Status" text is visible
+
+# The API (partner view) sees the same claim, with the documents' hashes
+Call API "GET ${API_URL}/v1/claims/${claimId}" as broker and store as apiClaim
+Expect the apiClaim response status is 200
+Expect response apiClaim matches schema "schemas/claim.schema.json"
+Expect response apiClaim "$.status" equals "SUBMITTED"
+Expect response apiClaim "$.channel" equals "PORTAL"
+Expect response apiClaim "$.amountClaimed" equals "${amount}"
+Expect response apiClaim "$.documents[0].filename" equals "kitchen-water-damage.png"
+Expect response apiClaim "$.documents[1].filename" equals "plumber-invoice.txt"
+
+# The database row and its documents
+Get the first row of query "SELECT * FROM claims WHERE id = '${claimId}'" on claims as dbClaim
+Expect ${dbClaim.status} equals "SUBMITTED"
+Expect ${dbClaim.amount_claimed} == ${amount}
+Expect ${dbClaim.description} equals "${story}"
+Expect ${dbClaim.late_notification} == 0
+Expect query "CLAIM_DOCUMENTS" on claims with claim_id="${claimId}" returns 2 rows
+
+# The event, correlated by claim id, and its contract
+Wait for a message in claimEvents where "$.claimId" = "${claimId}" and header "event-type" = "claim.submitted" within 20 s matching schema "schemas/claim-event.schema.json" as submitted
+Expect response submitted "$.documents" equals "2"
+Expect ${submitted_meta.key} equals "${claimId}"
+Stop listening to claimEvents
+
+# The acknowledgement e-mail
+Wait for an email to "amelia.hart@mail.larkspur.test" with subject "Claim ${claimId} received" within 20 seconds as ack
+Expect ${ack.text} contains "${claimId}"
+Expect ${ack.text} contains "2450.75 GBP"

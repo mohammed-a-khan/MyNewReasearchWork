@@ -1,0 +1,109 @@
+# Azure DevOps pipeline for the Larkspur claims regression suite (EZTest).
+# Stages: smoke -> regression (2 Chromium shards in parallel + Firefox) -> merge, API security scan,
+# load slice -> readiness gate. Secrets come from the "larkspur-<env>" variable groups (Key Vault backed).
+#
+# Variables expected in the group: LARKSPUR_* (see tests/.env.example), EZTEST_MASTER_KEY,
+# LARKSPUR_PORTAL_URL / _BACKOFFICE_URL / _API_URL / _SOAP_URL, KAFKA_BROKERS.
+
+trigger:
+  branches: { include: [main, release/*] }
+pr:
+  branches: { include: [main] }
+
+parameters:
+  - name: environment
+    type: string
+    default: sit
+    values: [dev, sit, uat]
+
+variables:
+  - group: larkspur-${{ parameters.environment }}
+  - name: suiteDir
+    value: eztest/examples/enterprise-reference/tests
+  - name: EZTEST_ENV
+    value: ${{ parameters.environment }}
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: smoke
+    displayName: Smoke (environment health)
+    jobs:
+      - job: smoke
+        steps:
+          - template: steps-setup.yml
+          - script: npx eztest run -e $(EZTEST_ENV) -t @smoke --reporter junit,html,json
+            workingDirectory: $(suiteDir)
+            displayName: Smoke journeys
+          - task: PublishTestResults@2
+            condition: always()
+            inputs: { testResultsFormat: JUnit, testResultsFiles: '$(suiteDir)/eztest-results/**/junit.xml', testRunTitle: Smoke $(EZTEST_ENV) }
+
+  - stage: regression
+    displayName: Regression
+    dependsOn: smoke
+    jobs:
+      - job: chromium
+        displayName: Chromium shard
+        strategy:
+          matrix:
+            shard1: { SHARD: '1/2' }
+            shard2: { SHARD: '2/2' }
+        steps:
+          - template: steps-setup.yml
+          - script: npx eztest run -e $(EZTEST_ENV) --shard $(SHARD) -x @known-risk -w 4 --reporter junit,html,json
+            workingDirectory: $(suiteDir)
+            displayName: Journeys, shard $(SHARD)
+          - publish: $(suiteDir)/eztest-results
+            artifact: results-chromium-$(System.JobPositionInPhase)
+            condition: always()
+      - job: firefox
+        displayName: Firefox (cross-browser)
+        steps:
+          - template: steps-setup.yml
+          - script: npx eztest install-browsers firefox && npx eztest run -e $(EZTEST_ENV) --browsers firefox -t @smoke,@e2e,@portal -w 3
+            workingDirectory: $(suiteDir)
+            displayName: Firefox journeys
+          - publish: $(suiteDir)/eztest-results
+            artifact: results-firefox
+            condition: always()
+
+  - stage: assure
+    displayName: Merge, security and load
+    dependsOn: regression
+    condition: succeededOrFailed()
+    jobs:
+      - job: assure
+        steps:
+          - template: steps-setup.yml
+          - download: current
+            patterns: 'results-chromium-*/**'
+          - script: npx eztest merge $(Pipeline.Workspace)/results-chromium-*/run-* -o eztest-results/merged
+            workingDirectory: $(suiteDir)
+            displayName: Merge shards (one run, one evidence chain)
+          - script: npx eztest api-scan security/api-scan.yaml -e $(EZTEST_ENV) --base $(LARKSPUR_API_URL) --yes --readiness eztest-results/merged
+            workingDirectory: $(suiteDir)
+            displayName: OWASP API scan (recorded for the apiSecurity gate)
+          - script: npx eztest load run load/broker-quotes.load.yaml -e $(EZTEST_ENV)
+            workingDirectory: $(suiteDir)
+            displayName: Load slice (SLAs)
+          - script: npx eztest evidence verify eztest-results/merged
+            workingDirectory: $(suiteDir)
+            displayName: Verify the evidence chain
+          - script: npx eztest ado publish eztest-results/merged
+            workingDirectory: $(suiteDir)
+            displayName: Publish to Azure Test Plans
+            env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
+          - script: npx eztest analyze eztest-results/merged --policy readiness-policy.yaml
+            workingDirectory: $(suiteDir)
+            displayName: Re-decide readiness with the scan included
+          - script: npx eztest ado gate eztest-results/merged --on-no-go fail --on-risks warn
+            workingDirectory: $(suiteDir)
+            displayName: Readiness gate (GO / GO_WITH_RISKS / NO_GO)
+          - task: PublishTestResults@2
+            condition: always()
+            inputs: { testResultsFormat: JUnit, testResultsFiles: '$(suiteDir)/eztest-results/merged/junit.xml', testRunTitle: Regression $(EZTEST_ENV) }
+          - publish: $(suiteDir)/eztest-results/merged
+            artifact: results-merged
+            condition: always()

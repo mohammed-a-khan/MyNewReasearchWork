@@ -1,0 +1,15 @@
+# OWASP API Top 10 scan of the partner API (EZTest's own deterministic scanner).
+#   node ../../../dist/cli/bin.js api-scan security/api-scan.yaml -e dev --yes --readiness eztest-results/<runId>
+# Endpoints are enumerated from the OpenAPI contract; the broker and reporting partners are the two identities.
+baseUrl: http://127.0.0.1:4702
+spec: ../app/openapi.yaml
+role: broker                 # OAuth2 client credentials from the Identity Vault
+otherRole: reporting         # the second identity for object-level authorization (BOLA) checks
+sample:
+  policyId: POL-H-100231
+  customerId: C-1001
+  claimId: CLM-100001
+  quoteId: Q-500000
+  jobId: BATCH-7000
+probes: [authBypass, bola, injection, securityHeaders, cors, verboseErrors, rateLimit]
+rateLimitBurst: 15

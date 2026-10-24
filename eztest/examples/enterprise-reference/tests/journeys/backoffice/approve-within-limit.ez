@@ -1,0 +1,46 @@
+Journey: An adjuster approves a claim within the limit; payout, event and e-mail agree
+Id: approve-within-limit
+Tags: @backoffice @claims @integration @regression @kafka @email
+Role: adjuster
+Risk: 5
+Requirements: ADJ-1, ADJ-3, PAY-1, EVT-2, NOTIF-2
+Variables: claimed=1800, approved=1650.40
+
+# Precondition through the partner API (a code step from the shared library)
+Run code "steps/claims.steps.ts#seedClaim" with policyId="POL-H-100231", type="STORM", amount="${claimed}" as seeded
+Set variable claimId to seeded.claimId
+Get the value of query "SELECT deductible FROM policies WHERE id = 'POL-H-100231'" on claims as excess
+Set variable payout to formatNumber(max(0, number(approved) - number(excess)), 2)
+Start listening on Kafka topic "larkspur.claims.events" on events as decisions
+
+Log in
+Type "${claimId}" into @ClaimDesk.search
+Click the "Search" button
+  Expect the "Claims queue" table contains "${claimId}"
+Click the "Review" link in the row containing "${claimId}"
+  Expect the page contains "Review claim ${claimId}"
+Expect @ClaimDesk.status has text "In review"
+Clear @ClaimDesk.approvedAmount
+Type "${approved}" into @ClaimDesk.approvedAmount
+Select "Covered in full" from @ClaimDesk.reason
+Click @ClaimDesk.approve
+  Expect the page contains "Claim ${claimId} approved"
+Expect @ClaimDesk.payout has text "${payout}"
+
+Get the first row of query "SELECT status, approved_amount, payout_amount, decision_by, settlement_code FROM claims WHERE id = '${claimId}'" on claims as row
+Expect ${row.status} equals "APPROVED"
+Expect ${row.approved_amount} == ${approved}
+Expect ${row.payout_amount} == ${payout}
+Expect ${row.decision_by} equals "dana.okafor"
+
+Wait for a message in decisions where "$.claimId" = "${claimId}" and "$.type" = "claim.approved" within 20 s matching schema "schemas/claim-event.schema.json" as approvedEvent
+Expect response approvedEvent "$.payoutAmount" equals "${payout}"
+Expect response approvedEvent "$.deductible" equals "${excess}"
+Expect response approvedEvent "$.decisionBy" equals "dana.okafor"
+
+Wait for an email to "amelia.hart@mail.larkspur.test" with subject "Claim ${claimId} approved - confirm your settlement" within 20 seconds as offer
+Expect ${offer.text} contains "We will pay: ${payout} GBP"
+Extract the code from ${offer.text} matching "confirmation code is (\d{6})" as code
+Expect ${code} equals "${row.settlement_code}"
+
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup

@@ -1,0 +1,40 @@
+Journey: Home quote premium matches the rating rules, the API and the database
+Id: quote-home-premium
+Tags: @portal @rating @regression @integration
+Role: policyholder
+Risk: 5
+Requirements: RATE-1, RATE-2, RATE-4
+Variables: sumInsured=450000, region=COAST, propertyAge=42, ncdYears=3
+
+Log in
+Click the "Get a quote" link
+  Expect the page contains "Get a quote"
+Select "Home insurance" from the Product dropdown
+Fill the "Sum insured (GBP)" field with ${sumInsured}
+Select "Coast" from the Region dropdown
+Fill the "Property age (years)" field with ${propertyAge}
+Fill the "No-claims years" field with ${ncdYears}
+Click the "Calculate premium" button
+  Expect the page contains "Premium breakdown"
+Read the premium breakdown into premium
+Capture the text of testid=quote-ref as quoteRef
+
+# 1. the screen against the underwriting manual (a reusable sub-journey with parameters and returns)
+Run journey "expected-premium" with product="HOME", sumInsured=${sumInsured}, region=${region}, riskAge=${propertyAge}, noClaimsYears=${ncdYears} and store the result as expected
+Expect ${premium.basePremium} == ${expected.base}
+Expect ${premium.loadingPct} == 12
+Expect ${premium.discount} == ${expected.discount}
+Expect ${premium.tax} == ${expected.tax}
+Expect ${premium.totalPremium} == ${expected.total}
+
+# 2. the same risk rated through the broker API
+Call API "POST ${API_URL}/v1/quotes" as broker with body '{"product":"HOME","sumInsured":${sumInsured},"region":"${region}","riskAge":${propertyAge},"noClaimsYears":${ncdYears}}' and store as apiQuote
+Expect the apiQuote response status is 201
+Expect response apiQuote "$.premium.totalPremium" equals "${expected.total}"
+Expect response apiQuote "$.premium.netPremium" equals "${expected.net}"
+
+# 3. the quote the portal saved, in the database
+Get the first row of query "SELECT * FROM quotes WHERE id = '${quoteRef}'" on claims as saved
+Expect ${saved.channel} equals "PORTAL"
+Expect ${saved.total_premium} == ${expected.total}
+Expect ${saved.tax} == ${expected.tax}

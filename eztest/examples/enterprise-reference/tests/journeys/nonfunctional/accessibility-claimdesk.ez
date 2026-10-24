@@ -1,0 +1,14 @@
+Journey: The ClaimDesk queue and review pages meet WCAG 2.2 AA
+Id: a11y-claimdesk
+Tags: @a11y @nonfunctional @backoffice
+Role: adjuster
+Risk: 3
+Requirements: A11Y-2
+
+Log in
+Open ${BACKOFFICE_URL}/queue
+  Expect the page contains "Claims queue"
+Check the page for accessibility issues at WCAG 2.2 level AA
+Open ${BACKOFFICE_URL}/claims/CLM-100005
+  Expect the page contains "Review claim CLM-100005"
+Check the page for accessibility issues at WCAG 2.2 level AA

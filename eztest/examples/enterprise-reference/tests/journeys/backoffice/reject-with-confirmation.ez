@@ -1,0 +1,36 @@
+Journey: Rejecting a claim asks for confirmation, notifies the customer and publishes the decision
+Id: reject-with-confirmation
+Tags: @backoffice @claims @regression @kafka @email
+Role: adjuster
+Risk: 4
+Requirements: ADJ-5, NOTIF-3, EVT-3
+
+Run code "steps/claims.steps.ts#seedClaim" with policyId="POL-M-200455", type="THEFT", amount="640" as seeded
+Set variable claimId to seeded.claimId
+Start listening on Kafka topic "larkspur.claims.events" on events as decisions
+
+Log in
+Open ${BACKOFFICE_URL}/claims/${claimId}
+  Expect the page contains "Review claim ${claimId}"
+Select "Policy exclusion" from @ClaimDesk.reason
+
+# Dismissing the confirmation keeps the claim open
+Dismiss the next confirm dialog
+Click @ClaimDesk.reject
+Expect a confirm dialog saying "Reject claim ${claimId}? The customer will be notified." appeared
+Expect @ClaimDesk.status has text "In review"
+
+# Accepting it rejects the claim
+Accept the next dialog and store it as confirmation
+Click @ClaimDesk.reject
+  Expect the page contains "Claim ${claimId} rejected"
+Expect ${confirmation} contains "Reject claim ${claimId}?"
+
+Wait for a message in decisions where "$.claimId" = "${claimId}" and header "event-type" = "claim.rejected" within 20 s as rejected
+Expect response rejected "$.reason" equals "POLICY_EXCLUSION"
+Expect no message in decisions where "$.claimId" = "${claimId}" and "$.type" = "claim.approved" within 3 s
+Wait for an email to "amelia.hart@mail.larkspur.test" with subject "Claim ${claimId} decision" within 20 seconds as decision
+Expect ${decision.text} contains "policy exclusion"
+Get the value of query "SELECT status FROM claims WHERE id = '${claimId}'" on claims as status
+Expect ${status} equals "REJECTED"
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup

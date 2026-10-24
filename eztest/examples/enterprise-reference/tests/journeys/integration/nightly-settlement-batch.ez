@@ -1,0 +1,46 @@
+Journey: The nightly settlement batch pays accepted settlements and drops a bank file that matches the database
+Id: nightly-settlement-batch
+Tags: @batch @integration @files @regression
+Risk: 5
+Requirements: BATCH-1, BATCH-2, PAY-2
+Locks: settlement-batch
+Requires: api GET ${API_URL}/v1/health returns 200
+
+# Database-seeded preconditions: two claims whose settlements were accepted (a state the API cannot create)
+Run code "steps/claims.steps.ts#seedApprovedClaim" with policyId="POL-H-100231", type="WATER", amount="3200", approved="2900", accepted="yes" as first
+Run code "steps/claims.steps.ts#seedApprovedClaim" with policyId="POL-M-200455", type="GLASS", amount="900", approved="900", accepted="yes" as second
+Set variable businessDate to format(today(), "YYYY-MM-DD")
+
+# Start the job through the API and poll its status until it completes (retry-until)
+Call API "POST ${API_URL}/v1/batch/jobs" with body '{"job":"nightly-settlement","businessDate":"${businessDate}"}' as broker and store as started
+Expect the started response status is 202
+Capture "$.jobId" from started as jobId
+Call API "GET ${API_URL}/v1/batch/jobs/${jobId}" as broker and store as job [retry=40 every=250ms]
+  Expect response job "$.status" equals "COMPLETED"
+Capture "$.fileName" from job as fileName
+Capture "$.recordCount" from job as recordCount
+Capture "$.totalAmount" from job as controlTotal
+
+# The bank file lands in the drop folder; every line matches the payments in the database
+Wait for a file matching "${fileName}" in folder "${DROP_DIR}/outbound" within 30 s as bankFile
+Read the download bankFile as rows into paymentRows
+Expect len(paymentRows) == number(recordCount)
+Expect len(paymentRows) >= 2
+Expect rows paymentRows equal query "BATCH_PAYMENTS" on claims with batch_id="${jobId}" by key "payment_id"
+Set variable fileTotal to round(sum(pluck(paymentRows, "amount")), 2)
+Expect ${fileTotal} == ${controlTotal}
+
+# Both seeded claims are now settled, each paid exactly its payout
+For each seeded in [first, second]
+  Get the first row of query "SELECT c.status, p.amount FROM claims c JOIN payments p ON p.claim_id = c.id WHERE c.id = '${seeded.claimId}'" on claims as paid
+  Expect ${paid.status} equals "SETTLED"
+  Expect ${paid.amount} == ${seeded.payout}
+End
+
+# The configured batch job (start + poll defined once in eztest.config.yaml): nothing left to pay
+Run batch job "nightly-settlement" with businessDate=${businessDate} and wait up to 1 minute as rerun
+Expect response rerun "$.result.recordCount" equals "0"
+Expect ${rerun.status} equals "COMPLETED"
+
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${first.claimId}" as cleanFirst
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${second.claimId}" as cleanSecond

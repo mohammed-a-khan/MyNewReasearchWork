@@ -1,0 +1,199 @@
+# EZTest suite for the Larkspur Mutual reference system (../server.ts).
+#
+#   cd examples/enterprise-reference && node server.ts          # the system under test
+#   cd tests && cp .env.example .env                              # dev secrets (test-only values)
+#   node ../../../dist/cli/bin.js run -e dev -w 4                 # or: npx eztest run -e dev -w 4
+#
+# Layers: this file < config/<env>.yaml < .env / .env.<env> < EZTEST_* variables < CLI flags.
+configVersion: 1
+
+vars:
+  # Endpoints of the four applications; every environment overrides them (config/<env>.yaml).
+  PORTAL_URL: ${LARKSPUR_PORTAL_URL:-http://127.0.0.1:4700}
+  BACKOFFICE_URL: ${LARKSPUR_BACKOFFICE_URL:-http://127.0.0.1:4701}
+  API_URL: ${LARKSPUR_API_URL:-http://127.0.0.1:4702}
+  SOAP_URL: ${LARKSPUR_SOAP_URL:-http://127.0.0.1:4703}
+  DROP_DIR: ${LARKSPUR_DROP_DIR:-../var/drop}
+  # Business constants the journeys compute with (the rating rules are in ../app/rating.ts).
+  TAX_RATE: '0.12'
+  ADJUSTER_LIMIT: '10000'
+  # Exposed to journeys that type it by hand (login-mfa.ez); a name with PASSWORD is masked everywhere.
+  AMELIA_PASSWORD: ${LARKSPUR_AMELIA_PASSWORD}
+
+baseUrl: ${PORTAL_URL}
+browser: chromium
+headless: true
+concurrency: 4
+retries: 0
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [console, html, json, junit]
+timeouts: { step: 15000 }
+screenshots: on-failure
+trace: { browser: on-failure }
+timezone: Europe/London
+locale: en-GB
+
+healing:
+  enabled: true
+  maxTier: T2-semantic
+  minConfidence: 0.7
+  requireVerification: true
+
+lenses: []          # per journey with the Lenses: header (accessibility and security slice)
+
+healthChecks:
+  - { name: portal, url: "${PORTAL_URL}/health", contains: UP }
+  - { name: back office, url: "${BACKOFFICE_URL}/health", contains: UP }
+  - { name: api, url: "${API_URL}/v1/health", contains: UP }
+  - { name: database, db: claims }
+
+identity:
+  sessionDir: .eztest/sessions
+  secretStores:
+    - { type: env, prefix: LARKSPUR_ }          # secret://env/AMELIA_PASSWORD reads LARKSPUR_AMELIA_PASSWORD
+  roles:
+    policyholder:                                # Amelia Hart: home + motor policies, TOTP MFA
+      loginUrl: /login
+      username: amelia.hart
+      password: secret://env/AMELIA_PASSWORD
+      totp: secret://env/AMELIA_TOTP
+      successUrl: /app/home
+    session-check:                               # Amelia again, with a session of its own: login-mfa signs it out,
+      loginUrl: /login                           # which must never kill the cached session other journeys share
+      username: amelia.hart
+      password: secret://env/AMELIA_PASSWORD
+      totp: secret://env/AMELIA_TOTP
+      successUrl: /app/home
+    motorist:                                    # Rohan Mehta: one active motor policy, one lapsed home policy
+      loginUrl: /login
+      username: rohan.mehta
+      password: secret://env/ROHAN_PASSWORD
+      totp: secret://env/ROHAN_TOTP
+      successUrl: /app/home
+    commercial:                                  # Bramble Property Group: 420 historical claims (virtualized grid)
+      loginUrl: /login
+      username: bramble.ops
+      password: secret://env/BRAMBLE_PASSWORD
+      totp: secret://env/BRAMBLE_TOTP
+      successUrl: /app/home
+    adjuster:                                    # ClaimDesk, approval limit 10,000
+      loginUrl: ${BACKOFFICE_URL}/signin
+      username: dana.okafor
+      password: secret://env/ADJUSTER_PASSWORD
+      fields: { username: Staff ID, password: Passphrase, submit: Sign in }
+      successUrl: /queue
+      verifyUrl: ${BACKOFFICE_URL}/queue
+    senior-adjuster:                             # ClaimDesk, approval limit 250,000; password kept encrypted (ENC)
+      loginUrl: ${BACKOFFICE_URL}/signin
+      username: victor.lindqvist
+      password: ENC(v1:sxn24A9iRlF2QCFb4AM2zw==:U7udywU3bTyvFyQJ:QYYDkeZ99GGKonUgRLsDYg==:bjSk1w2Bjwan8mg=)
+      fields: { username: Staff ID, password: Passphrase, submit: Sign in }
+      successUrl: /queue
+      verifyUrl: ${BACKOFFICE_URL}/queue
+    broker:                                      # API partner: OAuth2 client credentials
+      api:
+        tokenUrl: ${API_URL}/oauth/token
+        clientId: broker-gateway
+        clientSecret: secret://env/BROKER_CLIENT_SECRET
+    reporting:                                   # API partner with read-only scopes (authorization checks)
+      api:
+        tokenUrl: ${API_URL}/oauth/token
+        clientId: reporting-readonly
+        clientSecret: secret://env/REPORTING_CLIENT_SECRET
+
+db:
+  connections:
+    claims: { driver: sqlite, file: "${LARKSPUR_DB:-../var/larkspur.db}" }
+  queries:
+    dir: queries
+
+data:
+  seed: 20261023
+  entities:
+    Customer:
+      provider: sql
+      connection: claims
+      table: customers
+      key: id
+      defaults:                      # when no customer matches a Data: need, the fabric creates one (and removes it after)
+        id: "gen:unique:C-T"
+        full_name: gen:fullName
+        email: gen:email
+        segment: DIRECT
+        created_at: "2026-01-01T00:00:00.000Z"
+    Policy: { provider: sql, connection: claims, table: policies, key: id }
+
+api:
+  spec:                            # every API step to the gateway is validated against its OpenAPI contract
+    - { file: ../app/openapi.yaml, baseUrl: "${API_URL}" }
+  specMode: enforce
+
+email:
+  provider: sink                   # EZTest's SMTP sink; the apps send notifications to 127.0.0.1:2525
+  port: 2525
+
+messaging:
+  timeoutMs: 20000
+  lookbackMs: 120000
+  brokers:
+    events: { type: kafka, brokers: ["${KAFKA_BROKERS:-127.0.0.1:19092}"], clientId: eztest-larkspur }
+
+files:
+  allowFolders: ["${DROP_DIR}"]
+  pollMs: 500
+
+batch:
+  jobs:
+    nightly-settlement:
+      start: POST ${API_URL}/v1/batch/jobs
+      body: { job: nightly-settlement, businessDate: "$${businessDate}" }
+      idPath: $.jobId
+      statusUrl: ${API_URL}/v1/batch/jobs/$${jobId}
+      statusPath: $.status
+      success: [COMPLETED]
+      failure: [FAILED]
+      pollMs: 500
+      asRole: broker
+
+documents:
+  statement-vs-claim:              # the PDF statement against the screen and the database
+    template: templates/statement.yaml
+    db:
+      connection: claims
+      query: >
+        SELECT c.id AS claim_id, c.policy_id, cu.full_name AS holder, c.amount_claimed,
+               c.approved_amount, p.deductible, c.payout_amount
+          FROM claims c JOIN customers cu ON cu.id = c.customer_id JOIN policies p ON p.id = c.policy_id
+         WHERE c.id = ?
+      params: ['$${claimId}']
+    fields:
+      - { name: claimId, ui: claimId, pdf: claimRef, db: claim_id, type: text }
+      - { name: policy, ui: claimPolicy, pdf: policyNo, db: policy_id, type: text }
+      - { name: approved, ui: claimApproved, pdf: assessed, db: approved_amount, type: currency, tolerance: { abs: 0.005 } }
+      - { name: payout, ui: claimPayout, pdf: settlement, db: payout_amount, type: currency, tolerance: { abs: 0.005 } }
+    footing: { pdfTable: lines, column: Amount, tolerance: 0.005 }
+
+security:
+  allowPageScripts: false
+  api:                             # eztest api-scan (security/api-scan.yaml): local and test hosts only
+    allowedHosts: ["127.0.0.1", "*.sit.larkspur.test"]
+    allowMutating: false
+    failOn: high
+
+dialogs:
+  default: dismiss
+
+locks:
+  backend: file
+  dir: .eztest/locks
+  timeoutMinutes: 10
+
+reliability:
+  sessionExpiry: { text: ["Sign in to MyCover"] }
+
+plugins:
+  - ./plugins/larkspur-steps.mjs
+
+readiness:
+  policyPath: readiness-policy.yaml

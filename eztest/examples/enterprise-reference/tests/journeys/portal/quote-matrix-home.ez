@@ -1,0 +1,23 @@
+Journey: Home rating scenario <caseId> (<note>)
+Id: quote-matrix-home
+Tags: @portal @rating @data-driven @regression
+Role: policyholder
+Risk: 4
+Requirements: RATE-1, RATE-3
+Description: One run per row of the underwriting team's workbook (sheet "Home", runFlag Y only).
+
+Log in
+Run journey "quote-on-portal" with product="<product>", sumInsured=<sumInsured>, regionLabel="<regionLabel>", riskAge=<riskAge>, noClaimsYears=<noClaimsYears> and store the result as rated
+Run journey "expected-premium" with product="<product>", sumInsured=<sumInsured>, region="<region>", riskAge=<riskAge>, noClaimsYears=<noClaimsYears> and store the result as expected
+Expect ${rated.premium.totalPremium} == ${expected.total}
+Expect ${rated.premium.netPremium} == ${expected.net}
+Expect ${rated.premium.tax} == ${expected.tax}
+If ${expected.net} == 150 then
+  # Data-dependent branch: the minimum premium rule, not the rating table, decided this one
+  Expect ${expected.loaded} - ${expected.discount} < 150
+End
+Call API "GET ${API_URL}/v1/quotes/${rated.quoteRef}" as broker and store as stored
+Expect response stored "$.premium.totalPremium" equals "${expected.total}"
+Expect response stored "$.product" equals "<product>"
+
+Examples: from data "data/rating-matrix.xlsx" sheet "Home" where runFlag = Y

@@ -1,0 +1,57 @@
+# EZTest Load: brokers rating quotes and reading claims through the partner API.
+#   node ../../../dist/cli/bin.js load run load/broker-quotes.load.yaml -e dev --policy readiness-policy.yaml
+# A small, fixed slice for every pipeline run (the full soak test runs nightly in perf, not here).
+version: 1
+name: Broker quote and claim lookups
+baseUrl: "${env.LARKSPUR_API_URL}"         # from .env locally, from the variable group in the pipeline
+model: closed
+profile: { type: ramp, vus: 8, rampUp: 5s, plateau: 20s, rampDown: 3s }
+
+data:
+  risks: { file: ../data/load-risks.csv, order: random, scope: iteration }
+
+userPaths:
+  broker:
+    init:
+      - transaction:
+          name: oauth token
+          actions:
+            - request:
+                name: client credentials
+                method: POST
+                url: /oauth/token
+                form: { grant_type: client_credentials, client_id: broker-gateway, client_secret: "${env.LARKSPUR_BROKER_CLIENT_SECRET}" }
+                assert: [{ status: 200 }]
+                extract: [{ var: token, json: $.access_token }]
+    actions:
+      - use: risks
+      - transaction:
+          name: rate quote
+          actions:
+            - request:
+                name: POST /v1/quotes
+                method: POST
+                url: /v1/quotes
+                headers: { authorization: "Bearer ${token}" }
+                json: { product: "${risks.product}", sumInsured: "${number(risks.sumInsured)}", region: "${risks.region}", riskAge: "${number(risks.riskAge)}", noClaimsYears: "${number(risks.noClaimsYears)}" }
+                assert: [{ status: 201 }, { json: $.premium.totalPremium, exists: true }]
+                extract: [{ var: quoteId, json: $.quoteId }]
+      - transaction:
+          name: read quote
+          actions:
+            - request: { name: "GET /v1/quotes/{id}", url: "/v1/quotes/${quoteId}", headers: { authorization: "Bearer ${token}" }, assert: [{ status: 200 }] }
+      - transaction:
+          name: claim lookup
+          actions:
+            - request: { name: "GET /v1/claims/{id}", url: "/v1/claims/CLM-1000${__rand(10,99)}", headers: { authorization: "Bearer ${token}" }, assert: [{ status: 200 }] }
+    thinkTime: { min: 100ms, max: 300ms }
+
+populations:
+  - { name: brokers, userPath: broker, share: 100 }
+
+sla:
+  - { match: rate quote, kind: transaction, p95: { warn: 150, fail: 500 }, errorRate: { fail: 0.01 } }
+  - { match: claim lookup, kind: transaction, p95: { warn: 100, fail: 400 } }
+  - { match: "*", kind: request, errorRate: { warn: 0.001, fail: 0.01 } }
+
+options: { http: auto, timeoutMs: 10s, gracefulStop: 5s }

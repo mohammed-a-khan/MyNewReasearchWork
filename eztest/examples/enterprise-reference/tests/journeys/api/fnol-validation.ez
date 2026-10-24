@@ -1,0 +1,15 @@
+Journey: Broker FNOL <caseId> is refused with <expectedStatus> <expectedError>
+Id: fnol-validation
+Tags: @api @negative @regression @contract
+Risk: 3
+Requirements: API-4, FNOL-3
+Description: Negative first-notice-of-loss cases from a CSV owned by the business analysts; rows with runFlag N are not run. Every error response is also validated against the OpenAPI contract.
+
+Call API "POST ${API_URL}/v1/claims" with body '{"policyId":"<policyId>","type":"<type>","incidentDate":"<incidentDate>","amountClaimed":<amount>,"description":"<description>"}' with errors allowed as broker and store as refused
+Expect ${refused.status} == ${expectedStatus}
+Expect response refused "$.error" equals "<expectedError>"
+Expect response refused "$.message" contains "<expectedMessage>"
+Count the rows of query "SELECT id FROM claims WHERE description = '<description>'" on claims as created
+Expect ${created} == 0
+
+Examples: from data "data/fnol-negative.csv" where runFlag = Y

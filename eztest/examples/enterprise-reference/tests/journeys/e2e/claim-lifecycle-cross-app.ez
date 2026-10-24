@@ -1,0 +1,95 @@
+Journey: Claim lifecycle across MyCover, ClaimDesk, Kafka, e-mail, the nightly batch and the PDF statement
+Id: claim-lifecycle-cross-app
+Tags: @e2e @cross-app @critical @kafka @email @batch @documents
+Risk: 5
+Requirements: E2E-1, FNOL-1, ADJ-1, EVT-2, NOTIF-2, SETTLE-1, BATCH-1, DOC-1
+Actors: customer as policyholder, adjuster as adjuster
+Locks: settlement-batch
+Variables: amount=3875.20, approved=3600.00
+Description: Two people in two applications, plus the event bus, the mail server, the batch drop folder and the statement service, in one business journey.
+
+Set variable incidentDate to format(addDays(today(), -4), "YYYY-MM-DD")
+Set variable story to "Storm tore roof tiles off above the bedroom, run " + unique("E2E")
+Generate a UK IBAN as iban
+Start listening on Kafka topic "larkspur.claims.events" on events as lifecycle
+
+# 1. The customer files the claim on the portal (actor 1)
+As customer:
+  Open /app/claims/new
+    Expect the page contains "Make a claim"
+  Select "POL-H-100231 - Home" from @ClaimForm.policy
+  Select "Storm" from @ClaimForm.claimType
+  Fill @ClaimForm.incidentDate with ${incidentDate}
+  Fill @ClaimForm.amount with ${amount}
+  Fill @ClaimForm.description with "${story}"
+  Upload "fixtures/kitchen-water-damage.png" to @ClaimForm.documents
+  In the "Declaration" frame
+    Check the "I agree to the declaration" checkbox
+    Click the "Confirm declaration" button
+      Expect the page contains "Declaration confirmed."
+  End
+  Click the @ClaimForm.submit button
+    Expect the page contains "submitted"
+  Capture the text of css=h1 matching "CLM-\d+" as claimId
+
+Wait for a message in lifecycle where "$.claimId" = "${claimId}" and "$.type" = "claim.submitted" within 20 s as submitted
+
+# 2. The adjuster approves in ClaimDesk while the customer's claim page updates by itself (both at once)
+In parallel:
+  As adjuster:
+    Open ${BACKOFFICE_URL}/claims/${claimId}
+      Expect the page contains "Review claim ${claimId}"
+    Clear @ClaimDesk.approvedAmount
+    Type "${approved}" into @ClaimDesk.approvedAmount
+    Select "Covered in full" from @ClaimDesk.reason
+    Click @ClaimDesk.approve
+      Expect the page contains "Claim ${claimId} approved"
+  As customer:
+    Wait until testid=claim-status has text "Approved" within 30 seconds
+End
+
+# 3. The decision is published on the event bus, with the money in it
+Wait for a message in lifecycle where "$.claimId" = "${claimId}" and "$.type" = "claim.approved" within 20 s matching schema "schemas/claim-event.schema.json" as approvedEvent
+Capture "$.payoutAmount" from approvedEvent as payout
+Get the value of query "SELECT deductible FROM policies WHERE id = 'POL-H-100231'" on claims as excess
+Expect ${payout} == round(number(approved) - number(excess), 2)
+
+# 4. The e-mail arrives with a link and a one-time code
+Wait for an email to "amelia.hart@mail.larkspur.test" with subject "Claim ${claimId} approved - confirm your settlement" within 30 seconds as offer
+Extract the link from ${offer} matching "/app/settlement/" as settlementLink
+Extract the code from ${offer.text} matching "confirmation code is (\d{6})" as code
+
+# 5. The customer continues from the e-mail
+As customer:
+  Open ${settlementLink}
+    Expect the page contains "Confirm your settlement"
+  Expect testid=settlement-amount shows the number "${payout}"
+  Type "${code}" into the "Confirmation code" field
+  Type "${iban}" into the "Bank account (IBAN)" field
+  Click the "Accept settlement" button
+    Expect the page contains "Settlement accepted"
+Wait for a message in lifecycle where "$.claimId" = "${claimId}" and "$.type" = "settlement.accepted" within 20 s as accepted
+
+# 6. The nightly batch pays it and the bank file lands in the drop folder
+Set variable businessDate to format(today(), "YYYY-MM-DD")
+Run batch job "nightly-settlement" with businessDate=${businessDate} and wait up to 2 minutes as batch
+Wait for a file matching "${batch.result.fileName}" in folder "${DROP_DIR}/outbound" within 30 s as bankFile
+Read the download bankFile as rows into bankRows
+Run code "steps/rows.steps.ts#findRow" with rows="bankRows", column="claim_id", value="${claimId}" as paidLine
+Expect ${paidLine.amount} == ${payout}
+Expect ${paidLine.iban_masked} endsWith substring(iban, len(iban) - 4)
+Get the first row of query "SELECT id, amount, iban FROM payments WHERE claim_id = '${claimId}'" on claims as payment
+Expect ${payment.id} equals "${paidLine.payment_id}"
+Expect ${payment.iban} equals "${iban}"
+Wait for a message in lifecycle where "$.claimId" = "${claimId}" and "$.type" = "claim.paid" within 20 s as paid
+
+# 7. The PDF statement matches the database (and the screen)
+As customer:
+  Open /app/claims/${claimId}
+    Expect testid=claim-status has text "Settled"
+  Capture the text of testid=claim-policy as claimPolicy
+  Capture the text of testid=claim-approved as claimApproved
+  Capture the text of testid=claim-payout as claimPayout
+  Download the "Download statement" link as statement
+  Compare document statement to the claim using statement-vs-claim and store as statementCheck
+Stop listening to lifecycle

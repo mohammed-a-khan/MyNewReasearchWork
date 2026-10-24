@@ -1,0 +1,24 @@
+{
+  "partner": "Harbour Brokers Ltd",
+  "contact": "claims-desk@harbour-brokers.larkspur.test",
+  "batches": [
+    {
+      "batchId": "HB-2026-10-A",
+      "receivedOn": "2026-10-20",
+      "submissions": [
+        { "scenarioId": "HB-01", "policyId": "POL-H-100231", "role": "policyholder", "type": "WATER", "daysAgo": 2, "amount": 1240.5, "description": "Dishwasher hose burst, kitchen floor", "channel": "BROKER", "runFlag": "Yes" },
+        { "scenarioId": "HB-02", "policyId": "POL-M-200455", "role": "policyholder", "type": "GLASS", "daysAgo": 1, "amount": 310, "description": "Stone chip spread across the windscreen", "channel": "BROKER", "runFlag": "Yes" },
+        { "scenarioId": "HB-03", "policyId": "POL-M-200981", "role": "motorist", "type": "COLLISION", "daysAgo": 5, "amount": 2875.4, "description": "Low-speed collision in a car park", "channel": "BROKER", "runFlag": "Yes" },
+        { "scenarioId": "HB-04", "policyId": "POL-M-200981", "role": "motorist", "type": "THEFT", "daysAgo": 9, "amount": 640, "description": "Catalytic converter stolen overnight", "channel": "PHONE", "runFlag": "Yes" },
+        { "scenarioId": "HB-05", "policyId": "POL-H-100231", "role": "policyholder", "type": "STORM", "daysAgo": 3, "amount": 9800, "description": "Fence panels and shed roof lost in a storm", "channel": "BROKER", "runFlag": "No" }
+      ]
+    },
+    {
+      "batchId": "HB-2026-10-B",
+      "receivedOn": "2026-10-21",
+      "submissions": [
+        { "scenarioId": "HB-06", "policyId": "POL-H-100231", "role": "policyholder", "type": "FIRE", "daysAgo": 1, "amount": 450, "description": "Pan fire scorched the kitchen ceiling", "channel": "BROKER", "runFlag": "Yes" }
+      ]
+    }
+  ]
+}

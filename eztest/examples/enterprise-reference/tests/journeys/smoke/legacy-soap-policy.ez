@@ -1,0 +1,27 @@
+Journey: The legacy SOAP policy system agrees with the REST API and the database
+Id: legacy-soap-policy
+Tags: @smoke @soap @integration @legacy
+Risk: 4
+Requirements: LEG-1, LEG-2
+
+Call SOAP action "urn:larkspur:policyadmin:v1#GetPolicyDetails" on ${SOAP_URL}/legacy/PolicyAdministration with body '<pa:GetPolicyDetails xmlns:pa="urn:larkspur:policyadmin:v1"><pa:PolicyNumber>POL-H-100231</pa:PolicyNumber></pa:GetPolicyDetails>' and store as legacy
+Expect response legacy "$.GetPolicyDetailsResponse.Policy.Status" equals "ACTIVE"
+Expect response legacy "$.GetPolicyDetailsResponse.Policy.Holder.Name" equals "Amelia Hart"
+
+Call API "GET ${API_URL}/v1/policies/POL-H-100231" as broker and store as modern
+Capture "$.GetPolicyDetailsResponse.Policy.Excess" from legacy as legacyExcess
+Capture "$.GetPolicyDetailsResponse.Policy.SumInsured" from legacy as legacySum
+Expect response modern "$.deductible" equals "${legacyExcess}"
+Expect response modern "$.sumInsured" equals "${legacySum}"
+
+Call SOAP action "urn:larkspur:policyadmin:v1#GetClaimsSummary" on ${SOAP_URL}/legacy/PolicyAdministration with body '<pa:GetClaimsSummary xmlns:pa="urn:larkspur:policyadmin:v1"><pa:CustomerId>C-1003</pa:CustomerId></pa:GetClaimsSummary>' and store as summary
+Count the rows of query "SELECT id FROM claims WHERE customer_id = 'C-1003'" on claims as dbTotal
+Expect response summary "$.GetClaimsSummaryResponse.Summary.TotalClaims" equals "${dbTotal}"
+
+# A SOAP fault for an unknown policy
+Try
+  Call SOAP action "urn:larkspur:policyadmin:v1#GetPolicyDetails" on ${SOAP_URL}/legacy/PolicyAdministration with body '<pa:GetPolicyDetails xmlns:pa="urn:larkspur:policyadmin:v1"><pa:PolicyNumber>POL-H-000000</pa:PolicyNumber></pa:GetPolicyDetails>' and store as missing
+On failure
+  Set variable fault to error
+End
+Expect ${fault} contains "does not exist"

@@ -1,0 +1,15 @@
+Journey: Every Larkspur application is up
+Id: platform-health
+Tags: @smoke @api
+Risk: 5
+Requirements: OPS-1
+
+Call API "GET ${API_URL}/v1/health" and store as health
+Expect the health response status is 200
+Expect response health "$.status" equals "UP"
+Call API "GET ${PORTAL_URL}/health" and store as portal
+Expect response portal "$.status" equals "UP"
+Call API "GET ${BACKOFFICE_URL}/health" and store as backoffice
+Expect response backoffice "$.app" equals "backoffice"
+Run query "SELECT COUNT(*) AS n FROM policies" on claims as policyCount
+Expect ${policyCount.0.n} > 200

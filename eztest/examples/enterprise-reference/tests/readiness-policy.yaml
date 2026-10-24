@@ -1,0 +1,19 @@
+# Release readiness for Larkspur claims (policy as code). The pipeline's last stage runs
+# `eztest ado gate <runDir>` against this; NO_GO stops the release.
+version: 1
+gates:
+  noFailedCriticalJourneys: { minRisk: 5 }            # any failed risk-5 journey (money, identity, e2e) blocks
+  minPassRate: { min: 0.95 }
+  maxHealedRatio: { max: 0.1 }                        # more than 10% healed steps: the UI moved, review the heals first
+  noOpenProductBugs: true                             # a failure triaged as a product bug blocks
+  docsReconciled: true                                # every PDF statement check reconciled three ways
+  a11yNoCritical: true
+  requirementsCovered:                                # the release scope (2026.11), exported from the backlog
+    requirements: [A11Y-1, A11Y-2, ADJ-1, ADJ-2, ADJ-3, ADJ-4, ADJ-5, API-2, API-4, API-6, API-7, AUTH-1, AUTH-2, AUTH-3,
+      BATCH-1, BATCH-2, DATA-1, DOC-1, DOC-2, E2E-1, EVT-1, EVT-2, EVT-3, EVT-4, FNOL-1, FNOL-2, FNOL-3, FNOL-4, FNOL-5,
+      LEG-1, LEG-2, NOTIF-1, NOTIF-2, NOTIF-3, OPS-1, PAY-1, PAY-2, PORTAL-3, PORTAL-7, PORTAL-8,
+      RATE-1, RATE-2, RATE-3, RATE-4, RATE-5, RATE-6, SEC-1, SEC-2, SEC-3, SEC-4, SEC-5, SETTLE-1]
+  apiCoverage: { minOperations: 0.6, noViolations: true }   # the partner API contract, exercised and unbroken
+  # From `eztest api-scan security/api-scan.yaml --readiness <runDir>`. Medium findings (today: no rate
+  # limiting on the gateway, RISK-131) are tracked in the risk register; high ones block.
+  apiSecurity: { failOn: high }
