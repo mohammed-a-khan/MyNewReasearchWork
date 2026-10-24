@@ -113,7 +113,7 @@ describe('recording form controls', () => {
 });
 
 describe('recording inside frames and stopping on close', () => {
-  it('records the frame chain on the target and says why .ez cannot hold it', async () => {
+  it("records actions in a frame as an In frame block, named by the frame's id", async () => {
     const page = await browser.newPage();
     const done = recordJourney({ url: `${base}/framed`, page, until: 'close' });
     await page.frameLocator('#help').getByRole('button', { name: 'Ask' }).click();
@@ -121,10 +121,13 @@ describe('recording inside frames and stopping on close', () => {
     await new Promise((r) => setTimeout(r, 300));
     await page.close();
     const result = await done;
-    const click = result.journey.steps.find((s) => s.action === 'click');
-    expect(click?.target).toMatchObject({ description: 'the "Ask" button', frames: ['iframe#help'] });
-    expect(result.ez).toBe('');
-    expect(result.warnings.some((w) => /cannot be written as \.ez/.test(w))).toBe(true);
+    const block = result.journey.steps.find((s) => s.action === 'frame');
+    expect(block?.args).toEqual({ op: 'enter', path: ['help'] });
+    expect(block?.steps?.[0]).toMatchObject({ action: 'click', target: { description: 'the "Ask" button' } });
+    expect(block?.steps?.[0].target?.frames).toBeUndefined();
+    expect(result.ez).toContain('In frame "help"\n  Click the "Ask" button\nEnd');
+    expect(result.warnings).toEqual([]);
+    expect(diffJourneys(result.journey, parseEzScript(result.ez))).toEqual([]);
   });
 
   it('rejects a bad expectation and attaches programmatic ones to the last step', async () => {

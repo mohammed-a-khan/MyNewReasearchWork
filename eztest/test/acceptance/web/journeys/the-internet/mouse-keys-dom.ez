@@ -1,0 +1,45 @@
+Journey: Mouse, keyboard and tricky DOM
+Tags: @the-internet
+Base URL: https://the-internet.herokuapp.com
+
+Open /hovers
+Hover over the 2nd "User Avatar" image
+  Expect the page contains "name: user2"
+Click the "View profile" link
+  Expect the URL contains "/users/2"
+
+Open /drag_and_drop
+Drag #column-a to #column-b
+  Expect the text of #column-a is "B"
+  Expect the text of #column-b is "A"
+
+Open /context_menu
+Accept the next alert
+Right-click #hot-spot
+  Expect an alert saying "You selected a context menu"
+
+Open /key_presses
+Click #target
+Press Tab
+  Expect the page contains "You entered: TAB"
+Press Escape in #target
+  Expect the page contains "You entered: ESCAPE"
+
+Open /shadowdom
+Expect the 1st "Let's have some different text!" text is visible
+Expect the page contains "In a list!"
+
+Open /challenging_dom
+Click the "edit" link in the row containing "Iuvaret4"
+  Expect the URL contains "#edit"
+Expect the "Apeirian9" cell is visible
+
+Open /checkboxes
+Check the 1st checkbox
+Uncheck the 2nd checkbox
+  Expect the 1st checkbox is checked
+  Expect the 2nd checkbox is not checked
+
+Open /dropdown
+Select "Option 2" from the dropdown
+  Expect the value of the dropdown is "2"

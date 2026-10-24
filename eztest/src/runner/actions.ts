@@ -93,6 +93,101 @@ function key(step: Step, fallback?: string): string {
   return k;
 }
 
+/** Ads, analytics and tag managers: their requests say nothing about whether a click did anything. */
+const THIRD_PARTY = /doubleclick\.net|googlesyndication|google-analytics|googletagmanager|googleadservices|\/gtag\/|\/collect\b|analytics|optimizely|hotjar|segment\.(?:io|com)|facebook\.(?:net|com)\/tr|clarity\.ms|newrelic|nr-data\.net|sentry\.io/i;
+
+/** How long a click may take to show any effect before it is taken for a click the page did not see yet. */
+const DEAD_CLICK_MS = 2000;
+
+/**
+ * Watch whether a click has any effect at all: a change anywhere in the element's document, a navigation, a
+ * request, a new tab, a dialog or a download. Undefined when the element is a control whose effect is invisible
+ * to that (a checkbox, a select, a file input), so it is never clicked twice.
+ */
+async function watchEffects(target: Locator, ctx: StepContext): Promise<{ changed(ms: number): Promise<boolean>; failed(): boolean; stop(): void } | undefined> {
+  const page = ctx.page;
+  let ready: boolean;
+  try {
+    ready = await target.evaluate((el) => {
+      const tag = el.tagName.toLowerCase();
+      const type = ((el as HTMLInputElement).type || '').toLowerCase();
+      if (tag === 'select' || tag === 'option' || tag === 'label' || (tag === 'input' && type !== 'button' && type !== 'submit' && type !== 'image' && type !== 'reset')) return false;
+      if (el.closest('label') || el.closest('summary') || el.getAttribute('role') === 'checkbox' || el.getAttribute('role') === 'switch' || el.getAttribute('role') === 'radio') return false;
+      const w = el.ownerDocument.defaultView as unknown as { __ezEffects?: number; __ezEffectsMo?: MutationObserver };
+      w.__ezEffects = 0;
+      w.__ezEffectsMo?.disconnect();
+      w.__ezEffectsMo = new MutationObserver(() => { w.__ezEffects = (w.__ezEffects ?? 0) + 1; });
+      w.__ezEffectsMo.observe(el.ownerDocument, { subtree: true, childList: true, attributes: true, characterData: true });
+      return true;
+    }, undefined, { timeout: 2000 });
+  } catch {
+    return undefined;
+  }
+  if (!ready) return undefined;
+  let other = false;
+  let requested = false;
+  let threw = false;
+  const onAny = () => { other = true; };
+  let failedOwn = false;
+  const onError = (e: Error) => {
+    threw = true;
+    // The page's own code failed (not an ad's or a tracker's): a handler that ran before the page was ready.
+    const urls = String(e?.stack ?? '').match(/https?:\/\/[^\s)]+/g) ?? [];
+    if (!urls.length || urls.some((u) => site(u) === own && !THIRD_PARTY.test(u))) failedOwn = true;
+  };
+  // A request counts when the page's own site makes it: ad and analytics scripts send requests all the time.
+  const site = (u: string) => { try { return new URL(u).hostname.split('.').slice(-2).join('.'); } catch { return ''; } };
+  const own = site(page.url());
+  const onRequest = (r: { url(): string }) => { if (site(r.url()) === own && !THIRD_PARTY.test(r.url())) requested = true; };
+  const onNav = (f: { parentFrame(): unknown }) => { if (!f.parentFrame()) other = true; };
+  const url = page.url();
+  const pages = ctx.session?.pages.lastNumber;
+  page.on('request', onRequest);
+  page.on('pageerror', onError);
+  page.on('dialog', onAny);
+  page.on('download', onAny);
+  page.on('framenavigated', onNav);
+  const stop = () => {
+    page.off('request', onRequest);
+    page.off('pageerror', onError);
+    page.off('dialog', onAny);
+    page.off('download', onAny);
+    page.off('framenavigated', onNav);
+    void target.evaluate((el) => {
+      const w = el.ownerDocument.defaultView as unknown as { __ezEffectsMo?: MutationObserver };
+      w.__ezEffectsMo?.disconnect();
+    }, undefined, { timeout: 1000 }).catch(() => undefined);
+  };
+  const changed = async (ms: number): Promise<boolean> => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      if (other || page.isClosed() || page.url() !== url || (pages !== undefined && ctx.session!.pages.lastNumber !== pages)) return true;
+      let n: number | undefined;
+      try {
+        n = await target.evaluate((el) => (el.ownerDocument.defaultView as unknown as { __ezEffects?: number }).__ezEffects ?? 0, undefined, { timeout: 1000 });
+      } catch {
+        return true; // gone, or the page moved on: the click did something
+      }
+      if (n === undefined || n > 0) return true;
+      // A request of the page's own counts, unless the click's handler failed (it ran too early).
+      if (Date.now() >= deadline) return requested && !threw;
+      await sleep(150);
+    }
+  };
+  return { changed, failed: () => failedOwn, stop };
+}
+
+/** Whether all of a step's post-conditions hold right now (a click that needed no change). */
+async function expectationsHold(step: Step, ctx: StepContext): Promise<boolean> {
+  const { evaluateConditionOnce } = await import('./conditions.js');
+  const env = { page: ctx.page, ledger: ctx.ledger, vars: () => ctx.vars(), interpolate: (t: string) => ctx.interpolate(t), ...(ctx.session ? { session: ctx.session, frames: ctx.session.frames } : {}) };
+  for (const c of step.postconditions) {
+    const r = await evaluateConditionOnce(c, env).catch(() => undefined);
+    if (!r?.passed) return false;
+  }
+  return true;
+}
+
 /** Perform a step's action. `loc` is the resolved target for target actions. */
 export async function performAction(step: Step, loc: Locator | undefined, ctx: StepContext, opts: RunOptions, timeout: number): Promise<ActionOutcome> {
   const { page } = ctx;
@@ -123,13 +218,40 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       // "Click X and switch to the new tab": wait for the popup/tab the click opens and make it current.
       const since = a.newPage && ctx.session ? ctx.session.pages.lastNumber : undefined;
       const target = need();
-      try {
-        await target.click({ timeout, ...(button ? { button } : {}), ...extra });
-      } catch (e) {
-        // A button that closes its own window (OAuth/payment popups, "Send back") can close the page
-        // before the driver finishes the click; the click happened, so this is not a failure.
-        if (!target.page().isClosed()) throw e;
+      const doClick = async () => {
+        try {
+          await target.click({ timeout, ...(button ? { button } : {}), ...extra });
+        } catch (e) {
+          // A button that closes its own window (OAuth/payment popups, "Send back") can close the page
+          // before the driver finishes the click; the click happened, so this is not a failure.
+          if (!target.page().isClosed()) throw e;
+        }
+      };
+      // A click that must have an effect (it has expectations, or opens a tab) is watched: one that changed nothing
+      // at all was too early (a server-rendered page whose scripts have not wired the button yet) and is repeated once.
+      const watch = (step.postconditions.length || since !== undefined) && !a.modifiers && !a.clickCount ? await watchEffects(target, ctx) : undefined;
+      await doClick();
+      if (watch) {
+        const changed = await watch.changed(DEAD_CLICK_MS);
+        // The click's own handler threw: give its expectations the same 2 s, then click once more if they still fail.
+        let failed = false;
+        if (changed && watch.failed() && since === undefined) {
+          const until = Date.now() + DEAD_CLICK_MS;
+          failed = true;
+          while (Date.now() < until) {
+            if (await expectationsHold(step, ctx)) {
+              failed = false;
+              break;
+            }
+            await sleep(200);
+          }
+        }
+        if ((!changed || failed) && !(since === undefined && (await expectationsHold(step, ctx)))) {
+          ctx.logger.warn(`"${step.intent}": ${failed ? "the page's script failed on the click" : 'the click changed nothing on the page'} (it was probably still starting); clicked again`, { stepId: step.id });
+          await doClick();
+        }
       }
+      watch?.stop();
       if (since !== undefined && ctx.session) {
         const entry = await ctx.session.pages.waitForNewPage(timeout, since);
         if (a.newPage !== 'wait') ctx.session.pages.activate(entry);
@@ -175,15 +297,22 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       return {};
     }
     case 'download': {
-      const [download] = await Promise.all([page.waitForEvent('download', { timeout }), need().click({ timeout })]);
+      // A link the page's scripts have not wired yet starts no download: click it once more, as a person would.
+      const first = Math.min(5000, timeout);
+      let download = await Promise.all([page.waitForEvent('download', { timeout: first }), need().click({ timeout })]).then(([d]) => d).catch(() => undefined);
+      if (!download) {
+        ctx.logger.warn(`"${step.intent}": no download started within ${first} ms; clicked again`, { stepId: step.id });
+        [download] = await Promise.all([page.waitForEvent('download', { timeout: Math.max(1000, timeout - first) }), need().click({ timeout })]);
+      }
       const failure = await download.failure();
       if (failure) throw new EzTestError(`Download failed: ${failure}`, 'DOWNLOAD_FAILED');
-      const filename = safeName(download.suggestedFilename());
-      const relPath = ctx.evidence.reserve(`downloads/${safeName(ctx.journey.id)}/${safeName(step.id)}-${filename}`);
+      // The name the server gave the file is what "is named" checks; only the file kept on disk gets a safe, short name.
+      const filename = download.suggestedFilename() || 'download';
+      const relPath = ctx.evidence.reserve(`downloads/${safeName(ctx.journey.id)}/${safeName(step.id)}-${safeDiskName(filename)}`);
       const abs = join(ctx.runDir, relPath);
       await mkdir(join(ctx.runDir, 'downloads', safeName(ctx.journey.id)), { recursive: true });
       await download.saveAs(abs);
-      const ref = await ctx.evidence.recordFile('download', abs, { journeyId: ctx.journey.id, stepId: step.id, description: `download ${filename}` });
+      const ref = await ctx.evidence.recordFile('download', abs, { journeyId: ctx.journey.id, stepId: step.id, description: `download ${safeDiskName(filename)}` });
       const rec: DownloadRecord = { path: abs, relPath: ref.path, filename, evidenceId: ref.id, sha256: ref.sha256, size: (await stat(abs)).size };
       const k = key(step, 'download');
       ctx.ledger.set(k, rec);
@@ -353,3 +482,10 @@ export async function implicitCheck(step: Step, loc: Locator, ctx: StepContext, 
   }
 }
 
+/** A file name safe on every file system that keeps its extension when long names are shortened. */
+function safeDiskName(name: string): string {
+  const safe = name.replace(/[^A-Za-z0-9._-]+/g, '_') || 'x';
+  if (safe.length <= 100) return safe;
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(safe)?.[0] ?? '';
+  return safe.slice(0, 100 - ext.length) + ext;
+}

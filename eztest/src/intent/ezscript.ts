@@ -647,9 +647,18 @@ export function stepToText(s: Step): string {
   }
 }
 
+/** Ids handed out so far while rendering (parseEzScript numbers repeated ids "-2", "-3" in the same order). */
+let renderedIds: Map<string, number> | undefined;
+
 function annotate(text: string, s: Step, parsed: StepInput): string {
   const parts: string[] = [];
-  if (s.id !== defaultStepId(text)) parts.push(`id=${s.id}`);
+  let expected = defaultStepId(text);
+  if (renderedIds) {
+    const n = (renderedIds.get(expected) ?? 0) + 1;
+    renderedIds.set(expected, n);
+    if (n > 1) expected = `${expected}-${n}`;
+  }
+  if (s.id !== expected) parts.push(`id=${s.id}`);
   if (s.optional) parts.push('optional');
   if (s.soft && !parsed.soft) parts.push('soft');
   if (s.timeoutMs) parts.push(`timeout=${s.timeoutMs}ms`);
@@ -804,7 +813,12 @@ export function journeyToEzScript(journey: Journey): string {
     if (e.isMobile !== undefined) throw new Error('isMobile cannot be expressed in .ez (use Device:); keep this journey in YAML/JSON');
   }
   out.push('');
-  renderSteps(journey.steps, 0, out, true);
+  renderedIds = new Map();
+  try {
+    renderSteps(journey.steps, 0, out, true);
+  } finally {
+    renderedIds = undefined;
+  }
   if (journey.examplesFrom) out.push('', examplesSourceToText(journey.examplesFrom));
   if (journey.examples?.length) {
     const cols = Object.keys(journey.examples[0]);

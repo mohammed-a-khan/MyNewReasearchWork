@@ -1,0 +1,23 @@
+Journey: Practice login, positive and negative
+Tags: @practice
+Base URL: https://practicetestautomation.com
+Variables: password=Password123
+
+Open /practice-test-login/
+Type "incorrectUser" into the Username field
+Type "${password}" into the Password field
+Click the "Submit" button
+  Expect the page contains "Your username is invalid!"
+  Expect the URL contains "/practice-test-login/"
+Type "student" into the Username field
+Type "incorrectPassword" into the Password field
+Click the "Submit" button
+  Expect the page contains "Your password is invalid!"
+Type "student" into the Username field
+Type "${password}" into the Password field
+Click the "Submit" button
+  Expect the URL contains "/logged-in-successfully/"
+  Expect the page contains "Logged In Successfully"
+  Expect the "Log out" link is visible
+Click the "Log out" link
+  Expect user is redirected to "/practice-test-login/"

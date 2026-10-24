@@ -44,7 +44,11 @@ export const CONDITION_RULES: CondRule[] = [
   // Where the user ended up, said the way testers write it: "user lands on the "Dashboard" screen", "I am on the Orders page",
   // "user is redirected to Login". Checked as the page showing that name (a heading, title or label on the page).
   { name: 'lands-on', re: /^(?:the\s+)?(?:user|users|i|we|customer|they)\s+(?:(?:is|am|are|was|were|should\s+be|gets?|got|has\s+been|have\s+been)\s+)?(?:(?:lands?|landed|navigated|navigates|redirected|taken|brought|reach(?:es|ed)?|arrives?|arrived|goes|went|moved?)\s+)?(?:on|to|at|onto|in)\s+(?:the\s+)?(.+?)(?:\s+(?:screen|page|view|module))?\s*[.!]?$/i,
-    build: (m, q) => ({ type: 'pageContainsText', value: val(m[1].trim(), q) }) },
+    build: (m, q) => {
+      const v = val(m[1].trim(), q);
+      // "user is redirected to "/login"": an address, so the URL is checked.
+      return /^(?:\/|https?:\/\/)\S*$/i.test(v) ? { type: 'urlContains', value: v } : { type: 'pageContainsText', value: v };
+    } },
   // "the "Dashboard" screen is displayed", "Orders page is shown", "the Login page should be visible".
   { name: 'screen-shown', re: /^(?!there\s)(?:the\s+)?(.+?)\s+(?:screen|page|view|module)\s+(?:is\s+|should\s+be\s+|gets\s+)?(?:shown|displayed|visible|opened|open|loaded|appears|presented)\s*[.!]?$/i,
     build: (m, q) => ({ type: 'pageContainsText', value: val(m[1].trim(), q) }) },

@@ -205,11 +205,12 @@ export function frameSelectorCandidates(description: string): string[] {
   const d = description.trim();
   const css = /^css\s*=\s*(.+)$/i.exec(d);
   if (css) return [css[1].trim()];
-  if (/^(?:[#.[]|i?frame\b)/i.test(d)) return [d];
+  // A selector: "#pay", ".checkout", "[name=x]", "iframe", "iframe.inner", "frame:nth-of-type(2)" (not a name such as "frame-top").
+  if (/^(?:[#.[]|i?frame(?:$|[\s#.[:>~+]))/i.test(d)) return [d];
   const v = d.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     `iframe[name="${v}"]`, `frame[name="${v}"]`, `iframe[id="${v}"]`, `frame[id="${v}"]`,
-    `iframe[title="${v}"]`, `iframe[aria-label="${v}"]`, `iframe[src*="${v}"]`, `frame[src*="${v}"]`,
+    `iframe[title="${v}"]`, `frame[title="${v}"]`, `iframe[aria-label="${v}"]`, `iframe[src*="${v}"]`, `frame[src*="${v}"]`,
   ];
 }
 

@@ -1,0 +1,40 @@
+Journey: Slow and changing pages
+Tags: @the-internet
+Base URL: https://the-internet.herokuapp.com
+
+Open /dynamic_loading/1
+Click the "Start" button
+  Expect the page contains "Hello World!"
+Open /dynamic_loading/2
+Click the "Start" button
+Wait for the text "Hello World!"
+
+Open /dynamic_controls
+Click the "Remove" button
+  Expect the page contains "It's gone!"
+Click the "Enable" button
+  Expect the page contains "It's enabled!"
+Type "typed after enabling" into the field inside #input-example
+  Expect the value of the field inside #input-example is "typed after enabling"
+
+Open /notification_message_rendered
+Click the "Click here" link
+  Expect #flash contains "Action"
+
+Open /entry_ad
+If the "Close" text is visible then click the "Close" text
+Expect the page contains "Entry Ad"
+
+Open /infinite_scroll
+Scroll down until the "Infinite Scroll" heading is visible
+Repeat 4 times
+  Scroll to the bottom
+  Wait 1 second
+End
+Expect the number of css=.jscroll-added is at least 4
+
+Open /exit_intent
+Move the mouse to 600, 300
+Move the mouse to 600, -5
+  Expect the page contains "It's commonly used to encourage a user to take an action"
+Click the "Close" text

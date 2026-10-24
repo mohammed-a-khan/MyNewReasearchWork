@@ -1,0 +1,44 @@
+Journey: ParaBank register, open an account and transfer funds
+Tags: @parabank
+Base URL: https://parabank.parasoft.com
+Variables: password=Secret#2026
+
+Set variable user to "ez" + randomString(8)
+Open /parabank/register.htm
+Type "Ada" into the First Name field
+Type "Lovelace" into the Last Name field
+Type "1 Analytical Street" into the Address field
+Type "London" into the City field
+Type "LDN" into the State field
+Type "10115" into the Zip Code field
+Type "5550100" into the Phone # field
+Type "123-45-6789" into the SSN field
+Type "${user}" into the Username field
+Type "${password}" into the Password field
+Type "${password}" into the Confirm field
+Click the "Register" button
+  Expect the page contains "Your account was created successfully. You are now logged in."
+  Expect I see "Welcome ${user}"
+
+Click the "Open New Account" link
+  Expect the URL contains "/openaccount.htm"
+Select "SAVINGS" from #type
+Click the "Open New Account" button
+  Expect the page contains "Account Opened!"
+Capture the text of #newAccountId as newAccount
+
+Click the "Transfer Funds" link
+Type "25" into #amount
+Select "${newAccount}" from #toAccountId
+Click the "Transfer" button
+  Expect the page contains "Transfer Complete!"
+  Expect the page contains "$25.00 has been transferred"
+
+Click the "Accounts Overview" link
+  Expect the page contains "${newAccount}"
+Click the "${newAccount}" link
+  Expect the page contains "Account Details"
+  Expect the page contains "Funds Transfer Received"
+
+Click the "Log Out" link
+  Expect the URL contains "index.htm"

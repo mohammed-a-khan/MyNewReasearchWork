@@ -190,7 +190,80 @@ export function labelTexts(el: Element): string[] {
   if (refs.length) out.push(refs.map((r) => rawText(r)).join(' '));
   const labels = (el as HTMLInputElement).labels;
   if (labels) for (const l of Array.from(labels)) out.push(rawText(l));
+  const wrap = brokenWrappingLabel(el);
+  if (wrap) out.push(rawText(wrap));
+  if (!out.length) {
+    const seen = visualLabel(el);
+    if (seen) out.push(seen);
+  }
   return out;
+}
+
+const VISUAL_LABEL_TAGS = new Set(['input', 'select', 'textarea']);
+const NO_LABEL_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image']);
+
+/** Text of an element without the form controls in it. */
+function textWithoutControls(el: Element): string {
+  let s = '';
+  for (let c = el.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 3) s += (c as Text).data;
+    else if (isElement(c) && !VISUAL_LABEL_TAGS.has(lowerTag(c)) && !['button', 'script', 'style'].includes(lowerTag(c))) s += textWithoutControls(c);
+  }
+  return s;
+}
+
+/**
+ * The words a person reads as a field's label when the page has no <label>: the cell before it in a form laid
+ * out as a table ("First Name:" | [field]), or the text right before it. Only for fields with no label of their
+ * own; a trailing ":" or "*" is left out.
+ */
+export function visualLabel(el: Element): string {
+  const tag = lowerTag(el);
+  if (!VISUAL_LABEL_TAGS.has(tag)) return '';
+  if (tag === 'input' && NO_LABEL_TYPES.has(((el as HTMLInputElement).type || 'text').toLowerCase())) return '';
+  if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el as HTMLInputElement).labels?.length) return '';
+  if (normalizeWhitespace(el.getAttribute('placeholder') || '')) return '';
+  const clean = (s: string) => normalizeWhitespace(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, '');
+  const cell = el.parentElement?.closest('td,th');
+  if (cell && !clean(textWithoutControls(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
+    for (let prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      if (prev.querySelector('input,select,textarea')) return '';
+      const t = clean(textWithoutControls(prev));
+      if (t) return t.length <= 60 ? t : '';
+    }
+    return '';
+  }
+  // A checkbox or radio button is followed by its words ("[x] Remember me"), a field preceded by them.
+  const box = tag === 'input' && /^(?:checkbox|radio)$/i.test((el as HTMLInputElement).type);
+  for (let n: Node | null = box ? el.nextSibling : el.previousSibling; n; n = box ? n.nextSibling : n.previousSibling) {
+    if (isElement(n)) {
+      if (VISUAL_LABEL_TAGS.has(lowerTag(n)) || n.querySelector('input,select,textarea')) return '';
+      if (lowerTag(n) === 'br') {
+        if (box) return '';
+        continue;
+      }
+      if (lowerTag(n) === 'legend') return '';
+    }
+    const t = clean(n.nodeType === 3 ? (n as Text).data : isElement(n) ? textWithoutControls(n) : '');
+    if (t) return t.length <= 60 ? t : '';
+  }
+  return '';
+}
+
+/**
+ * A <label> around a control whose `for` names an id nothing has (`<label for="radio2"><input type=radio> Radio2</label>`
+ * with no id on the input). HTML then gives the control no label at all, yet every person reads "Radio2" as its
+ * label, so getByLabel finds it by that text.
+ */
+export function brokenWrappingLabel(el: Element): Element | null {
+  if ((el as HTMLInputElement).labels?.length) return null;
+  const tag = lowerTag(el);
+  if (tag !== 'input' && tag !== 'select' && tag !== 'textarea') return null;
+  const label = el.parentElement?.closest('label');
+  if (!label) return null;
+  const forId = label.getAttribute('for');
+  if (!forId || (el.getRootNode() as Document | ShadowRoot).getElementById?.(forId)) return null;
+  return label.querySelectorAll('input,select,textarea').length === 1 ? label : null;
 }
 
 function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
@@ -204,7 +277,7 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
       if (!(el as HTMLLabelElement).control && match(elementText(el))) loose.push(el);
       continue;
     }
-    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length) continue;
+    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length && !brokenWrappingLabel(el) && !visualLabel(el)) continue;
     if (labelTexts(el).some(match)) out.push(el);
   }
   if (out.length) return out;

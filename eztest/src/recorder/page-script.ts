@@ -71,8 +71,18 @@ export interface ElementInfo {
   rowText?: string;
   /** 1-based position among elements with the same text, when the text is not unique. */
   textNth?: number;
-  /** 1-based position among visible elements with the same role and name, when that is not unique. */
+  /** With rowText: the container (`#table1`) the row is looked up in, when the text repeats in another one. */
+  rowWithin?: string;
+  /** For an unnamed control: the named group (fieldset legend) it is the only one of its kind in. */
+  group?: string;
+  /** A named landmark around the element in which its name is unique (`the "Main" navigation`). */
+  landmark?: { role: string; name: string; word: string };
+  /** 1-based position among the visible elements with the same role and name, when the name is not unique. */
   roleNth?: number;
+  /** For an unnamed checkbox or radio button: its 1-based position among the visible ones. */
+  kindNth?: number;
+  /** A contenteditable host (a rich-text editor): its text is what was typed. */
+  editable?: boolean;
   /** A custom (non-native) select box: a focusable element that opens a list of options. */
   customSelect?: boolean;
 }
@@ -86,6 +96,12 @@ export type PageEvent =
   | { kind: 'check' | 'uncheck'; el: ElementInfo; t: number; url: string }
   | { kind: 'press'; el?: ElementInfo; key: string; t: number; url: string }
   | { kind: 'upload'; el: ElementInfo; files: string[]; t: number; url: string }
+  /** The element a later click needs hovered first (a menu or overlay shown by :hover or a mouseenter handler). */
+  | { kind: 'hover'; el: ElementInfo; t: number; url: string }
+  /** The page is closing its own window (window.close()), so no "Close the tab" step is needed. */
+  | { kind: 'closing'; t: number; url: string }
+  /** A drag from `el` to `to` (HTML5 drag and drop, or a mouse drag), described as both were before it. */
+  | { kind: 'drag'; el: ElementInfo; to: ElementInfo; t: number; url: string }
   | { kind: 'assert'; el: ElementInfo; text?: string; value?: string; t: number; url: string }
   /** An option picked from a custom dropdown's list: `el` is the box that opened it. */
   | { kind: 'choose'; el: ElementInfo; option: string; optionEl: ElementInfo; t: number; url: string }
@@ -111,8 +127,35 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (!k) { seq += 1; k = docId + ':' + seq; keys.set(el, k); }
       return k;
     };
-    var norm = function (s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); };
+    // Icon-font glyphs (Private Use Area characters) are not words: the runner ignores them in names and text too.
+    var norm = function (s) { return String(s == null ? '' : s).replace(/[\uE000-\uF8FF]|[\uDB80-\uDBFF][\uDC00-\uDFFF]/g, '').replace(/\s+/g, ' ').trim(); };
     var lower = function (el) { return el.tagName ? el.tagName.toLowerCase() : ''; };
+    // Open shadow roots are searched as well: the runner's role, label, text and CSS locators pierce them.
+    var rootsCache = null;
+    var shadowRoots = function () {
+      if (rootsCache) return rootsCache;
+      var out = [];
+      var walk = function (root) {
+        var all = root.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+          var sr = all[i].shadowRoot;
+          if (sr) { out.push(sr); walk(sr); }
+        }
+      };
+      walk(document);
+      return out;
+    };
+    var deepAll = function (sel, base) {
+      var out = Array.prototype.slice.call((base || document).querySelectorAll(sel));
+      var roots = shadowRoots();
+      for (var i = 0; i < roots.length; i++) {
+        if (base && base !== document && !(base.contains(roots[i].host) || base === roots[i].host)) continue;
+        out = out.concat(Array.prototype.slice.call(roots[i].querySelectorAll(sel)));
+      }
+      return out;
+    };
+    var treeOf = function (el) { var r = el.getRootNode ? el.getRootNode() : document; return r && r.getElementById ? r : document; };
+    var inShadow = function (el) { return !!(el.getRootNode && el.getRootNode() !== document && el.getRootNode().host); };
     var inputType = function (el) { return (el.getAttribute('type') || 'text').toLowerCase(); };
     var BUTTON_TYPES = { button: 1, submit: 1, reset: 1, image: 1 };
     var NON_FIELD_TYPES = { button: 1, submit: 1, reset: 1, image: 1, checkbox: 1, radio: 1, file: 1, hidden: 1 };
@@ -147,6 +190,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         case 'img': return el.getAttribute('alt') === '' ? 'presentation' : 'img';
         case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return 'heading';
         case 'nav': return 'navigation';
+        case 'section': return (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby')) ? 'region' : '';
+        case 'form': return (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || el.hasAttribute('title')) ? 'form' : '';
         case 'main': return 'main';
         case 'table': return 'table';
         case 'tr': return 'row';
@@ -190,10 +235,11 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return out;
     };
-    var idsText = function (ids) {
+    var idsText = function (ids, from) {
       var parts = [];
+      var tree = from ? treeOf(from) : document;
       norm(ids).split(' ').forEach(function (id) {
-        var e = id && document.getElementById(id);
+        var e = id && tree.getElementById(id);
         if (e) parts.push(norm(textOf(e, false)));
       });
       return norm(parts.join(' '));
@@ -201,7 +247,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var labelsList = function (el) {
       var out = [];
       var lb = el.getAttribute('aria-labelledby');
-      if (lb) { var t = idsText(lb); if (t) out.push(t); }
+      if (lb) { var t = idsText(lb, el); if (t) out.push(t); }
       var al = norm(el.getAttribute('aria-label'));
       if (al) out.push(al);
       if (el.labels) {
@@ -210,7 +256,60 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           if (lt) out.push(lt);
         }
       }
+      var wrap = brokenLabel(el);
+      if (wrap) { var wt = norm(textOf(wrap, true)); if (wt) out.push(wt); }
+      if (!out.length) { var seen = visualLabel(el); if (seen) out.push(seen); }
       return out;
+    };
+    // A <label for="x"> around a control without that id: HTML gives it no label, the runner's getByLabel reads it.
+    var brokenLabel = function (el) {
+      if (!el.tagName || (el.labels && el.labels.length)) return null;
+      var t = lower(el);
+      if (t !== 'input' && t !== 'select' && t !== 'textarea') return null;
+      var l = el.parentElement && el.parentElement.closest ? el.parentElement.closest('label') : null;
+      if (!l) return null;
+      var f = l.getAttribute('for');
+      if (!f || treeOf(el).getElementById(f)) return null;
+      return l.querySelectorAll('input,select,textarea').length === 1 ? l : null;
+    };
+    // The words a person reads as a field's label when there is no <label> (the runner's getByLabel reads them too):
+    // the table cell before the field's cell ("First Name:"), or the text right before the field.
+    var LABELLABLE = { input: 1, select: 1, textarea: 1 };
+    var controlsText = function (el) {
+      var s = '';
+      for (var c = el.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) s += c.data;
+        else if (c.nodeType === 1 && !LABELLABLE[lower(c)] && lower(c) !== 'button' && lower(c) !== 'script' && lower(c) !== 'style') s += controlsText(c);
+      }
+      return s;
+    };
+    var visualLabel = function (el) {
+      var t = lower(el);
+      if (!LABELLABLE[t]) return '';
+      if (t === 'input' && /^(hidden|submit|button|reset|image)$/.test(inputType(el))) return '';
+      if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el.labels && el.labels.length)) return '';
+      if (norm(el.getAttribute('placeholder'))) return '';
+      var clean = function (s) { return norm(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, ''); };
+      var cell = el.parentElement && el.parentElement.closest ? el.parentElement.closest('td,th') : null;
+      if (cell && !clean(controlsText(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
+        for (var prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+          if (prev.querySelector('input,select,textarea')) return '';
+          var pt = clean(controlsText(prev));
+          if (pt) return pt.length <= 60 ? pt : '';
+        }
+        return '';
+      }
+      var box = t === 'input' && (inputType(el) === 'checkbox' || inputType(el) === 'radio');
+      for (var n = box ? el.nextSibling : el.previousSibling; n; n = box ? n.nextSibling : n.previousSibling) {
+        if (n.nodeType === 1) {
+          if (LABELLABLE[lower(n)] || n.querySelector('input,select,textarea')) return '';
+          if (lower(n) === 'br') { if (box) return ''; continue; }
+          if (lower(n) === 'legend') return '';
+        }
+        var nt = clean(n.nodeType === 3 ? n.data : n.nodeType === 1 ? controlsText(n) : '');
+        if (nt) return nt.length <= 60 ? nt : '';
+      }
+      return '';
     };
     var labelOf = function (el) { var l = labelsList(el); return l.length ? l[0] : ''; };
     // Labels linked to nothing (UI kits put <label> next to the field): the field is the one control of the form group.
@@ -262,7 +361,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       heading: 1, cell: 1, columnheader: 1, rowheader: 1, checkbox: 1, radio: 1, switch: 1, treeitem: 1, tooltip: 1, row: 1 };
     var nameOf = function (el, role) {
       var lb = el.getAttribute('aria-labelledby');
-      if (lb) { var t = idsText(lb); if (t) return t; }
+      if (lb) { var t = idsText(lb, el); if (t) return t; }
       var al = norm(el.getAttribute('aria-label'));
       if (al) return al;
       var tag = lower(el);
@@ -300,12 +399,17 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       img: 'img,[role=img]',
       option: 'option,[role=option]',
       slider: 'input[type=range],[role=slider]',
-      cell: 'td,[role=cell]'
+      cell: 'td,[role=cell]',
+      navigation: 'nav,[role=navigation]',
+      region: 'section,[role=region]',
+      form: 'form,[role=form]',
+      dialog: 'dialog,[role=dialog]',
+      alertdialog: '[role=alertdialog]'
     };
     var countRoleName = function (role, name) {
       var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
       var n = 0;
-      var all = document.querySelectorAll(q);
+      var all = deepAll(q);
       for (var i = 0; i < all.length; i++) {
         var e = all[i];
         if (roleOf(e) !== role || isHidden(e)) continue;
@@ -313,13 +417,14 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return n;
     };
-    var roleNthOf = function (el, role, name) {
+    // 1-based position of el among the visible elements with this role and name (what "the 2nd ... button" picks).
+    var roleNth = function (el, role, name) {
       var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
-      var n = 0;
-      var all = document.querySelectorAll(q);
+      var all = deepAll(q), n = 0;
       for (var i = 0; i < all.length; i++) {
         var e = all[i];
-        if (roleOf(e) !== role || isHidden(e) || nameOf(e, role) !== name) continue;
+        if (roleOf(e) !== role || isHidden(e)) continue;
+        if (name !== null && nameOf(e, role) !== name) continue;
         n++;
         if (e === el) return n;
       }
@@ -328,7 +433,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var countLabel = function (text) {
       if (!text) return 0;
       var n = 0;
-      var all = document.querySelectorAll('input,select,textarea,button,meter,output,progress,[aria-label],[aria-labelledby]');
+      var all = deepAll('input,select,textarea,button,meter,output,progress,[aria-label],[aria-labelledby]');
       for (var i = 0; i < all.length; i++) {
         var e = all[i];
         if (lower(e) === 'input' && inputType(e) === 'hidden') continue;
@@ -339,32 +444,89 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var countAttr = function (attr, value) {
       if (!value) return 0;
       var n = 0;
-      var all = document.querySelectorAll('[' + attr + ']');
+      var all = deepAll('[' + attr + ']');
       for (var i = 0; i < all.length; i++) if (all[i].getAttribute(attr) === value) n++;
       return n;
     };
-    var countText = function (text) {
-      if (!text || !document.body) return 0;
-      var n = 0;
-      var all = document.body.querySelectorAll('*');
-      for (var i = 0; i < all.length; i++) {
-        var e = all[i];
-        var t = lower(e);
-        if (t === 'script' || t === 'style' || t === 'template') continue;
-        var raw = e.textContent || '';
-        if (raw.length < text.length) continue;
-        if (norm(raw) !== text) continue;
-        var childHas = false;
-        for (var j = 0; j < e.children.length; j++) if (norm(e.children[j].textContent) === text) { childHas = true; break; }
-        if (!childHas) n++;
+    // The text engine of the runner, in miniature: the rendered (flat-tree) text of each element, shadow trees and
+    // slots included, and only the innermost elements whose whole text is the given text, in shadow-including order.
+    var NO_TEXT_TAGS = { script: 1, style: 1, template: 1, noscript: 1, head: 1 };
+    var flatText = function (el, cache) {
+      var c = cache.get(el);
+      if (c !== undefined) return c;
+      var tag = lower(el), s = '';
+      if (NO_TEXT_TAGS[tag]) s = '';
+      else if (tag === 'input' && /^(button|submit|reset)$/i.test(el.type || '')) s = el.value;
+      else {
+        var kids = el.shadowRoot ? el.shadowRoot.childNodes : null;
+        if (!kids && tag === 'slot' && el.assignedNodes && el.assignedNodes().length) kids = el.assignedNodes();
+        if (!kids) kids = el.childNodes;
+        for (var i = 0; i < kids.length; i++) {
+          var k = kids[i];
+          if (k.nodeType === 3) s += k.data;
+          else if (k.nodeType === 1) s += flatText(k, cache);
+        }
       }
+      cache.set(el, s);
+      return s;
+    };
+    var deepOrder = function (root, out) {
+      for (var c = root.firstElementChild; c; c = c.nextElementSibling) {
+        out.push(c);
+        if (c.shadowRoot) deepOrder(c.shadowRoot, out);
+        deepOrder(c, out);
+      }
+      return out;
+    };
+    var renderedParent = function (el) {
+      if (el.assignedSlot) return el.assignedSlot;
+      var p = el.parentNode;
+      if (!p) return null;
+      if (p.nodeType === 11) return p.host || null;
+      return p.nodeType === 1 && !p.shadowRoot ? p : null;
+    };
+    var containsFlat = function (anc, node) {
+      for (var n = node; n; ) {
+        if (n === anc) return true;
+        if (n.assignedSlot) { n = n.assignedSlot; continue; }
+        var p = n.parentNode;
+        n = p && p.nodeType === 11 ? p.host : p;
+      }
+      return false;
+    };
+    var textHits = function (text) {
+      if (!text || !document.body) return [];
+      var all = deepOrder(document, []);
+      var cache = new Map(), covered = new Set(), hits = [];
+      for (var i = all.length - 1; i >= 0; i--) {
+        var e = all[i], hit = false;
+        if (covered.has(e)) hit = true;
+        else if (!NO_TEXT_TAGS[lower(e)]) {
+          var raw = flatText(e, cache);
+          if (raw.length >= text.length && norm(raw) === text) { hits.push(e); hit = true; }
+        }
+        if (hit) { var rp = renderedParent(e); if (rp) covered.add(rp); }
+      }
+      return hits.reverse();
+    };
+    var countText = function (text) { return textHits(text).length; };
+    // The test-id attributes a testid= target matches (the runner looks for all of them).
+    var TEST_ID_ATTRS = ['data-testid', 'data-test-id', 'data-test', 'data-qa', 'data-cy'];
+    var TEST_ID_SEL = '[data-testid],[data-test-id],[data-test],[data-qa],[data-cy]';
+    var testIdAttr = function (el) {
+      for (var i = 0; i < TEST_ID_ATTRS.length; i++) if (el.hasAttribute(TEST_ID_ATTRS[i])) return TEST_ID_ATTRS[i];
+      return '';
+    };
+    var countTestId = function (v) {
+      var n = 0;
+      for (var i = 0; i < TEST_ID_ATTRS.length; i++) n += countAttr(TEST_ID_ATTRS[i], v);
       return n;
     };
     var safeAttr = function (v) { return typeof v === 'string' && v.length > 0 && v.length <= 120 && !/["'\x60\\“”\n\r]/.test(v); };
     var attrSel = function (name, v) { return '[' + name + '="' + v + '"]'; };
     var cssId = function (id) { return (W.CSS && W.CSS.escape) ? W.CSS.escape(id) : id.replace(/([^\w-])/g, '\\$1'); };
     var uniqueSel = function (sel, el) {
-      try { var m = document.querySelectorAll(sel); return m.length === 1 && m[0] === el; } catch (e) { return false; }
+      try { var m = deepAll(sel); return m.length === 1 && m[0] === el; } catch (e) { return false; }
     };
     var classesOf = function (el) {
       var out = [];
@@ -378,8 +540,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var baseSel = function (el) {
       var tag = lower(el);
       if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) return tag + '#' + el.id;
-      var tid = el.getAttribute('data-testid');
-      if (safeAttr(tid)) return tag + attrSel('data-testid', tid);
+      var ta = testIdAttr(el);
+      if (ta && safeAttr(el.getAttribute(ta))) return tag + attrSel(ta, el.getAttribute(ta));
       var attrs = ['name', 'aria-label', 'href', 'for', 'placeholder', 'title', 'type', 'role'];
       for (var i = 0; i < attrs.length; i++) {
         var v = el.getAttribute(attrs[i]);
@@ -393,12 +555,13 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (a.id && /^[A-Za-z][\w-]*$/.test(a.id)) return '#' + a.id;
       var al = a.getAttribute('aria-label');
       if (safeAttr(al)) return tag + attrSel('aria-label', al);
-      var tid = a.getAttribute('data-testid');
-      if (safeAttr(tid)) return tag + attrSel('data-testid', tid);
+      var tb = testIdAttr(a);
+      if (tb && safeAttr(a.getAttribute(tb))) return tag + attrSel(tb, a.getAttribute(tb));
       var cls = classesOf(a);
       return cls.length ? tag + '.' + cls[0] : tag;
     };
-    var cssPath = function (el) {
+    // A path inside el's own tree (the document or one shadow root).
+    var treePath = function (el) {
       var base = baseSel(el);
       if (uniqueSel(base, el)) return base;
       for (var a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
@@ -414,34 +577,148 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return parts.join(' > ');
     };
+    // Matches of a chain "a >> css=b >> css=c": each step searched inside the previous matches (and their shadow roots).
+    var chainAll = function (sels) {
+      var cur = deepAll(sels[0]);
+      for (var i = 1; i < sels.length; i++) {
+        var next = [];
+        for (var j = 0; j < cur.length; j++) {
+          var inner = deepAll(sels[i], cur[j]);
+          if (cur[j].shadowRoot) inner = inner.concat(Array.prototype.slice.call(cur[j].shadowRoot.querySelectorAll(sels[i])));
+          for (var k = 0; k < inner.length; k++) if (next.indexOf(inner[k]) < 0) next.push(inner[k]);
+        }
+        cur = next;
+      }
+      return cur;
+    };
+    // A unique CSS selector; inside a shadow root the host's path is chained in front ("my-card >> css=button.save").
+    var cssPath = function (el) {
+      var own = treePath(el);
+      if (!inShadow(el) || uniqueSel(own, el)) return own;
+      var sels = [own];
+      for (var host = el.getRootNode().host; host; host = inShadow(host) ? host.getRootNode().host : null) {
+        sels.unshift(treePath(host));
+        var m;
+        try { m = chainAll(sels); } catch (e) { m = []; }
+        if (m.length === 1 && m[0] === el) return sels.join(' >> css=');
+        if (!inShadow(host)) break;
+      }
+      return sels.join(' >> css=');
+    };
     // The row of an element (tr, li, role=row/listitem) and a short text of another cell that only this row has.
+    // Row-like, as the runner's row= engine sees it: a table row, list item, ARIA row, listitem, option, article,
+    // treeitem or menuitem, or an element repeated among its siblings (product cards).
+    var ROW_ROLES = { row: 1, listitem: 1, option: 1, article: 1, treeitem: 1, menuitem: 1 };
+    var signatureOf = function (e) { return lower(e) + '.' + Array.prototype.slice.call(e.classList || []).sort().join('.'); };
+    var isRowLike = function (p) {
+      var t = lower(p), rr = p.getAttribute('role');
+      if (t === 'tr' || t === 'li' || (rr && ROW_ROLES[rr])) return true;
+      var parent = p.parentElement;
+      if (!parent || t === 'body' || lower(parent) === 'body' || t === 'html') return false;
+      var sig = signatureOf(p), same = 0;
+      for (var i = 0; i < parent.children.length; i++) if (signatureOf(parent.children[i]) === sig) same++;
+      return same >= 2 && p.children.length > 0;
+    };
     var rowOf = function (el) {
+      for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) if (isRowLike(p)) return p;
+      return null;
+    };
+    var visibleText = function (e) { return norm(e.innerText != null ? e.innerText : e.textContent); };
+    // Short texts of a row other than the element's own, first ones first (the name of a product card, a cell).
+    var rowTexts = function (row, el) {
+      var out = [];
+      var all = row.querySelectorAll('*');
+      for (var i = 0; i < all.length && out.length < 12; i++) {
+        var c = all[i];
+        if (c.contains(el) || el.contains(c) || NO_TEXT_TAGS[lower(c)]) continue;
+        var t = visibleText(c);
+        if (!t || t.length > 40 || out.indexOf(t) >= 0) continue;
+        // The words of one element ("name: user2"), not of a block holding several ("name: user2 View profile").
+        var inner = false;
+        for (var j = 0; j < c.children.length; j++) if (visibleText(c.children[j])) { inner = true; break; }
+        if (!inner) out.push(t);
+      }
+      // A name ("Soft Stretch Jeans") tells a person which row before a price or a number does ("Rs. 799").
+      var wordy = function (t) { return /[A-Za-z\u00C0-\u024F]{3,}/.test(t) && (t.replace(/[^0-9]/g, '').length * 3 < t.length) ? 0 : 1; };
+      return out.map(function (t, i) { return { t: t, i: i }; }).sort(function (a, b) { return wordy(a.t) - wordy(b.t) || a.i - b.i; }).map(function (x) { return x.t; });
+    };
+    // The rows the runner's row= engine finds for a text: from each innermost element whose text contains it, the
+    // first row-like element at or above it (inside "within" when given).
+    var rowsFor = function (t, within, cache) {
+      var root = within || document.body;
+      var want = t.toLowerCase();
+      var all = deepOrder(root, []);
+      var rows = [];
+      for (var i = 0; i < all.length; i++) {
+        var c = all[i];
+        if (NO_TEXT_TAGS[lower(c)]) continue;
+        if (norm(flatText(c, cache)).toLowerCase().indexOf(want) < 0) continue;
+        var innermost = true;
+        for (var j = 0; j < c.children.length; j++) {
+          if (norm(flatText(c.children[j], cache)).toLowerCase().indexOf(want) >= 0) { innermost = false; break; }
+        }
+        if (!innermost) continue;
+        for (var p = c; p && p !== root; p = p.parentElement) {
+          if (isRowLike(p)) { if (rows.indexOf(p) < 0) rows.push(p); break; }
+        }
+      }
+      return rows;
+    };
+    // A text of one of the element's rows that picks out exactly one row, in which the element's name is unique.
+    var rowTextOf = function (el, role, name, within) {
+      var cache = new Map();
+      var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
+      for (var r = rowOf(el); r && r !== document.body && (!within || within.contains(r)); r = r.parentElement) {
+        if (!isRowLike(r)) continue;
+        var texts = rowTexts(r, el);
+        for (var i = 0; i < texts.length; i++) {
+          var rows = rowsFor(texts[i], within, cache);
+          if (rows.length !== 1 || !rows[0].contains(el)) continue;
+          var inside = rows[0].querySelectorAll(q), n = 0;
+          for (var k = 0; k < inside.length; k++) if (roleOf(inside[k]) === role && !isHidden(inside[k]) && nameOf(inside[k], role) === name) n++;
+          if (n === 1) return texts[i];
+        }
+      }
+      return '';
+    };
+    // The same names in two tables (or two forms): the nearest container with a unique id that tells them apart.
+    var idContainerOf = function (el) {
       for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-        var t = lower(p), rr = p.getAttribute('role');
-        if (t === 'tr' || t === 'li' || rr === 'row' || rr === 'listitem') return p;
+        if (p.id && /^[A-Za-z][\w-]*$/.test(p.id) && uniqueSel('#' + p.id, p)) return p;
       }
       return null;
     };
-    var rowTextOf = function (el, role, name) {
-      var row = rowOf(el);
-      if (!row) return '';
-      var cells = row.children;
-      for (var i = 0; i < cells.length; i++) {
-        if (cells[i].contains(el)) continue;
-        var t = norm(cells[i].innerText != null ? cells[i].innerText : cells[i].textContent);
-        if (!t || t.length > 40) continue;
-        // Unique: no other element with this role and name sits in a row containing the text.
+    // The named group around an unnamed control, when it is the only one of its kind there (a fieldset whose legend
+    // says "Dropdown Example" around one select): "the dropdown inside the "Dropdown Example" section".
+    var groupOf = function (el, role) {
+      for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        var gname = '';
+        if (lower(p) === 'fieldset') { var lg = p.querySelector('legend'); gname = lg ? norm(textOf(lg, true)) : ''; }
+        else if (p.getAttribute('aria-label')) gname = norm(p.getAttribute('aria-label'));
+        if (!gname) continue;
+        if (gname.length > 60) return '';
         var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
-        var all = document.querySelectorAll(q), hits = 0;
-        for (var k = 0; k < all.length; k++) {
-          var e = all[k];
-          if (roleOf(e) !== role || isHidden(e) || nameOf(e, role) !== name) continue;
-          var er = rowOf(e);
-          if (er && norm(er.innerText != null ? er.innerText : er.textContent).toLowerCase().indexOf(t.toLowerCase()) >= 0) hits++;
-        }
-        if (hits === 1) return t;
+        var inside = p.querySelectorAll(q), n = 0;
+        for (var i = 0; i < inside.length; i++) if (roleOf(inside[i]) === role && !isHidden(inside[i])) n++;
+        return n === 1 ? gname : '';
       }
       return '';
+    };
+    // A named landmark around the element in which its role and name are unique ("the "Main" navigation").
+    var LANDMARK_WORDS = { navigation: 'navigation', region: 'section', form: 'form', dialog: 'dialog', alertdialog: 'dialog' };
+    var landmarkOf = function (el, role, name) {
+      for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        var lr = roleOf(p);
+        if (!LANDMARK_WORDS[lr]) continue;
+        var ln = nameOf(p, lr);
+        if (!ln || ln.length > 60) continue;
+        if (countRoleName(lr, ln) !== 1) continue;
+        var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
+        var inside = p.querySelectorAll(q), n = 0;
+        for (var i = 0; i < inside.length; i++) if (roleOf(inside[i]) === role && !isHidden(inside[i]) && nameOf(inside[i], role) === name) n++;
+        if (n === 1) return { role: lr, name: ln, word: LANDMARK_WORDS[lr] };
+      }
+      return null;
     };
     // A click on a plain container whose text is exactly one labelled control or heading inside it (a title bar
     // div around an <h6>): describe that element instead, so the step reads "the "Dashboard" heading", not a CSS path.
@@ -460,21 +737,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     };
     // 1-based position of el among the elements countText counts, for "the 2nd "Dashboard" text".
     var textNth = function (el, text) {
-      if (!text || !document.body) return 0;
-      var n = 0;
-      var all = document.body.querySelectorAll('*');
-      for (var i = 0; i < all.length; i++) {
-        var e = all[i];
-        var t = lower(e);
-        if (t === 'script' || t === 'style' || t === 'template') continue;
-        var raw = e.textContent || '';
-        if (raw.length < text.length || norm(raw) !== text) continue;
-        var childHas = false;
-        for (var j = 0; j < e.children.length; j++) if (norm(e.children[j].textContent) === text) { childHas = true; break; }
-        if (childHas) continue;
-        n++;
-        if (e === el || el.contains(e)) return n;
-      }
+      var hits = textHits(text);
+      for (var i = 0; i < hits.length; i++) if (hits[i] === el || containsFlat(el, hits[i])) return i + 1;
       return 0;
     };
     // A one-time code field (TOTP / MFA): autocomplete=one-time-code, or named like one (Keycloak otp, Entra otc).
@@ -485,6 +749,11 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       return /(^|[^a-z])(otp|totp|otc|one-?time-?code|mfa-?code|totp-?code|otp-?code)([^a-z]|$)/.test(n);
     };
     var info = function (el) {
+      rootsCache = null;
+      rootsCache = shadowRoots();
+      try { return infoOf(el); } finally { rootsCache = null; }
+    };
+    var infoOf = function (el) {
       el = meaningful(el);
       var tag = lower(el);
       var role = roleOf(el);
@@ -502,8 +771,11 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       var otp = isOtp(el);
       var secret = (tag === 'input' && inputType(el) === 'password') || otp;
       var text = (field || tag === 'select' || customSelect) ? '' : norm(el.innerText != null ? el.innerText : el.textContent);
+      // In a web component the rendered text comes through slots and shadow trees, which innerText leaves out.
+      if (!field && tag !== 'select' && !customSelect && (inShadow(el) || el.shadowRoot || el.querySelector('slot'))) text = norm(flatText(el, new Map()));
       if (text.length > 200) text = text.slice(0, 200);
-      var testId = el.getAttribute('data-testid') || '';
+      var testAttr = testIdAttr(el);
+      var testId = testAttr ? el.getAttribute(testAttr) || '' : '';
       var r = el.getBoundingClientRect();
       var out = {
         key: keyOf(el), tag: tag, classes: classesOf(el), css: cssPath(el), field: field, secret: secret, otp: otp,
@@ -513,16 +785,27 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           placeholder: placeholder ? countAttr('placeholder', el.getAttribute('placeholder')) : 0,
           placeholderAsLabel: placeholder ? countLabel(placeholder) : 0,
           text: text && text.length <= 80 && !role ? countText(text) : 0,
-          testId: testId ? countAttr('data-testid', testId) : 0,
+          testId: testId ? countTestId(testId) : 0,
           id: el.id ? countAttr('id', el.id) : 0
         },
         box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
       };
       if (tag === 'input') out.type = inputType(el);
       if (role && name && out.counts.roleName > 1) {
-        var rt = rowTextOf(el, role, name); if (rt) out.rowText = rt;
-        var rn = roleNthOf(el, role, name); if (rn) out.roleNth = rn;
+        var rt = rowTextOf(el, role, name);
+        if (rt) out.rowText = rt;
+        else {
+          var box = idContainerOf(el);
+          var rt2 = box ? rowTextOf(el, role, name, box) : '';
+          if (rt2) { out.rowText = rt2; out.rowWithin = '#' + box.id; }
+        }
+        var lm = landmarkOf(el, role, name);
+        if (lm) out.landmark = lm;
+        var rn = roleNth(el, role, name); if (rn) out.roleNth = rn;
       }
+      if (role && !name && (role === 'checkbox' || role === 'radio')) { var kn = roleNth(el, role, null); if (kn) out.kindNth = kn; }
+      if (role && !name && !label && !placeholder) { var gr = groupOf(el, role); if (gr) out.group = gr; }
+      if (el.isContentEditable) out.editable = true;
       if (role) out.role = role;
       if (name) out.name = name;
       if (label) out.label = label;
@@ -544,7 +827,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var actionable = function (target) {
       var el = target && target.nodeType === 1 ? target : (target && target.parentElement);
       if (!el || !el.closest) return null;
-      return el.closest(ACTIONABLE) || el.closest('[data-testid]') || el;
+      return el.closest(ACTIONABLE) || el.closest(TEST_ID_SEL) || el;
     };
     R.info = info;
     R.roleOf = roleOf;
@@ -556,14 +839,72 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var pending = new Set();
     var lastSent = new WeakMap();
     var lastEnter = 0;
-    var mk = function (ev) { ev.t = Date.now(); ev.url = location.href; return ev; };
+    // The chain of frames this document sits in, outermost first, named as a tester names a frame (see
+    // frameChain in recorder.ts, which the Node side uses when a parent is on another origin).
+    var frameName = function (fe) {
+      var root = fe.getRootNode();
+      var frames = Array.prototype.slice.call(root.querySelectorAll('iframe,frame'));
+      var plain = function (v) { return !!v && v.length <= 80 && !/["\\\n\r]/.test(v) && v.trim() === v && !/^(?:css\s*=|[#.[]|i?frame(?:$|[\s#.[:>~+]))/i.test(v); };
+      var count = function (attr, v) { var n = 0; for (var i = 0; i < frames.length; i++) if ((attr === 'id' ? frames[i].id : frames[i].getAttribute(attr)) === v) n++; return n; };
+      var name = fe.getAttribute('name');
+      if (plain(name) && count('name', name) === 1) return name;
+      var title = fe.getAttribute('title');
+      if (plain(title) && count('title', title) === 1 && count('name', title) === 0 && count('id', title) === 0) return title;
+      if (plain(fe.id) && count('id', fe.id) === 1 && count('name', fe.id) === 0) return fe.id;
+      var src = fe.getAttribute('src') || '', path = '';
+      try { path = src && !/^(?:about|data|javascript|blob):/i.test(src) ? new URL(src, location.href).pathname : ''; } catch (e) { path = ''; }
+      if (plain(path) && path.length > 1 && count('name', path) + count('id', path) + count('title', path) === 0) {
+        var hits = 0;
+        for (var j = 0; j < frames.length; j++) if ((frames[j].getAttribute('src') || '').indexOf(path) >= 0) hits++;
+        if (hits === 1) return path;
+      }
+      var tag = lower(fe);
+      if (root.querySelectorAll(tag).length === 1) return tag;
+      var idx = 1;
+      for (var sib = fe.previousElementSibling; sib; sib = sib.previousElementSibling) if (sib.tagName === fe.tagName) idx++;
+      var sel = tag + ':nth-of-type(' + idx + ')';
+      if (root.querySelectorAll(sel).length === 1) return sel;
+      var p = fe.parentElement;
+      var scoped = p && p.id && /^[A-Za-z][\w-]*$/.test(p.id) ? '#' + p.id + ' > ' + sel : '';
+      return scoped && root.querySelectorAll(scoped).length === 1 ? scoped : 'css=' + sel;
+    };
+    var frameChainHere = function () {
+      var out = [];
+      try {
+        for (var w = W; w !== w.top; w = w.parent) {
+          var fe = w.frameElement;
+          if (!fe) return null;
+          out.unshift(frameName(fe));
+        }
+      } catch (e) { return null; }
+      return out;
+    };
+    var mk = function (ev) {
+      if (!ev.t) ev.t = Date.now();
+      ev.url = location.href;
+      if (W !== W.top) { var fc = frameChainHere(); if (fc) ev.frameChain = fc; }
+      return ev;
+    };
     var send = function (ev) {
       if (!R.binding || typeof W[R.binding] !== 'function') return;
       try { var p = W[R.binding](mk(ev)); if (p && p.catch) p.catch(function () {}); } catch (e) { /* page is going away */ }
     };
+    // The element whose text a person edits: a field, or the host of a contenteditable region (a rich-text editor).
+    var editHost = function (el) {
+      if (!el || !el.tagName) return null;
+      if (isField(el)) return el;
+      if (!el.isContentEditable) return null;
+      var h = el;
+      while (h.parentElement && h.parentElement.isContentEditable) h = h.parentElement;
+      return h;
+    };
+    var editedText = function (el) {
+      if (isField(el)) return el.value;
+      return String(el.innerText != null ? el.innerText : el.textContent).replace(/\n+$/, '');
+    };
     var fillEvent = function (el) {
       pending.delete(el);
-      var v = el.value;
+      var v = editedText(el);
       if (lastSent.get(el) === v) return null;
       lastSent.set(el, v);
       // A one-time code is never reported either: it is useless on replay (a fresh one is computed then).
@@ -579,14 +920,189 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       pending.clear();
       return out;
     };
+    var sendPending = function (el) { if (pending.has(el)) { var ev = fillEvent(el); if (ev) send(ev); } };
     R.flush = flushPending;
     var targetOf = function (e) { var p = e.composedPath ? e.composedPath() : []; return (p && p[0]) || e.target; };
+
+    // ------------------------------------------------ hover: menus and overlays that only show while hovered
+    // A CSS rule "A:hover B { display: block }" (or visibility, opacity, ...) shows B while A is hovered. A click on
+    // something inside B needs a hover over A first, or the replay finds it hidden.
+    var REVEALS = /(?:^|;)\s*(?:display|visibility|opacity|max-height|height|width|transform|clip|clip-path|left|top|right|bottom|z-index|pointer-events)\s*:/i;
+    var hoverRules = function () {
+      var out = [];
+      var collect = function (rules) {
+        for (var i = 0; i < rules.length; i++) {
+          var r = rules[i];
+          if (r.cssRules && !r.selectorText) { try { collect(r.cssRules); } catch (e) { /* unreadable */ } continue; }
+          var st = r.selectorText;
+          if (!st || st.indexOf(':hover') < 0 || !r.style || !REVEALS.test(r.style.cssText)) continue;
+          var sels = st.split(',');
+          for (var j = 0; j < sels.length; j++) {
+            var sel = sels[j].trim();
+            var k = sel.lastIndexOf(':hover');
+            if (k < 0) continue;
+            var tail = /^[^\s>+~]*/.exec(sel.slice(k + 6))[0];
+            var hovered = (sel.slice(0, k) + tail).replace(/:hover/g, '').trim();
+            var shown = sel.replace(/:hover/g, '').trim();
+            if (!hovered || hovered === shown || /::?(?:before|after|placeholder|marker|selection)/.test(shown)) continue;
+            out.push({ hovered: hovered, shown: shown });
+          }
+        }
+      };
+      for (var i = 0; i < document.styleSheets.length; i++) {
+        try { collect(document.styleSheets[i].cssRules); } catch (e) { /* a cross-origin style sheet cannot be read */ }
+      }
+      return out;
+    };
+    // Something to describe for a hovered container: its first named element that is not part of what the hover shows.
+    var hoverPick = function (h, shown) {
+      if (roleOf(h) && nameOf(h, roleOf(h))) return h;
+      var all = h.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        var c = all[i];
+        if (shown && (shown === c || shown.contains(c))) continue;
+        var r = roleOf(c);
+        if (r && r !== 'presentation' && nameOf(c, r) && !isHidden(c)) return c;
+      }
+      return h;
+    };
+    var lastOver = null, lastOverT = 0;
+    var shownBy = [];
+    var hoverAnchors = function (el) {
+      var anchors = [];
+      var add = function (h, shown) {
+        for (var i = 0; i < anchors.length; i++) if (anchors[i].h === h) return;
+        anchors.push({ h: h, shown: shown });
+      };
+      var rules = hoverRules();
+      for (var r = 0; r < rules.length; r++) {
+        var shown = null;
+        try { shown = el.closest(rules[r].shown); } catch (e) { continue; }
+        if (!shown) continue;
+        for (var a = shown.parentElement; a; a = a.parentElement) {
+          var ok = false;
+          try { ok = a.matches(rules[r].hovered) && a.matches(':hover'); } catch (e) { break; }
+          if (ok) { add(a, shown); break; }
+        }
+      }
+      // Script menus (mouseenter handlers): the hovered element changed a container that holds the clicked one.
+      for (var s = shownBy.length - 1; s >= 0; s--) {
+        var rec = shownBy[s];
+        if (Date.now() - rec.t > 10000) break;
+        if (!rec.node.isConnected || !rec.node.contains(el) || !rec.by.isConnected) continue;
+        if (rec.by === el || el.contains(rec.by)) continue;
+        var by = actionable(rec.by) || rec.by;
+        if (by === el || el.contains(by)) continue;
+        add(by, rec.node.contains(by) ? null : rec.node);
+        break;
+      }
+      // Outermost first: an inner menu shows only while the outer one is open.
+      anchors.sort(function (x, y) { return x.h.contains(y.h) ? -1 : y.h.contains(x.h) ? 1 : 0; });
+      var out = [];
+      for (var i = 0; i < anchors.length; i++) {
+        var pick = hoverPick(anchors[i].h, anchors[i].shown);
+        if (pick !== el && !pick.contains(el)) out.push(pick);
+        else if (anchors[i].h !== el && !anchors[i].h.contains(el)) out.push(anchors[i].h);
+      }
+      return out;
+    };
+    var watchShown = function () {
+      if (typeof MutationObserver !== 'function' || !document.documentElement) return;
+      new MutationObserver(function (records) {
+        if (!lastOver || Date.now() - lastOverT > 1000) return;
+        for (var i = 0; i < records.length; i++) {
+          var r = records[i];
+          var nodes = r.type === 'childList' ? r.addedNodes : [r.target];
+          for (var j = 0; j < nodes.length; j++) {
+            var n = nodes[j];
+            if (!n || n.nodeType !== 1) continue;
+            var t = lower(n);
+            if (t === 'html' || t === 'body' || t === 'head' || t === 'script' || t === 'style') continue;
+            if (n.contains(lastOver) && n.getElementsByTagName('*').length > 400) continue;
+            shownBy.push({ node: n, by: lastOver, t: Date.now() });
+          }
+        }
+        if (shownBy.length > 300) shownBy.splice(0, shownBy.length - 300);
+      }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'open'] });
+    };
+
+    // ------------------------------------------------ keys
+    var NAMED_KEYS = { Tab: 1, Escape: 1, Enter: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, PageUp: 1, PageDown: 1,
+      Home: 1, End: 1, Delete: 1, Backspace: 1, Insert: 1, F1: 1, F2: 1, F3: 1, F4: 1, F5: 1, F6: 1, F7: 1, F8: 1, F9: 1, F10: 1, F11: 1, F12: 1 };
+    var MODIFIER_KEYS = { Shift: 1, Control: 1, Alt: 1, Meta: 1, AltGraph: 1, CapsLock: 1, NumLock: 1, Dead: 1, Unidentified: 1, Process: 1, OS: 1, Fn: 1 };
+    var keyName = function (e) {
+      var k = e.key === ' ' ? 'Space' : e.key;
+      var mods = [];
+      if (e.ctrlKey) mods.push('Control');
+      if (e.altKey) mods.push('Alt');
+      if (e.metaKey) mods.push('Meta');
+      if (e.shiftKey && (NAMED_KEYS[k] || k === 'Space' || mods.length)) mods.push('Shift');
+      if (k.length === 1 && mods.length) k = k.toUpperCase() === k.toLowerCase() ? k : k.toLowerCase();
+      return mods.concat([k]).join('+');
+    };
+    // Keys whose effect is recorded as another step: activating a control (its click or check) or moving a choice (its change).
+    var keyRecordedElsewhere = function (el, k) {
+      var tag = lower(el), role = roleOf(el);
+      if (k === 'Enter' || k === ' ') {
+        if (tag === 'button' || tag === 'a' || tag === 'summary' || tag === 'select' || tag === 'option') return true;
+        if (tag === 'input') return true;
+        if (role === 'button' || role === 'link' || role === 'checkbox' || role === 'radio' || role === 'switch' || role === 'tab' ||
+          role === 'menuitem' || role === 'option' || role === 'menuitemcheckbox' || role === 'menuitemradio' || role === 'treeitem') return true;
+      }
+      if (k.indexOf('Arrow') === 0 || k === 'Home' || k === 'End' || k === 'PageUp' || k === 'PageDown') {
+        if (tag === 'select') return true;
+        if (tag === 'input' && (inputType(el) === 'radio' || inputType(el) === 'range')) return true;
+      }
+      return false;
+    };
+
+    // ------------------------------------------------ drag and drop
+    var dragFrom = null;
+    var nativeDrag = false;
+    var down = null;
+    var suppressClickUntil = 0;
+    var dropTarget = function (el) {
+      if (!el || !el.closest) return el;
+      return el.closest('[draggable="true"]') || actionable(el) || el;
+    };
+
     R.attach = function () {
       if (R.listening) return;
       R.listening = true;
+      watchShown();
+      if (!R.wrapped) {
+        R.wrapped = true;
+        try {
+          var closeWindow = W.close;
+          W.close = function () { send({ kind: 'closing' }); return closeWindow.apply(W, arguments); };
+        } catch (e) { /* not replaceable */ }
+        // document.open() erases the listeners of the document and, in Firefox, of its window too (a rich-text
+        // editor writes its iframe that way): listen again when the probe listener below no longer answers.
+        try {
+          var DP = W.Document && W.Document.prototype;
+          var openDocument = DP && DP.open;
+          if (openDocument) {
+            DP.open = function () {
+              var out = openDocument.apply(this, arguments);
+              if (this === W.document && arguments.length < 3 && R.binding) {
+                R.alive = false;
+                try { W.dispatchEvent(new Event('__ezrec_probe')); } catch (e) { /* ignore */ }
+                if (!R.alive) { R.listening = false; R.attach(); }
+              }
+              return out;
+            };
+          }
+        } catch (e) { /* not replaceable */ }
+      }
+      W.addEventListener('__ezrec_probe', function () { R.alive = true; });
+      W.addEventListener('pointerover', function (e) {
+        if (!e.isTrusted) return;
+        lastOver = targetOf(e);
+        lastOverT = Date.now();
+      }, true);
       W.addEventListener('input', function (e) {
-        var el = targetOf(e);
-        if (isField(el)) pending.add(el);
+        var el = editHost(targetOf(e));
+        if (el) pending.add(el);
       }, true);
       W.addEventListener('change', function (e) {
         var el = targetOf(e);
@@ -609,20 +1125,100 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
             return;
           }
         }
-        if (isField(el)) { var ev = fillEvent(el); if (ev) send(ev); }
+        // Only typed text: a value the page's own script put there (a picked suggestion) comes from the click before.
+        if (isField(el) && pending.has(el)) { var ev = fillEvent(el); if (ev) send(ev); }
       }, true);
-      W.addEventListener('focusout', function (e) {
-        var el = targetOf(e);
-        if (pending.has(el)) { var ev = fillEvent(el); if (ev) send(ev); }
+      W.addEventListener('focusout', function (e) { sendPending(editHost(targetOf(e))); }, true);
+      // The page changed the field since it was recorded (a login page empties the password after a failed try):
+      // typing the same text again is a step again.
+      W.addEventListener('focusin', function (e) {
+        var el = editHost(targetOf(e));
+        if (el && lastSent.has(el) && lastSent.get(el) !== editedText(el)) lastSent.delete(el);
       }, true);
+      // Leaving a frame (a rich-text editor's iframe) moves focus out of its window, not out of an element in it.
+      W.addEventListener('blur', function (e) { if (e.target === W) flushPending().forEach(function (ev) { send(ev); }); }, true);
       W.addEventListener('keydown', function (e) {
-        if (e.key !== 'Enter' || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !e.isTrusted) return;
+        if (!e.isTrusted || e.isComposing || e.repeat || MODIFIER_KEYS[e.key]) return;
         var el = targetOf(e);
-        if (!isField(el) || lower(el) === 'textarea') return;
-        var ev = fillEvent(el);
-        if (ev) send(ev);
-        lastEnter = Date.now();
-        send({ kind: 'press', key: 'Enter', el: info(el) });
+        if (el && el.nodeType !== 1) el = el.parentElement;
+        var host = editHost(el);
+        var plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+        if (host) {
+          // Typing and editing shortcuts are recorded as the text they produce; only keys that leave or drive the field are steps.
+          if (!plain) return;
+          var k = e.key;
+          var tag = lower(host);
+          if (k === 'Enter') {
+            if (tag === 'textarea' || !isField(host) || e.shiftKey) return;
+          } else if (k === 'Tab' || k === 'Escape') {
+            // a step of its own
+          } else if ((k === 'ArrowDown' || k === 'ArrowUp') && tag === 'input' && !e.shiftKey) {
+            // choosing from a suggestion list
+          } else return;
+          sendPending(host);
+          if (k === 'Enter') lastEnter = Date.now();
+          send({ kind: 'press', key: keyName(e), el: info(host) });
+          return;
+        }
+        var k2 = e.key;
+        if (!NAMED_KEYS[k2] && k2 !== ' ' && k2.length !== 1) return;
+        if (plain && k2.length === 1 && k2 !== ' ' && el && (lower(el) === 'select' || lower(el) === 'input')) return;
+        if (el && keyRecordedElsewhere(el, k2)) return;
+        var target = el && el !== document.body && el !== document.documentElement && el.tagName ? el : null;
+        send({ kind: 'press', key: keyName(e), el: target ? info(target) : undefined });
+      }, true);
+      W.addEventListener('dragstart', function (e) {
+        if (!e.isTrusted) return;
+        var el = targetOf(e);
+        if (el && el.nodeType !== 1) el = el.parentElement;
+        var src = el && el.closest ? (el.closest('[draggable="true"]') || el) : el;
+        if (!src || isField(src)) { dragFrom = null; return; }
+        nativeDrag = true;
+        dragFrom = { info: info(src), t: Date.now() };
+      }, true);
+      // The drop may be untrusted while the drag a person started is: Firefox driven by WebDriver ends the drag
+      // without a drop, and the driver fires it.
+      W.addEventListener('drop', function (e) {
+        if (!dragFrom) return;
+        var to = dropTarget(targetOf(e));
+        if (to && to.tagName) send({ kind: 'drag', el: dragFrom.info, to: info(to), t: dragFrom.t });
+        dragFrom = null;
+      }, true);
+      W.addEventListener('dragend', function () { dragFrom = null; nativeDrag = false; suppressClickUntil = Date.now() + 300; down = null; }, true);
+      W.addEventListener('mousedown', function (e) {
+        if (!e.isTrusted || e.button !== 0) { down = null; return; }
+        var el = targetOf(e);
+        if (el && el.nodeType !== 1) el = el.parentElement;
+        nativeDrag = false;
+        if (!el || !el.tagName || editHost(el) || lower(el) === 'select' || lower(el) === 'option' || (lower(el) === 'input')) { down = null; return; }
+        down = { x: e.clientX, y: e.clientY, el: el, info: null, moved: false, t: Date.now() };
+      }, true);
+      W.addEventListener('mousemove', function (e) {
+        if (!down || down.moved || !e.isTrusted || !(e.buttons & 1)) return;
+        if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) < 12) return;
+        down.moved = true;
+        var src = actionable(down.el) || down.el;
+        down.src = src;
+        // Described as it was before it moved.
+        try { var r = src.getBoundingClientRect(); src.__ezBox = r; } catch (err) { /* detached */ }
+        down.info = info(src);
+      }, true);
+      W.addEventListener('mouseup', function (e) {
+        var d = down;
+        down = null;
+        if (!d || !d.moved || nativeDrag || !e.isTrusted) return;
+        var sel = W.getSelection && W.getSelection();
+        if (sel && String(sel).trim()) return;
+        var hits = document.elementsFromPoint ? document.elementsFromPoint(e.clientX, e.clientY) : [];
+        var to = null;
+        for (var i = 0; i < hits.length; i++) {
+          var h = hits[i];
+          if (h === document.documentElement || h === document.body || d.src.contains(h) || h.contains(d.src)) continue;
+          to = h;
+          break;
+        }
+        suppressClickUntil = Date.now() + 300;
+        if (to) send({ kind: 'drag', el: d.info, to: info(dropTarget(to)), t: d.t });
       }, true);
       // A custom dropdown: the box clicked last, and the option picked from the list it opened. Lists usually close on
       // mousedown, so the click on the option never arrives: the pick is taken at pointerdown.
@@ -669,6 +1265,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           send(a);
           return;
         }
+        if (Date.now() < suppressClickUntil) return;
         if (e.detail === 0 && Date.now() - lastEnter < 1000) return;
         var el = actionable(raw);
         if (!el) return;
@@ -678,21 +1275,29 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           else pressedInfo = down.info;
         }
         down = null;
+        // Typing still pending in a field happened before this click (a suggestion list keeps the focus in its field).
+        pending.forEach(function (p) { if (p !== el && !p.contains(el)) sendPending(p); });
         var tag = lower(el);
         if (tag === 'select' || tag === 'option' || tag === 'textarea') return;
         if (tag === 'input' && (isField(el) || NON_FIELD_TYPES[inputType(el)] && !BUTTON_TYPES[inputType(el)])) return;
         if (tag === 'label' && el.control) return;
         if (el.isContentEditable) return;
+        var t0 = Date.now();
+        if (e.detail > 0) {
+          var hovers = [];
+          try { hovers = hoverAnchors(el); } catch (err) { hovers = []; }
+          for (var hv = 0; hv < hovers.length; hv++) send({ kind: 'hover', el: info(hovers[hv]), t: t0 - hovers.length + hv });
+        }
         var role = roleOf(el);
         if ((role === 'checkbox' || role === 'switch') && tag !== 'input') {
           var was = el.getAttribute('aria-checked') === 'true';
-          send({ kind: was ? 'uncheck' : 'check', el: info(el) });
+          send({ kind: was ? 'uncheck' : 'check', el: info(el), t: t0 });
           return;
         }
-        if (role === 'radio' && tag !== 'input') { send({ kind: 'check', el: info(el) }); return; }
+        if (role === 'radio' && tag !== 'input') { send({ kind: 'check', el: info(el), t: t0 }); return; }
         var ci = pressedInfo || info(el);
         lastBox = ci.customSelect || role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox' ? { info: ci, t: Date.now() } : null;
-        send({ kind: 'click', el: ci });
+        send({ kind: 'click', el: ci, t: t0 });
         // Nothing to name it by, and gone a moment later: a loading overlay or a backdrop that was in the way, not part
         // of the journey (replaying a click on it fails, it is not there any more).
         if (!ci.role && !ci.name && !ci.label && !ci.text && !ci.placeholder) {

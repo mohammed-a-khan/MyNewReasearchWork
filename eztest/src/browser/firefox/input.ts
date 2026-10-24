@@ -88,6 +88,21 @@ export interface InputTarget {
   /** Insert text at the caret of the focused element (like an IME commit); false when nothing editable is focused. */
   insertText(text: string): Promise<boolean>;
   viewport(): { width: number; height: number } | null;
+  /**
+   * The pointer left the page at (x, y) outside the viewport. WebDriver cannot move a pointer out of the viewport,
+   * so the mouseout / mouseleave events a browser fires then are dispatched in the page (from the edge point).
+   */
+  pointerLeft(x: number, y: number, edge: { x: number; y: number }): Promise<void>;
+  /** Before a press: watch the page's HTML5 drag events, so that the release can drop (see dropIfDragging). */
+  watchDrag(): Promise<void>;
+  /**
+   * Before the release at (x, y): when an HTML5 drag is under way and the element there accepted it (its dragover
+   * was cancelled), fire the "drop" the page waits for. Firefox's WebDriver ends a synthesized drag session on
+   * release without one; the "dragend" then comes from Firefox itself.
+   */
+  dropIfDragging(x: number, y: number): Promise<void>;
+  /** After the release: fire the "dragend" when Firefox ended the drag without one. */
+  endDrag(x: number, y: number): Promise<void>;
 }
 
 const MOD_BITS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
@@ -164,6 +179,10 @@ export class FirefoxMouse extends Mouse {
       actions.push({ type: 'pointerMove', x: p.x, y: p.y, origin: 'viewport', duration: 0 });
     }
     await this.send(actions);
+    const vp = this.target.viewport();
+    const outside = (px: number, py: number) => !!vp && (px < 0 || py < 0 || px >= vp.width || py >= vp.height);
+    // Leaving the page (an exit-intent popup listens for this): Chromium fires the events itself, Firefox cannot move there.
+    if (outside(x, y) && !outside(fromX, fromY)) await this.target.pointerLeft(x, y, this.clamp(x, y)).catch(() => undefined);
     this.x = x;
     this.y = y;
   }
@@ -172,13 +191,17 @@ export class FirefoxMouse extends Mouse {
     const button = options.button ?? 'left';
     this.buttons.add(button);
     this.pressesSent++;
+    if (button === 'left') await this.target.watchDrag().catch(() => undefined);
     await this.send([{ type: 'pointerDown', button: BUTTONS[button] }]);
   }
 
   override async up(options: { button?: MouseButton; clickCount?: number } = {}): Promise<void> {
     const button = options.button ?? 'left';
     this.buttons.delete(button);
+    const p = this.clamp(this.x, this.y);
+    if (button === 'left') await this.target.dropIfDragging(p.x, p.y).catch(() => undefined);
     await this.send([{ type: 'pointerUp', button: BUTTONS[button] }]);
+    if (button === 'left') await this.target.endDrag(p.x, p.y).catch(() => undefined);
   }
 
   override async click(x: number, y: number, options: { button?: MouseButton; clickCount?: number; delay?: number } = {}): Promise<void> {

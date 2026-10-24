@@ -158,6 +158,9 @@ Every call is a runner step with its own intent, evidence and trace entry.
 | Reads | `text`, `value`, `attribute(t, name)`, `texts`, `count`, `table` (rows as records), `url()`, `title()` |
 | Probes | `isVisible`, `isHidden`, `isEnabled`, `isChecked`. These never fail; the default timeout is short |
 | Dialogs and session | `acceptNextDialog(answer?)`, `dismissNextDialog()`, `lastDialog()`, `clearSession()` |
+| Tabs, windows, frames | `switchToTab('new' \| 'main' \| 'previous' \| n \| { title } \| { url })`, `closeTab()`, `inFrame(['outer', 'inner'], async () => …)` (returns what the function returns; back in the page afterwards, also on failure) |
+| Mouse | `drag(from, to)` (HTML5 drag and drop for draggable elements, else a mouse drag) |
+| Any `.ez` step | `perform('Scroll down until the "Item 50" text is visible')`: one plain-English line, run exactly as in an `.ez` file |
 | Components | `component(widget, name, op, args?)`: a grid, combo box, date picker, tree, tab, dialog or other library widget step, run like the `.ez` Components phrasings (strict widget lookup, library detection, read-back verification, healing, evidence); returns what `readCell`, `readAll` or `capture` reads. See [components.md](components.md) |
 | Identity | `login(role?)`, the verified Identity Vault login with session reuse |
 | Other | `screenshot(name)` (added to evidence), `page()`, the raw browser page from `@eztech/eztest/browser` (see below) |

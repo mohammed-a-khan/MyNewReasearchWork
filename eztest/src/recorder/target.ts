@@ -41,10 +41,19 @@ const SAFE_UNQUOTED = /^[\p{L}\p{N}][\p{L}\p{N} _-]*$/u;
 const SAFE_TESTID = /^[^\s"'`\\]+$/;
 const SAFE_ID = /^[A-Za-z][\w-]*$/;
 
+/**
+ * Ids a framework makes up and numbers per page load (jQuery UI's ui-id-3, Ember's ember123, React Select's
+ * react-select-2-option-1, MUI's mui-17, long numbers or hashes): different on the next run, so not a description.
+ */
+export function generatedId(id: string): boolean {
+  return /^(?:ui-id-\d+|ember\d+|react-select-\d+\b.*|mui-\d+|:r[0-9a-z]+:|downshift-\d+.*|headlessui-.*-\d+|radix-.*)$/i.test(id) ||
+    /\d{5,}/.test(id) || /[0-9a-f]{8,}/i.test(id.replace(/^[a-z]+[-_]/i, '')) && /\d/.test(id);
+}
+
 /** The element kind used for the description. */
 export function kindOf(info: ElementInfo): TargetKind {
   if (info.tag === 'select' || info.customSelect) return 'combobox';
-  if (info.field || (info.tag === 'input' && info.type === 'file')) return 'textbox';
+  if (info.field || info.editable || (info.tag === 'input' && info.type === 'file')) return 'textbox';
   return (info.role && ROLE_KIND[info.role]) || 'generic';
 }
 
@@ -138,6 +147,9 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
         note = `placeholder "${info.placeholder}" matches ${c.placeholder} elements`;
       }
     }
+  } else if ((kind === 'checkbox' || kind === 'radio' || kind === 'switch') && !info.name && info.label && c.label === 1) {
+    // Labelled only by a broken <label for> around it: the label still names it for a person and for getByLabel.
+    human = phrase(kind, info.label);
   } else if (kind !== 'generic' && info.name) {
     const d = phrase(kind, info.name);
     if (d && c.roleName === 1) human = d;
@@ -146,26 +158,31 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
       note = `${info.role} "${info.name}" matches ${c.roleName} elements`;
     }
   }
-  // A repeated name in a table or list row: say which row (`the "Edit" button in the row containing "Acme"`).
+  // A repeated name in a table or list row: say which row (`the "Edit" button in the row containing "Acme"`),
+  // and in which table when two tables hold the same rows (`... inside #table1`).
   if (!human && ambiguous && info.rowText && kind !== 'generic' && info.name) {
     const d = phrase(kind, info.name);
     const q = tryQuote(info.rowText);
     if (d && q) {
-      human = `${d} in the row containing ${q}`;
+      human = `${d} in the row containing ${q}${info.rowWithin ? ` inside ${info.rowWithin}` : ''}`;
       ambiguous = false;
       note = undefined;
     }
   }
-  // Still repeated (identical suggestions, duplicate records): which one, in words, before a CSS path.
-  const stableId = (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) || (info.id && c.id === 1 && SAFE_ID.test(info.id));
-  if (!human && ambiguous && info.roleNth && kind !== 'generic' && info.name && !stableId) {
+  // Or in which named part of the page (`the "New order" link inside the "Main" navigation`).
+  if (!human && ambiguous && info.landmark && kind !== 'generic' && info.name) {
     const d = phrase(kind, info.name);
-    const q = tryQuote(info.name);
-    const word = KIND_WORD[kind];
-    if (d && q && word) {
-      human = `the ${ordinal(info.roleNth)} ${q} ${word}`;
-      note = `${info.role} "${info.name}" matches ${c.roleName} elements; recorded the ${ordinal(info.roleNth)}`;
+    const q = tryQuote(info.landmark.name);
+    if (d && q) {
+      human = `${d} inside the ${q} ${info.landmark.word}`;
+      ambiguous = false;
+      note = undefined;
     }
+  }
+  // An unnamed control alone in a named group: `the dropdown inside the "Dropdown Example" section`.
+  if (!human && info.group && !info.name && !info.label && KIND_WORD[kind] && (kind === 'textbox' || kind === 'combobox' || kind === 'checkbox' || kind === 'radio' || kind === 'slider')) {
+    const q = tryQuote(info.group);
+    if (q) human = `the ${KIND_WORD[kind]} inside the ${q} section`;
   }
   if (human) {
     descriptions.push(human);
@@ -178,7 +195,7 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
     }
   }
   if (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) descriptions.push(`testid=${info.testId}`);
-  if (info.id && c.id === 1 && SAFE_ID.test(info.id)) descriptions.push(`#${info.id}`);
+  if (info.id && c.id === 1 && SAFE_ID.test(info.id) && !generatedId(info.id)) descriptions.push(`#${info.id}`);
   if (kind === 'generic' && info.text && c.text === 1) {
     const q = tryQuote(info.text);
     if (q) descriptions.push(`the ${q} text`);
@@ -186,6 +203,15 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
     // The same words appear elsewhere (a menu item and the page title): say which one, in words, before any CSS path.
     const q = tryQuote(info.text);
     if (q) descriptions.push(`the ${ordinal(info.textNth)} ${q} text`);
+  }
+  // A name repeated with no row to tell them apart (three "User Avatar" images): say which one by position.
+  if (!human && ambiguous && info.roleNth && kind !== 'generic' && info.name && KIND_WORD[kind]) {
+    const q = tryQuote(info.name);
+    if (q) descriptions.push(`the ${ordinal(info.roleNth)} ${q} ${KIND_WORD[kind]}`);
+  }
+  // An unnamed checkbox or radio button: its position is still words ("the 2nd checkbox"), not a CSS path.
+  if (!human && !info.name && info.kindNth && (kind === 'checkbox' || kind === 'radio')) {
+    descriptions.push(`the ${ordinal(info.kindNth)} ${KIND_WORD[kind]}`);
   }
   descriptions.push(`css=${info.css}`);
 

@@ -91,12 +91,14 @@ describe('element description (in-page computation)', () => {
     expect(t.candidates[2]).toEqual({ strategy: 'css', value: '#email' });
   });
 
-  it('disambiguates a duplicated name with a unique CSS path, or the test id when there is one', async () => {
+  it('disambiguates a duplicated name by its position in words, a CSS path as the fallback, or the test id when there is one', async () => {
     const first = await describeElement(page.getByRole('button', { name: 'Delete' }).first());
     expect(first.ambiguous).toBe(true);
-    expect(first.note).toBe('button "Delete" matches 3 elements; recorded the 1st');
+    expect(first.note).toBe('button "Delete" matches 3 elements');
     expect(first.descriptions[0]).toBe('the 1st "Delete" button');
+    expect(first.descriptions[first.descriptions.length - 1]).toMatch(/^css=/);
     await expectRoundTrip(page.getByRole('button', { name: 'Delete' }).first(), first.descriptions[0]);
+    await expectRoundTrip(page.getByRole('button', { name: 'Delete' }).first(), first.descriptions[first.descriptions.length - 1]);
 
     const third = await describeElement(page.getByTestId('delete-3'));
     expect(third.ambiguous).toBe(true);

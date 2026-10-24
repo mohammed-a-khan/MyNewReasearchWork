@@ -165,10 +165,33 @@ Every EZTest module that touches a page imports it.
   `install-browsers` cache (`EZTEST_TEST_BROWSER_DIRS`; headless launches
   then use the headless shell and headed ones full Chrome, as in a real
   install) and sets `EZTEST_FIREFOX_PATH`.
+- `npm run test:acceptance` runs `test/acceptance` against real sites and
+  apps, under `xvfb-run -a` when there is no display (recording needs a
+  visible browser). `test/acceptance/web` covers seven public practice sites
+  (the-internet, demoqa, practicetestautomation, rahulshettyacademy,
+  saucedemo, parabank, automationexercise): each scenario is recorded by
+  driving the visible browser with the mouse and keyboard, written by hand
+  in `.ez` (`test/acceptance/web/journeys/<site>`) and as code journeys, and
+  each must replay green. They run only with `EZTEST_ONLINE=1` (the script
+  sets it); a site that does not answer is skipped with the reason, nothing
+  is retried. `EZTEST_BROWSER=firefox` runs them on Firefox.
 - `test/legal/no-testing-tools.test.ts` fails if a testing tool appears in
   `package.json`, the lockfile, the source, `dist/` or the tarball.
 
 ### Known differences
+
+- **The mouse leaving the page (Firefox).** WebDriver BiDi keeps the pointer
+  inside the viewport. A move to a point outside it moves to the edge and
+  then dispatches the `mouseout` (no related target) and `mouseleave` events
+  a browser fires when the pointer leaves the document, with the requested
+  coordinates; they are untrusted events. Chromium fires them itself.
+
+- **HTML5 drag and drop with the mouse (Firefox).** Firefox starts the drag
+  and fires `dragover` as the mouse moves, but its WebDriver ends the drag on
+  release without a `drop`. On release the driver fires the `drop` (with the
+  data the page put in the drag) on the element under the pointer when its
+  last `dragover` was cancelled, and then the `dragend`; both are untrusted
+  events. Drags inside a child frame are not covered. Chromium drops by itself.
 
 - **Client certificates.** Chromium has no protocol command to present a
   TLS client certificate. Requests to an origin with a configured certificate
@@ -262,6 +285,12 @@ popups allowed; a mouse-like pointer (`ui.primaryPointerCapabilities`, as
 the Chromium launch reports a fine pointer with hover); lazy images loading
 within about 1250px as in Chromium; the remote agent speaking BiDi
 (`remote.active-protocols`).
+Without a `proxy` option the profile follows `HTTPS_PROXY` / `HTTP_PROXY` /
+`NO_PROXY` (Firefox's system mode), as Chromium does, and connects directly
+when none is set. On Linux the temporary profile starts from a copy of the
+user's shared NSS certificate database (`~/.pki/nssdb`, or `EZTEST_NSSDB`),
+the one Chromium trusts, so a company's TLS-inspecting proxy CA is trusted
+by both browsers.
 `firefoxUserPrefs` adds or overrides preferences. The browser runs in its
 own process group; `close()` sends `browser.close`, then kills the group and
 removes the profile. `EZTEST_FIREFOX_SYSTEM_ACCESS=0` drops

@@ -16,7 +16,7 @@ import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { startDemoApp, type DemoServer } from '../../examples/demo-app/server.js';
 import { firefox, type Browser, type BrowserContext, type Page } from '../../src/browser/index.js';
-import { findFirefox, firefoxCommandLine, firefoxPreferences, firefoxChannelCandidates, userJs, cachedFirefoxBuilds } from '../../src/browser/firefox/launch.js';
+import { adoptSharedCertificates, findFirefox, firefoxCommandLine, firefoxPreferences, firefoxChannelCandidates, userJs, cachedFirefoxBuilds } from '../../src/browser/firefox/launch.js';
 import { webdriverKeyValue } from '../../src/browser/firefox/input.js';
 import { netErrorText, headersFromBidi } from '../../src/browser/firefox/network.js';
 import { toLocalValue, fromRemoteValue } from '../../src/browser/firefox/realm.js';
@@ -63,6 +63,37 @@ describe('firefox launcher, preferences and keys (no browser needed)', () => {
     expect(() => findFirefox({ executablePath: '/nope/firefox' })).toThrow(/not found/);
     expect(() => findFirefox({ channel: 'chrome' })).toThrow(/Unknown Firefox channel/);
     expect(cachedFirefoxBuilds(join(tmpdir(), 'no-such-cache-dir'))).toEqual([]);
+  });
+
+  it('follows the machine proxy from the environment, as Chromium does, and connects directly without one', () => {
+    const keys = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'];
+    const saved = keys.map((k) => process.env[k]);
+    try {
+      for (const k of keys) delete process.env[k];
+      expect(firefoxPreferences({})['network.proxy.type']).toBe(0);
+      process.env.HTTPS_PROXY = 'http://proxy.corp:3128';
+      expect(firefoxPreferences({})['network.proxy.type']).toBe(5);
+      expect(firefoxPreferences({ proxy: { server: 'other:8080' } })['network.proxy.type']).toBe(1);
+    } finally {
+      keys.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
+    }
+  });
+
+  it('starts a temporary profile from the shared NSS certificate database (a TLS-inspecting proxy CA)', () => {
+    const db = mkdtempSync(join(tmpdir(), 'eztest-nssdb-'));
+    const profile = mkdtempSync(join(tmpdir(), 'eztest-ffprofile-'));
+    try {
+      expect(adoptSharedCertificates(profile, { EZTEST_NSSDB: db }, 'linux')).toBe(false);
+      writeFileSync(join(db, 'cert9.db'), 'certs');
+      writeFileSync(join(db, 'key4.db'), 'keys');
+      expect(adoptSharedCertificates(profile, { EZTEST_NSSDB: db }, 'linux')).toBe(true);
+      expect(readFileSync(join(profile, 'cert9.db'), 'utf8')).toBe('certs');
+      expect(readFileSync(join(profile, 'key4.db'), 'utf8')).toBe('keys');
+      expect(adoptSharedCertificates(profile, { HOME: db }, 'win32')).toBe(false);
+    } finally {
+      rmSync(db, { recursive: true, force: true });
+      rmSync(profile, { recursive: true, force: true });
+    }
   });
 
   it('maps layout keys to WebDriver key values', () => {
@@ -214,6 +245,50 @@ describe.skipIf(!executable)('firefox driver', () => {
         await obj.dispose();
         // The page cannot see the driver's engine world.
         expect(await page.evaluate(() => typeof (globalThis as Record<string, unknown>).__eztestEngine)).toBe('undefined');
+      });
+    });
+
+    it('fires mouseout and mouseleave when the mouse leaves the page (exit-intent popups)', async () => {
+      await withPage(async (page) => {
+        await page.setContent(`<!doctype html><p style="height:400px">page</p><script>
+          window.left = [];
+          document.documentElement.addEventListener('mouseleave', (e) => left.push('leave ' + e.clientY));
+          document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) left.push('out ' + e.clientY); });
+        </script>`);
+        await page.mouse.move(100, 200);
+        await page.mouse.move(100, -5);
+        expect(await page.evaluate(() => (window as unknown as { left: string[] }).left)).toEqual(['out -5', 'leave -5']);
+        await page.mouse.move(100, -20);
+        expect(await page.evaluate(() => (window as unknown as { left: string[] }).left.length)).toBe(2);
+      });
+    });
+
+    it('drops an HTML5 drag where the mouse is released (Firefox ends the drag without a drop)', async () => {
+      await withPage(async (page) => {
+        await page.setContent(`<!doctype html>
+          <div id="a" draggable="true" style="width:100px;height:100px;background:#ccc">A</div>
+          <div id="b" style="width:100px;height:100px;margin-top:50px;background:#eee">B</div>
+          <div id="c" style="width:100px;height:100px;background:#ddd">C</div><script>
+          window.seen = [];
+          a.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'from-a'));
+          b.addEventListener('dragover', (e) => e.preventDefault());
+          b.addEventListener('drop', (e) => { e.preventDefault(); seen.push('drop ' + e.dataTransfer.getData('text/plain')); });
+          c.addEventListener('drop', () => seen.push('drop on c'));
+          a.addEventListener('dragend', () => seen.push('dragend'));
+        </script>`);
+        const drag = async (to: string) => {
+          await page.mouse.move(50, 50);
+          await page.mouse.down();
+          await page.mouse.move(60, 60, { steps: 3 });
+          const box = (await page.locator(to).boundingBox())!;
+          await page.mouse.move(box.x + 50, box.y + 50, { steps: 8 });
+          await page.mouse.up();
+        };
+        await drag('#b');
+        expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['drop from-a', 'dragend']);
+        // #c does not cancel dragover: it does not accept the drop.
+        await drag('#c');
+        expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['drop from-a', 'dragend', 'dragend']);
       });
     });
 
@@ -572,6 +647,8 @@ describe.skipIf(!executable)('firefox driver', () => {
         await page.getByRole('button', { name: 'Delete order' }).click();
         expect(await page.locator('#confirm-result').textContent()).toBe('Kept');
         const seen: string[] = [];
+        const closed: Array<{ type: string; message: string; accepted: boolean; userInput?: string }> = [];
+        page.on('dialogclosed', (c) => closed.push(c));
         page.on('dialog', async (d) => {
           seen.push(`${d.type()}:${d.message()}:${d.defaultValue()}`);
           if (d.type() === 'prompt') await d.accept('Ada');
@@ -582,6 +659,12 @@ describe.skipIf(!executable)('firefox driver', () => {
         expect(await page.locator('#confirm-result').textContent()).toBe('Deleted');
         expect(await page.locator('#prompt-result').textContent()).toBe('Hello Ada');
         expect(seen).toEqual(['confirm:Delete the order?:', 'prompt:Your name?:guest']);
+        // How each dialog was answered, whoever answered it (the policy, the test or a person).
+        await expect.poll(() => closed.length).toBe(2);
+        expect(closed).toEqual([
+          { type: 'confirm', message: 'Delete the order?', accepted: true },
+          { type: 'prompt', message: 'Your name?', accepted: true, userInput: 'Ada' },
+        ]);
       });
     });
 

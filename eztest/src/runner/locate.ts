@@ -4,6 +4,7 @@
  * never "first match wins".
  */
 import type { FrameLocator, Locator, Page } from '../browser/index.js';
+import { COMMON_TEST_ID_ATTRIBUTES, getTestIdAttribute } from '../browser/locator.js';
 import { NotSupportedError, interpolate, sleep, type LocatorCandidate, type Target, type TargetScope } from '../core/index.js';
 import { fillXPath } from './reliability/xpath.js';
 import { AdaptiveDeadline, type Extension, type Probeable } from './reliability/load.js';
@@ -39,8 +40,11 @@ export function toLocator(root: LocatorRoot, c: LocatorCandidate): Locator {
       return root.getByLabel(c.value, { exact });
     case 'text':
       return root.getByText(c.value, { exact });
-    case 'testId':
-      return root.getByTestId(c.value);
+    case 'testId': {
+      if (getTestIdAttribute() !== 'data-testid') return root.getByTestId(c.value);
+      const v = c.value.replace(/["\\]/g, '\\$&');
+      return root.locator(COMMON_TEST_ID_ATTRIBUTES.map((a) => `[${a}="${v}"]`).join(', '));
+    }
     case 'placeholder':
       return root.getByPlaceholder(c.value, { exact });
     case 'altText':

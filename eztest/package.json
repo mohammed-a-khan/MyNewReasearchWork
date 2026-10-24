@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node tools/testkit/cli.mjs",
     "test:firefox": "node tools/testkit/cli.mjs --browser firefox",
+    "test:acceptance": "node scripts/test-acceptance.mjs",
     "test:ci": "node tools/testkit/cli.mjs --reporter default --reporter junit",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p examples/enterprise-reference/tsconfig.json --noEmit",
     "eztest": "tsx src/cli/bin.ts",

@@ -1,0 +1,32 @@
+Journey: Automation Exercise search, product, cart and contact form
+Tags: @automationexercise
+Base URL: https://automationexercise.com
+
+Open /
+  Expect the page contains "Full-Fledged practice website for Automation Engineers"
+Click the "Products" link
+  Expect the URL contains "/products"
+  Expect the page contains "All Products"
+Type "jeans" into the Search Product field
+Click #submit_search
+  Expect the page contains "Searched Products"
+Click the "View Product" link in the row containing "Soft Stretch Jeans"
+  Expect the URL contains "/product_details/"
+  Expect the page contains "Availability: In Stock"
+Clear #quantity
+Type "3" into #quantity
+Click the "Add to cart" button
+  Expect the page contains "Your product has been added to cart."
+Click the "View Cart" link
+  Expect the URL contains "/view_cart"
+  Expect the page contains "Soft Stretch Jeans"
+  Expect the "3" button is visible
+Click the "Contact us" link
+  Expect the page contains "Get In Touch"
+Type "Ada" into the Name field
+Type "ada@example.com" into the Email field
+Type "Order question" into the Subject field
+Type "Where is my order?" into the Your Message Here field
+Accept the next confirm dialog
+Click the "Submit" button
+  Expect the page contains "Success! Your details have been submitted successfully."

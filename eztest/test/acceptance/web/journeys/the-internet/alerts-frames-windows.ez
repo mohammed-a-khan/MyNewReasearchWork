@@ -1,0 +1,38 @@
+Journey: Alerts, frames and windows
+Tags: @the-internet
+Base URL: https://the-internet.herokuapp.com
+
+Open /javascript_alerts
+Accept the next alert
+Click the "Click for JS Alert" button
+  Expect an alert saying "I am a JS Alert"
+  Expect the page contains "You successfully clicked an alert"
+Dismiss the next confirm dialog
+Click the "Click for JS Confirm" button
+  Expect the page contains "You clicked: Cancel"
+Answer the next prompt with "EZTest"
+Click the "Click for JS Prompt" button
+  Expect the page contains "You entered: EZTest"
+
+Open /nested_frames
+In frame "frame-top" > "frame-left"
+  Expect the page contains "LEFT"
+End
+In frame "frame-top" > "frame-middle": expect the page contains "MIDDLE"
+Switch to frame "frame-bottom"
+Expect the page contains "BOTTOM"
+Switch to the main frame
+
+Open /iframe
+In the "Rich Text Area" frame
+  Expect the page contains "Your content goes here."
+End
+
+Open /windows
+Click the "Click Here" link and switch to the new tab
+  Expect the URL contains "/windows/new"
+  Expect the "New Window" heading is visible
+Expect there are 2 tabs open
+Close the tab
+Expect the page contains "Opening a new window"
+Expect 1 window is open

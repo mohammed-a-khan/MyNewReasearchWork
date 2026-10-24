@@ -557,7 +557,7 @@ A description like `the "Sign in" button` becomes an ordered list of locators: r
 
 **Labels next to their field.** A field is found by its label when the label names it the standard way (`<label for>`, a wrapping `<label>`, `aria-label`, `aria-labelledby`). Component libraries often put a bare `<label>` beside the input instead (OrangeHRM's oxd forms: `<div><label>Employee Id</label></div><div><input></div>`). When no element is labelled the standard way, a `<label>` with no `for` and no control inside names the one field of the small group it sits in; a group with several fields or several such labels names none of them, so `Type "0042" into the "Employee Id" field` stays strict. Images are found by their `alt` text too (`the "profile picture"`).
 
-You can also give an exact selector: `#id`, `css=…`, `xpath=…`, `testid=…`, `text=…` or `role=button[name="Save"]`; on native apps also `accessibility id=…` (or `~…`), `id=…` (resource id), `class=…` and `predicate=…` (iOS). Targets resolve in the current tab and frame; healing searches there too.
+You can also give an exact selector: `#id`, `css=…`, `xpath=…`, `testid=…` (any of `data-testid`, `data-test-id`, `data-test`, `data-qa`, `data-cy`), `text=…` or `role=button[name="Save"]`; on native apps also `accessibility id=…` (or `~…`), `id=…` (resource id), `class=…` and `predicate=…` (iOS). Targets resolve in the current tab and frame; healing searches there too.
 
 ### Relative and scoped targets
 

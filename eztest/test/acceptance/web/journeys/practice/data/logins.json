@@ -1,0 +1,5 @@
+[
+  { "case": "valid", "username": "student", "password": "Password123", "message": "Logged In Successfully", "url": "/logged-in-successfully/" },
+  { "case": "wrong user", "username": "incorrectUser", "password": "Password123", "message": "Your username is invalid!", "url": "/practice-test-login/" },
+  { "case": "wrong password", "username": "student", "password": "incorrectPassword", "message": "Your password is invalid!", "url": "/practice-test-login/" }
+]

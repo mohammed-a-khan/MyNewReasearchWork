@@ -193,6 +193,12 @@ describe('targets and conditions', () => {
     expect(apos?.value).toContain(`normalize-space(.)="O'Brien orders"`);
   });
 
+  it('reads "the slider" as the one slider on the page, not a slider named "slider" (demoqa.com)', () => {
+    expect(widgetTarget('the slider', 'slider').locators).toEqual([{ strategy: 'role', value: 'slider' }, { strategy: 'css', value: 'input[type=range]' }]);
+    expect(widgetTarget('the editor', 'richtext').locators).toEqual([{ strategy: 'role', value: 'textbox' }, { strategy: 'css', value: '[contenteditable="true"]' }]);
+    expect(widgetTarget('the Price slider', 'slider').locators[0]).toEqual({ strategy: 'role', value: 'slider', name: 'Price', exact: true });
+  });
+
   it('parses row conditions', () => {
     const { text, quotes: q } = protectQuotes('Customer is Contoso and Amount >= 10 and Note is empty and "Order date" starts with 2026');
     expect(parseWhere(text, q)).toEqual([

@@ -23,7 +23,7 @@ let listenerSeq = 0;
 export const DEFAULT_LOADER_SELECTORS = ['.spinner', '.loading', '.loader', '[aria-busy="true"]', '[role="progressbar"]'];
 
 /** Steps that never touch the page: no loader check before them. */
-const NO_PAGE_ACTIONS = new Set(['api', 'db', 'set', 'compareData', 'email', 'sms', 'log', 'runJourney', 'group', 'if', 'while', 'forEach', 'repeat', 'try']);
+export const NO_PAGE_ACTIONS = new Set(['api', 'db', 'set', 'compareData', 'email', 'sms', 'log', 'runJourney', 'group', 'if', 'while', 'forEach', 'repeat', 'try']);
 
 /** In-page check: is any element matching any selector visible? (CSS, or XPath with "xpath=" / "//"). */
 const anyVisible = (sels: string[]): boolean => {

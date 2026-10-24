@@ -65,7 +65,7 @@ export const electron = new ElectronLauncher(chromium);
 
 export type BrowserType = ChromiumBrowserType;
 export type { ChromiumBrowser as Browser, ChromiumContext as BrowserContext, Download } from './chromium/browser.js';
-export type { ChromiumPage as Page, ConsoleMessage, Dialog, Worker, FileChooser } from './chromium/page.js';
+export type { ChromiumPage as Page, ConsoleMessage, Dialog, DialogClosed, Worker, FileChooser } from './chromium/page.js';
 export type { ChromiumFrame as Frame } from './chromium/frame.js';
 export type { JSHandle, ElementHandle } from './chromium/handles.js';
 export type { Request, Response, Route, WebSocket } from './chromium/network.js';

@@ -8,8 +8,15 @@
 
 /** Collapse runs of whitespace (incl. NBSP) to one space and trim. */
 export function normalizeWhitespace(s: string): string {
-  return s.replace(/[\s ​]+/g, ' ').trim();
+  return s.replace(PRIVATE_USE, '').replace(/[\s ​]+/g, ' ').trim();
 }
+
+/**
+ * Private Use Area characters: the glyphs of icon fonts (Material Icons, Font Awesome, Bootstrap Icons) put in
+ * text or in ::before content. They are icons, not words (screen readers say nothing), so a "Products" link with
+ * a cart icon in front is named and matched as "Products".
+ */
+const PRIVATE_USE = /[\uE000-\uF8FF]|[\uDB80-\uDBFF][\uDC00-\uDFFF]/g;
 
 export function isElement(n: Node | null | undefined): n is Element {
   return !!n && n.nodeType === 1;

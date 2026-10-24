@@ -4,7 +4,8 @@
  * every document and frame) and turn it into a Journey and an `.ez` script.
  */
 import { randomBytes } from 'node:crypto';
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Frame, type Page, type Request } from '../browser/index.js';
+import { isAbsolute, relative, sep } from 'node:path';
+import { chromium, firefox, webkit, type Browser, type BrowserContext, type DialogClosed, type Download, type Frame, type Page, type Request } from '../browser/index.js';
 import { NotSupportedError, sleep } from '../core/index.js';
 import { parseCondition } from '../intent/index.js';
 import { JourneyComposer, type ComposerEvent, type FramedPageEvent, type RecordingResult } from './compose.js';
@@ -50,22 +51,98 @@ async function launch(opts: RecorderOptions): Promise<Browser> {
   return type.launch({ headless: opts.headless ?? false, ...(opts.executablePath ? { executablePath: opts.executablePath } : {}) });
 }
 
-/** Selector chain of the iframes between the main frame and `frame`. */
+/**
+ * The frames between the main frame and `frame`, outermost first, each named the way a tester names it: the
+ * frame's name, id or title when that picks out one frame in its document, else a part of its address, else a
+ * CSS selector. The runner looks a frame up the same way (name, id, title, aria-label, then src), so the first
+ * frame it finds is this one.
+ */
 async function frameChain(frame: Frame): Promise<string[]> {
   const out: string[] = [];
   for (let f: Frame | null = frame; f && f.parentFrame(); f = f.parentFrame()) {
     const handle = await f.frameElement();
-    // A single expression (no inner named functions), so it serializes cleanly into the page.
-    const sel = await handle.evaluate((node) =>
-      (node as Element).id && /^[A-Za-z][\w-]*$/.test((node as Element).id) ? `iframe#${(node as Element).id}`
-        : (node as Element).getAttribute('name') ? `iframe[name="${(node as Element).getAttribute('name')}"]`
-          : (node as Element).getAttribute('title') ? `iframe[title="${(node as Element).getAttribute('title')}"]`
-            : `iframe[src="${(node as Element).getAttribute('src') ?? ''}"]`);
+    // No inner named functions, so it serializes cleanly into the page.
+    const desc = await handle.evaluate((node) => {
+      const el = node as Element;
+      const root = el.getRootNode() as Document | ShadowRoot;
+      const frames = Array.from(root.querySelectorAll('iframe,frame'));
+      const plain = (v: string | null): v is string =>
+        !!v && v.length <= 80 && !/["\\\n\r]/.test(v) && v.trim() === v && !/^(?:css\s*=|[#.[]|i?frame(?:$|[\s#.[:>~+]))/i.test(v);
+      const count = (attr: string, v: string) => frames.filter((x) => (attr === 'id' ? x.id : x.getAttribute(attr)) === v).length;
+      const name = el.getAttribute('name');
+      if (plain(name) && count('name', name) === 1) return name;
+      // A title reads better than a generated id ("Rich Text Area", not "mce_0_ifr").
+      const title = el.getAttribute('title');
+      if (plain(title) && count('title', title) === 1 && count('name', title) === 0 && count('id', title) === 0) return title;
+      const id = el.id;
+      if (plain(id) && count('id', id) === 1 && count('name', id) === 0) return id;
+      const src = el.getAttribute('src') ?? '';
+      let path = '';
+      try {
+        path = src && !/^(?:about|data|javascript|blob):/i.test(src) ? new URL(src, location.href).pathname : '';
+      } catch {
+        path = '';
+      }
+      if (plain(path) && path.length > 1 && frames.filter((x) => (x.getAttribute('src') ?? '').includes(path)).length === 1 &&
+        count('name', path) + count('id', path) + count('title', path) === 0) return path;
+      const tag = el.tagName.toLowerCase();
+      if (root.querySelectorAll(tag).length === 1) return tag;
+      let idx = 1;
+      for (let sib = el.previousElementSibling; sib; sib = sib.previousElementSibling) if (sib.tagName === el.tagName) idx++;
+      const sel = `${tag}:nth-of-type(${idx})`;
+      if (root.querySelectorAll(sel).length === 1) return sel;
+      const parent = el.parentElement;
+      const scoped = parent && parent.id && /^[A-Za-z][\w-]*$/.test(parent.id) ? `#${parent.id} > ${sel}` : '';
+      return scoped && root.querySelectorAll(scoped).length === 1 ? scoped : `css=${sel}`;
+    });
     await handle.dispose();
-    out.unshift(sel);
+    out.unshift(desc);
   }
   return out;
 }
+
+
+/**
+ * The files a person chose in a file input, as paths (relative to the working directory when inside it). The page
+ * only sees file names; Chromium's DevTools protocol knows where each file came from. Undefined when the browser
+ * cannot say (Firefox), so the recording keeps the names and says to edit them.
+ */
+async function chosenFilePaths(context: BrowserContext, page: Page, css: string, count: number): Promise<string[] | undefined> {
+  if (css.includes('>>')) return undefined;
+  let cdp: Awaited<ReturnType<BrowserContext['newCDPSession']>> | undefined;
+  try {
+    cdp = await context.newCDPSession(page);
+    const out: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const { result } = (await cdp.send('Runtime.evaluate', { expression: `(document.querySelector(${JSON.stringify(css)}) || {}).files?.[${i}]` })) as { result: { objectId?: string } };
+      if (!result.objectId) return undefined;
+      const { path } = (await cdp.send('DOM.getFileInfo', { objectId: result.objectId })) as { path?: string };
+      if (!path) return undefined;
+      const rel = relative(process.cwd(), path);
+      out.push((rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : path).split(sep).join('/'));
+    }
+    return out;
+  } catch {
+    return undefined;
+  } finally {
+    await cdp?.detach().catch(() => undefined);
+  }
+}
+
+/** frameChain, asked again shortly when the browser does not know the frame yet (a frameset still loading). */
+async function frameChainWithRetry(frame: Frame): Promise<string[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await frameChain(frame);
+    } catch (e) {
+      if (attempt >= 3) throw e;
+      await sleep(250);
+    }
+  }
+}
+
+/** Frames of ad networks: what happens in them is never a step. */
+const AD_FRAME = /^https?:\/\/(?:[^/]*\.)?(?:doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.[a-z.]+|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com)\//i;
 
 const FLUSH_EXPR = 'window.__ezRecorder && window.__ezRecorder.flush ? window.__ezRecorder.flush() : []';
 const DETACH_EXPR = 'window.__ezRecorder ? (window.__ezRecorder.binding = null, true) : false';
@@ -77,32 +154,84 @@ export class Recorder {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped?: RecordingResult;
   private stopping?: Promise<RecordingResult>;
-  /**
-   * Main-frame navigation requests: whether each was started by the page. A link or script carries a Referer; a
-   * form post carries an Origin (sign-in pages send `Referrer-Policy: no-referrer`, so a Keycloak or Entra ID
-   * sign-in and its redirect chain back to the app has no Referer at all); and a navigation right after the
-   * person clicked or pressed a key in the page is the page's too. Only what is left is a URL typed by the person.
-   */
-  private readonly navRequests = new Map<string, boolean>();
-  /** When the person last clicked, pressed a key or submitted in the page. */
+  /** When the person last clicked, pressed a key or submitted in the page (a navigation right after it is the page's). */
   private lastUserAction = 0;
-  private readonly onRequest = (req: Request) => {
-    if (!req.isNavigationRequest() || req.frame() !== this.page.mainFrame()) return;
-    let first = req;
-    for (let r = req.redirectedFrom(); r; r = r.redirectedFrom()) first = r;
-    const h = first.headers();
-    const byPage = Boolean(h['referer']) || 'origin' in h || first.method() !== 'GET' || Date.now() - this.lastUserAction < USER_NAV_WINDOW_MS;
-    this.navRequests.set(req.url(), byPage);
-    if (this.navRequests.size > 50) this.navRequests.delete(this.navRequests.keys().next().value as string);
+  /** Every tab, window and popup of the recording, numbered in opening order (the main page is 1). */
+  private readonly tabs = new Map<Page, number>();
+  private tabCounter = 0;
+  /** Tabs by when the person last used them, most recent last: an expectation is about the one in front. */
+  private readonly recent: number[] = [];
+  private touch(tab: number): void {
+    const i = this.recent.indexOf(tab);
+    if (i >= 0) this.recent.splice(i, 1);
+    this.recent.push(tab);
+  }
+  private readonly detach: Array<() => void> = [];
+  private readonly onNewPage = (p: Page) => {
+    if (this.stopped || this.stopping || this.tabs.has(p)) return;
+    const tab = this.track(p);
+    this.touch(tab);
+    const t = Date.now();
+    this.enqueue({ kind: 'tab', op: 'open', tab, t });
+    // A popup can have loaded its address before we started watching it.
+    const url = p.url();
+    if (/^(?:https?|file):/i.test(url)) this.enqueue({ kind: 'navigate', url, t: t + 1, byPage: true, tab });
   };
-  private readonly onNav = (f: Frame) => {
-    if (f !== this.page.mainFrame()) return;
-    const url = f.url();
-    // Same-document navigations (history API) have no request: the page started them.
-    const byPage = this.navRequests.get(url) ?? true;
-    this.navRequests.delete(url);
-    this.enqueue({ kind: 'navigate', url, t: Date.now(), byPage });
-  };
+
+  /** Watch one page: its navigations, dialogs, downloads and closing. */
+  private track(page: Page): number {
+    const known = this.tabs.get(page);
+    if (known) return known;
+    const tab = ++this.tabCounter;
+    this.tabs.set(page, tab);
+    // Main-frame navigation requests: whether each was started by the page. A link or script carries a Referer; a
+    // form post carries an Origin (sign-in pages send `Referrer-Policy: no-referrer`, so a Keycloak or Entra ID
+    // sign-in and its redirect chain back to the app has no Referer at all); and a navigation right after the
+    // person clicked or pressed a key in the page is the page's too. Only what is left is a URL typed by the person.
+    const navRequests = new Map<string, boolean>();
+    const onRequest = (req: Request) => {
+      if (!req.isNavigationRequest() || req.frame() !== page.mainFrame()) return;
+      let first = req;
+      for (let r = req.redirectedFrom(); r; r = r.redirectedFrom()) first = r;
+      const h = first.headers();
+      navRequests.set(req.url(), Boolean(h['referer']) || 'origin' in h || first.method() !== 'GET' || Date.now() - this.lastUserAction < USER_NAV_WINDOW_MS);
+      if (navRequests.size > 50) navRequests.delete(navRequests.keys().next().value as string);
+    };
+    const onNav = (f: Frame) => {
+      if (f !== page.mainFrame()) return;
+      const url = f.url();
+      // Same-document navigations (history API) have no request: the page started them.
+      const byPage = navRequests.get(url) ?? true;
+      navRequests.delete(url);
+      this.enqueue({ kind: 'navigate', url, t: Date.now(), byPage, tab });
+    };
+    // Listening keeps a dialog open for the person to answer (the driver dismisses dialogs nobody watches).
+    const onDialog = () => undefined;
+    const onDialogClosed = (d: DialogClosed) => {
+      this.enqueue({ kind: 'dialog', type: d.type, message: d.message, accepted: d.accepted, ...(d.userInput !== undefined ? { userInput: d.userInput } : {}), t: Date.now(), tab });
+    };
+    const onDownload = (d: Download) => this.enqueue({ kind: 'download', filename: d.suggestedFilename(), t: Date.now(), tab });
+    const onClose = () => {
+      const i = this.recent.indexOf(tab);
+      if (i >= 0) this.recent.splice(i, 1);
+      this.enqueue({ kind: 'tab', op: 'close', tab, t: Date.now() });
+    };
+    page.on('request', onRequest);
+    page.on('framenavigated', onNav);
+    page.on('dialog', onDialog);
+    page.on('dialogclosed', onDialogClosed);
+    page.on('download', onDownload);
+    page.on('close', onClose);
+    this.detach.push(() => {
+      page.off('request', onRequest);
+      page.off('framenavigated', onNav);
+      page.off('dialog', onDialog);
+      page.off('dialogclosed', onDialogClosed);
+      page.off('download', onDownload);
+      page.off('close', onClose);
+    });
+    return tab;
+  }
 
   /** @internal use startRecording() */
   constructor(
@@ -114,31 +243,44 @@ export class Recorder {
 
   /** @internal */
   async begin(url: string): Promise<void> {
-    this.page.on('request', this.onRequest);
-    this.page.on('framenavigated', this.onNav);
+    this.touch(this.track(this.page));
+    this.context.on('page', this.onNewPage);
     this.composer.start(Date.now());
     await this.page.goto(url);
+  }
+
+  /** The open pages of the recording (tabs, windows, popups), the main page first. */
+  get pages(): Page[] {
+    return [...this.tabs.keys()].filter((p) => !p.isClosed());
   }
 
   /** @internal binding entry point */
   onPageEvent(source: { page: Page; frame: Frame }, payload: unknown): void {
     if (this.stopped || this.stopping) return;
-    if (source.page !== this.page) {
-      this.composer.warn('Actions in other tabs or popups are not recorded; record each page separately.');
-      return;
-    }
     const ev = payload as PageEvent;
     if (!ev || typeof ev !== 'object' || typeof (ev as { kind?: unknown }).kind !== 'string') return;
+    // Closing an ad (Google's full-screen vignette) is not part of the journey: the runner closes those itself.
+    for (let f: Frame | null = source.frame; f; f = f.parentFrame()) if (AD_FRAME.test(f.url())) return;
+    // A popup can report its first action before the context's "page" event reaches us.
+    if (!this.tabs.has(source.page)) this.onNewPage(source.page);
+    const tab = this.tabs.get(source.page) ?? 1;
+    this.touch(tab);
     if (ev.kind !== 'fill') this.lastUserAction = Date.now();
     const p = (async () => {
-      const framed: FramedPageEvent = { ...ev };
-      if (source.frame !== this.page.mainFrame()) {
+      const framed: FramedPageEvent = { ...ev, tab };
+      const inPage = (ev as { frameChain?: unknown }).frameChain;
+      delete (framed as { frameChain?: unknown }).frameChain;
+      if (source.frame !== source.page.mainFrame()) {
         try {
-          framed.frames = await frameChain(source.frame);
+          // Named by the page itself when every parent is on the same origin; else asked of the browser.
+          framed.frames = Array.isArray(inPage) && inPage.every((x) => typeof x === 'string') ? (inPage as string[]) : await frameChainWithRetry(source.frame);
         } catch (e) {
           this.composer.warn(`An action inside a frame was dropped: its frame could not be identified (${(e as Error).message}).`);
           return;
         }
+      } else if (framed.kind === 'upload' && framed.files.length) {
+        const paths = await chosenFilePaths(this.context, source.page, framed.el.css, framed.files.length);
+        if (paths) framed.files = paths;
       }
       this.enqueue(framed);
     })();
@@ -161,23 +303,26 @@ export class Recorder {
     const done = (async () => {
       await this.flushPendingTyping();
       await Promise.all([...this.inflight].filter((p) => p !== done));
-      this.enqueue({ kind: 'expect', condition, t: Date.now() });
+      this.enqueue({ kind: 'expect', condition, t: Date.now(), tab: this.recent[this.recent.length - 1] ?? 1 });
     })();
     this.inflight.add(done);
     void done.finally(() => this.inflight.delete(done));
     return done;
   }
 
-  /** Ask every frame for typing it has not reported yet (without detaching the recorder). */
-  private async flushPendingTyping(): Promise<void> {
-    if (this.page.isClosed()) return;
-    for (const frame of this.page.frames()) {
-      try {
-        const evs = (await frame.evaluate(FLUSH_EXPR)) as PageEvent[];
-        const frames = frame === this.page.mainFrame() ? [] : await frameChain(frame);
-        for (const ev of evs) this.enqueue({ ...ev, ...(frames.length ? { frames } : {}) });
-      } catch {
-        // Frame detached or navigating: nothing pending there.
+  /** Ask every frame of every tab for typing it has not reported yet (and, when stopping, detach it). */
+  private async flushPendingTyping(detach = false): Promise<void> {
+    for (const [page, tab] of this.tabs) {
+      if (page.isClosed()) continue;
+      for (const frame of page.frames()) {
+        try {
+          const evs = (await frame.evaluate(FLUSH_EXPR)) as PageEvent[];
+          const frames = frame === page.mainFrame() || !evs.length ? [] : await frameChain(frame);
+          for (const ev of evs) this.enqueue({ ...ev, tab, ...(frames.length ? { frames } : {}) });
+          if (detach) await frame.evaluate(DETACH_EXPR);
+        } catch {
+          // Frame detached or navigating: nothing pending there.
+        }
       }
     }
     await sleep(SETTLE_MS);
@@ -203,23 +348,11 @@ export class Recorder {
   }
 
   private async finish(): Promise<RecordingResult> {
-    if (!this.page.isClosed()) {
-      for (const frame of this.page.frames()) {
-        try {
-          const evs = (await frame.evaluate(FLUSH_EXPR)) as PageEvent[];
-          const frames = frame === this.page.mainFrame() ? [] : await frameChain(frame);
-          for (const ev of evs) this.enqueue({ ...ev, ...(frames.length ? { frames } : {}) });
-          await frame.evaluate(DETACH_EXPR);
-        } catch {
-          // Frame detached or navigating: nothing pending there.
-        }
-      }
-      // Binding calls already sent by the page may still be on their way.
-      await sleep(SETTLE_MS);
-    }
+    // Binding calls already sent by the pages may still be on their way: flushing waits a moment for them.
+    await this.flushPendingTyping(true);
     await Promise.all([...this.inflight]);
-    this.page.off('framenavigated', this.onNav);
-    this.page.off('request', this.onRequest);
+    this.context.off('page', this.onNewPage);
+    for (const off of this.detach.splice(0)) off();
     if (this.timer) clearTimeout(this.timer);
     this.drain(true);
     const result = this.composer.result();

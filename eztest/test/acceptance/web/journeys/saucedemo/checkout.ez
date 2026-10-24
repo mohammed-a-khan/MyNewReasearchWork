@@ -1,0 +1,40 @@
+Journey: Sauce Demo login, cart and checkout
+Tags: @saucedemo @smoke
+Base URL: https://www.saucedemo.com
+Variables: password=secret_sauce
+
+Open /
+Type "locked_out_user" into the Username field
+Type "${password}" into the Password field
+Click the "Login" button
+  Expect the page contains "Sorry, this user has been locked out."
+Type "standard_user" into the Username field
+Type "${password}" into the Password field
+Click the "Login" button
+  Expect the URL contains "/inventory.html"
+  Expect the page contains "Products"
+Select "Price (low to high)" from the dropdown
+  Expect the 1st "Sauce Labs Onesie" text is visible
+Click the "Add to cart" button in the row containing "Sauce Labs Backpack"
+  Expect the "Remove" button in the row containing "Sauce Labs Backpack" is visible
+Click the "Add to cart" button in the row containing "Sauce Labs Bike Light"
+  Expect testid=shopping-cart-badge has text "2"
+Click testid=shopping-cart-link
+  Expect the URL contains "/cart.html"
+  Expect the page contains "Sauce Labs Bike Light"
+Click the "Remove" button in the row containing "Sauce Labs Bike Light"
+  Expect testid=shopping-cart-badge has text "1"
+Click the "Checkout" button
+Click the "Continue" button
+  Expect the page contains "Error: First Name is required"
+Type "Ada" into the First Name field
+Type "Lovelace" into the Last Name field
+Type "10115" into the Zip/Postal Code field
+Click the "Continue" button
+  Expect the URL contains "/checkout-step-two.html"
+  Expect the page contains "Item total: $29.99"
+  Expect the page contains "Total: $32.39"
+Click the "Finish" button
+  Expect the page contains "Thank you for your order!"
+Click the "Back Home" button
+  Expect the URL contains "/inventory.html"

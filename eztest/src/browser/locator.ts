@@ -68,6 +68,15 @@ let testIdAttribute = 'data-testid';
 export function setTestIdAttribute(name: string): void {
   testIdAttribute = name;
 }
+export function getTestIdAttribute(): string {
+  return testIdAttribute;
+}
+
+/**
+ * The test-id attributes teams use besides data-testid (Sauce Demo's data-test, data-test-id, data-qa,
+ * data-cy). A `testid=x` target matches any of them unless another attribute was chosen with setTestIdAttribute.
+ */
+export const COMMON_TEST_ID_ATTRIBUTES = ['data-testid', 'data-test-id', 'data-test', 'data-qa', 'data-cy'] as const;
 
 /** Selector settings: `selectors.setTestIdAttribute('data-qa')` changes what getByTestId matches. */
 export const selectors = {

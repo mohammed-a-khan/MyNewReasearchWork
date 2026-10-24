@@ -18,7 +18,7 @@
  * takes every content process down.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { debugLog } from '../debug.js';
@@ -168,6 +168,11 @@ export interface FirefoxPrefsOptions {
  * popup blocking, prompts or session restore) and with the remote agent
  * speaking WebDriver BiDi.
  */
+/** Whether the environment names a proxy (the variables Firefox's system mode reads on Linux). */
+function envProxy(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!(env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy || env.ALL_PROXY || env.all_proxy);
+}
+
 export function firefoxPreferences(opts: FirefoxPrefsOptions = {}): Record<string, string | number | boolean> {
   const prefs: Record<string, string | number | boolean> = {
     // Remote agent: WebDriver BiDi only (1 = BiDi).
@@ -320,6 +325,10 @@ export function firefoxPreferences(opts: FirefoxPrefsOptions = {}): Record<strin
     }
     prefs['network.proxy.no_proxies_on'] = opts.proxy.bypass ?? '';
     prefs['network.proxy.allow_hijacking_localhost'] = !opts.proxy.bypass?.split(',').some((b) => /localhost|127\.0\.0\.1|<-loopback>/.test(b));
+  } else if (envProxy()) {
+    // Like Chromium, follow the machine's proxy (HTTPS_PROXY / HTTP_PROXY / NO_PROXY, read by Firefox's
+    // "system" mode on Linux): a direct connection fails on networks that only allow the proxy.
+    prefs['network.proxy.type'] = 5;
   } else {
     prefs['network.proxy.type'] = 0;
   }
@@ -375,12 +384,32 @@ export function firefoxCommandLine(opts: FirefoxLaunchOptions, profileDir: strin
   return args;
 }
 
+/**
+ * On Linux, Chromium trusts the certificates in the user's shared NSS database (`~/.pki/nssdb`), which is
+ * where a company's TLS-inspecting proxy CA is installed. A fresh Firefox profile has its own empty database,
+ * so it rejects every site behind that proxy. Start the temporary profile from a copy of the shared database
+ * (`EZTEST_NSSDB` points at another one), so both browsers trust the same certificates.
+ */
+export function adoptSharedCertificates(profileDir: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== 'linux' && !env.EZTEST_NSSDB) return false;
+  const db = env.EZTEST_NSSDB || join(homedir(), '.pki', 'nssdb');
+  if (!isFile(join(db, 'cert9.db'))) return false;
+  try {
+    for (const f of ['cert9.db', 'key4.db']) if (isFile(join(db, f))) copyFileSync(join(db, f), join(profileDir, f));
+    return true;
+  } catch (e) {
+    debugLog('browser', `shared certificates not copied from ${db}: ${(e as Error).message}`);
+    return false;
+  }
+}
+
 /** Start Firefox and connect to its WebDriver BiDi endpoint. */
 export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Promise<LaunchedFirefox> {
   const found = findFirefox({ executablePath: opts.executablePath, channel: opts.channel });
   const temp = !opts.userDataDir;
   const profileDir = opts.userDataDir ?? makeTempDir('firefox-profile');
   writeFileSync(join(profileDir, 'user.js'), userJs(firefoxPreferences(opts)));
+  if (temp) adoptSharedCertificates(profileDir);
   const args = firefoxCommandLine(opts, profileDir);
   debugLog('browser', `launch ${found.executablePath} ${args.join(' ')}`);
   const env: Record<string, string | undefined> = {

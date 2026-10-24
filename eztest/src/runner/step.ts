@@ -25,7 +25,8 @@ import { bindStep } from '../elements/bind.js';
 import { scopeHints } from './scope-hints.js';
 import { safeName } from './evidence.js';
 import type { RunOptions, StepContext } from './types.js';
-import { settleLoaders } from './waits.js';
+import { NO_PAGE_ACTIONS, settleLoaders } from './waits.js';
+import { dismissInterstitials } from './reliability/interstitials.js';
 import { guardedAction, noteExtended } from './reliability/guard.js';
 import { adaptiveTimeout, type Probeable } from './reliability/load.js';
 import { suggestImprovement } from './reliability/improve.js';
@@ -87,6 +88,7 @@ async function actAndVerify(step: Step, loc: Locator | undefined, ctx: StepConte
     let outcome: ActionOutcome;
     try {
       await settleLoaders(step, ctx, rt.opts);
+      if (ctx.session && !NO_PAGE_ACTIONS.has(step.action)) await dismissInterstitials(ctx.page, ctx.logger);
       // The action's own waits run in the browser driver: their timeout is scaled by the load seen just before.
       const actTimeout = await adaptiveTimeout(timeout, { what: `${step.action}${step.target ? ` ${step.target.description}` : ''}`, ...adaptFor(ctx) });
       // Reliability guard: app idle, actionability (named overlays), re-render safety (see reliability/guard.ts).

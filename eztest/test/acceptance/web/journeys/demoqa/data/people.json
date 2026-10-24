@@ -1,0 +1,7 @@
+{
+  "people": [
+    { "first": "Ada", "last": "Lovelace", "email": "ada@example.com", "age": "36", "salary": "5000", "department": "Computing" },
+    { "first": "Alan", "last": "Turing", "email": "alan@example.com", "age": "41", "salary": "7000", "department": "Cryptography" },
+    { "first": "Grace", "last": "Hopper", "email": "grace@example.com", "age": "85", "salary": "9000", "department": "Navy" }
+  ]
+}

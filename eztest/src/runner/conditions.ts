@@ -4,14 +4,36 @@
  * Targets in conditions use the same strict (exactly-one) resolution as actions.
  */
 import { existsSync, statSync } from 'node:fs';
-import type { Page } from '../browser/index.js';
+import type { Locator, Page } from '../browser/index.js';
 import { sleep, type Condition, type ConditionResult, type Target } from '../core/index.js';
 import type { Ledger } from './ledger.js';
 import { describeCandidate, rootFor, targetLocators } from './locate.js';
 import { evaluateAdvancedCondition, framesOf } from './conditions-advanced.js';
 import type { BrowserSession } from './session.js';
 import { activeSurface } from './surface.js';
+import { dismissInterstitials } from './reliability/interstitials.js';
 import { AdaptiveDeadline, type Extension, type Probeable } from './reliability/load.js';
+
+/**
+ * The visible text of an element as the page wrote it: CSS text-transform (uppercase headings, capitalised
+ * buttons) does not apply, so a check written with the words in the HTML holds as well as one written with the
+ * words on screen. Hidden text still does not count.
+ */
+export async function writtenText(loc: Locator): Promise<string> {
+  return loc
+    .evaluate((root) => {
+      let out = '';
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const p = n.parentElement;
+        if (!p || /^(?:SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.tagName)) continue;
+        const shown = typeof p.checkVisibility === 'function' ? p.checkVisibility({ visibilityProperty: true }) : p.getClientRects().length > 0;
+        if (shown) out += n.nodeValue ?? '';
+      }
+      return out;
+    })
+    .catch(() => '');
+}
 
 export interface ConditionEnv {
   page: Page;
@@ -104,10 +126,12 @@ export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Pr
     case 'pageContainsText':
     case 'pageNotContainsText': {
       // Inside a frame block (In the "payment" frame ... End) the page is the current frame.
-      const body = norm(await rootFor(page, env.frames).locator('body').innerText({ timeout: 2000 }).catch(() => ''));
+      const bodyLoc = rootFor(page, env.frames).locator('body');
+      const body = norm(await bodyLoc.innerText({ timeout: 2000 }).catch(() => ''));
       const v = norm(I(c.value));
       if (!v) return fail(c, 'expected text is empty');
-      const has = body.includes(v);
+      // As shown, or as written when CSS changes its case ("Searched Products" shown as SEARCHED PRODUCTS).
+      const has = body.includes(v) || norm(await writtenText(bodyLoc)).includes(v);
       if (c.type === 'pageContainsText') return has ? ok(c) : fail(c, `page does not contain "${v}"`, body.slice(0, 300));
       return has ? fail(c, `page contains "${v}"`) : ok(c);
     }
@@ -127,9 +151,11 @@ export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Pr
       }
       const text = norm(await r.locator.innerText({ timeout: 2000 }));
       const want = norm(I(c.value));
-      if (c.type === 'textEquals') return text === want ? ok(c, text) : fail(c, `${c.target.description} text is "${text}", expected "${want}"`, text);
-      if (!want) return fail(c, 'expected text is empty');
-      return text.includes(want) ? ok(c, text) : fail(c, `${c.target.description} text "${text}" does not contain "${want}"`, text);
+      if (!want && c.type !== 'textEquals') return fail(c, 'expected text is empty');
+      const holds = (t: string) => (c.type === 'textEquals' ? t === want : t.includes(want));
+      if (holds(text) || holds(norm(await writtenText(r.locator)))) return ok(c, text);
+      if (c.type === 'textEquals') return fail(c, `${c.target.description} text is "${text}", expected "${want}"`, text);
+      return fail(c, `${c.target.description} text "${text}" does not contain "${want}"`, text);
     }
     case 'hidden': {
       if (!c.target.locators.length) return fail(c, `${c.target.description}: target has no locator candidates`);
@@ -209,6 +235,8 @@ export async function evaluateConditions(conds: Condition[], env: ConditionEnv, 
       }
     }
     if (results.every((r) => r.passed) || (await deadline.reached())) return results;
+    // A full-screen ad after a link click holds the navigation back until someone closes it.
+    if (env.page && env.session && (await dismissInterstitials(env.page))) continue;
     await sleep(Math.min(150, Math.max(10, deadline.remaining())));
   }
 }

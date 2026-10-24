@@ -1,0 +1,38 @@
+Journey: Rahul Shetty Academy practice page
+Tags: @rahulshetty
+Base URL: https://rahulshettyacademy.com
+
+Open /AutomationPractice/
+Check the Radio2 radio button
+  Expect the Radio2 radio button is checked
+Type "ind" into the Type to Select Countries field
+Click the "India" text
+  Expect the value of the Type to Select Countries field is "India"
+Select "Option2" from the dropdown inside the "Dropdown Example" section
+Check the Option3 checkbox
+  Expect the Option3 checkbox is checked
+Hover over the "Mouse Hover" button
+Click the "Top" link
+  Expect the URL contains "#top"
+Type "Ada" into the Enter Your Name field
+Accept the next alert
+Click the "Alert" button
+  Expect an alert saying "Hello Ada"
+Type "Ada" into the Enter Your Name field
+Dismiss the next confirm dialog
+Click the "Confirm" button
+  Expect a confirm dialog saying "Hello Ada, Are you sure you want to confirm?"
+Click the "Hide" button
+  Expect the Hide/Show Example field is hidden
+Click the "Show" button
+  Expect the Hide/Show Example field is visible
+In frame "courses-iframe"
+  Expect the page contains "An Academy to Learn Earn"
+End
+Click the "Open Tab" link and switch to the new tab
+  Expect the URL contains "qaclickacademy"
+Switch back to the main tab
+Click the "Open Window" button and switch to the new window
+  Expect there are 3 tabs open
+Close the window
+Expect the page contains "Web Table Example"
