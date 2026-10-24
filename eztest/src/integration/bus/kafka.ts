@@ -15,13 +15,39 @@
  *   not join its group in time fails the wait instead of reading nothing.
  */
 import { randomUUID } from 'node:crypto';
+import type { AwsCredentials } from '../../identity/aws-sigv4.js';
+import type { SchemaRegistrySerde } from '../schema-registry.js';
+import type { TlsOptions } from '../tls.js';
+import { MSK_IAM_MECHANISM, mskIamAuthenticationProvider } from './msk-iam.js';
 import { BusError, BusSubscription, decodePayload, loadClient, payloadText, type BusDestination, type BusDriver, type OutgoingMessage, type PublishReceipt, type SubscribeOptions } from './types.js';
+
+export type KafkaSasl =
+  | { mechanism: 'plain' | 'scram-sha-256' | 'scram-sha-512'; username: string; password: string }
+  /** SASL/OAUTHBEARER: a token from the provider (EZTest's OAuth client: client credentials, cached and refreshed). */
+  | { mechanism: 'oauthbearer'; tokenProvider: { getToken(): Promise<string> }; extensions?: Record<string, string> }
+  /** Amazon MSK IAM (AWS_MSK_IAM), signed with EZTest's SigV4. */
+  | { mechanism: 'aws-msk-iam'; region: string; credentials: () => Promise<AwsCredentials> | AwsCredentials };
+
+/** The kafkajs `sasl` option for EZTest's SASL settings. */
+export function kafkajsSasl(s: KafkaSasl): Record<string, unknown> {
+  switch (s.mechanism) {
+    case 'oauthbearer':
+      return { mechanism: 'oauthbearer', oauthBearerProvider: async () => ({ value: await s.tokenProvider.getToken(), ...(s.extensions ? { extensions: s.extensions } : {}) }) };
+    case 'aws-msk-iam':
+      return { mechanism: MSK_IAM_MECHANISM, authenticationProvider: mskIamAuthenticationProvider({ region: s.region, credentials: s.credentials }) };
+    default:
+      return { mechanism: s.mechanism, username: s.username, password: s.password };
+  }
+}
 
 export interface KafkaOptions {
   brokers: string[];
   clientId?: string;
-  ssl?: boolean;
-  sasl?: { mechanism: 'plain' | 'scram-sha-256' | 'scram-sha-512'; username: string; password: string };
+  /** true: TLS with the system roots; or tls options (ca, client cert + key, servername). */
+  ssl?: boolean | TlsOptions;
+  sasl?: KafkaSasl;
+  /** Decode Confluent-framed values (Avro, Protobuf, JSON Schema) and encode "as Avro" publishes. */
+  serde?: SchemaRegistrySerde;
   /** Group id prefix for test consumers (default "eztest"). */
   groupPrefix?: string;
   /** Create missing topics (default false: a missing topic is an error). */
@@ -58,7 +84,12 @@ export class KafkaBusDriver implements BusDriver {
   private async ensureTopic(topic: string): Promise<void> {
     if (this.knownTopics.has(topic)) return;
     const admin = await this.adm();
-    const topics = (await admin.listTopics()) as string[];
+    let topics: string[];
+    try {
+      topics = (await admin.listTopics()) as string[];
+    } catch (e) {
+      throw this.connectError(e);
+    }
     if (!topics.includes(topic)) {
       if (!this.opts.createTopics) {
         throw new BusError(`Kafka topic "${topic}" does not exist on broker "${this.name}" (${this.opts.brokers.join(', ')}). Create it, or set createTopics: true on messaging.brokers.${this.name} to let EZTest create it.`, 'KAFKA_TOPIC_MISSING', { topic });
@@ -95,8 +126,8 @@ export class KafkaBusDriver implements BusDriver {
     this.kafka = new k.Kafka({
       clientId: this.opts.clientId ?? 'eztest',
       brokers: this.opts.brokers,
-      ...(this.opts.ssl ? { ssl: true } : {}),
-      ...(this.opts.sasl ? { sasl: this.opts.sasl } : {}),
+      ...(this.opts.ssl ? { ssl: this.opts.ssl === true ? true : { ...this.opts.ssl } } : {}),
+      ...(this.opts.sasl ? { sasl: kafkajsSasl(this.opts.sasl) } : {}),
       connectionTimeout: this.opts.connectionTimeoutMs ?? 10_000,
       logLevel: k.logLevel?.NOTHING ?? 0,
       retry: { retries: 5, initialRetryTime: 200 },
@@ -104,10 +135,28 @@ export class KafkaBusDriver implements BusDriver {
     return this.kafka;
   }
 
+  /** A connection failure as EZTest reports it: authentication, TLS, or the broker not reachable. */
+  private connectError(e: unknown): BusError {
+    if (e instanceof BusError) return e;
+    const m = (e as Error).message ?? String(e);
+    const mech = this.opts.sasl?.mechanism;
+    if (/SASL|authentication failed/i.test(m)) return new BusError(`Kafka broker "${this.name}" refused the ${mech ? mech.toUpperCase() : 'SASL'} credentials: ${m}`, 'BUS_AUTH');
+    if (/certificate|self[- ]signed|unable to verify|handshake|ssl|tls|alert/i.test(m)) return new BusError(`TLS to Kafka broker "${this.name}" failed: ${m}`, 'BUS_TLS');
+    // On a rejected token the broker closes the connection; kafkajs then only sees a broker it cannot reach.
+    if (mech === 'oauthbearer' && /No brokers in the broker pool|Connection error|closed|ECONNRESET/i.test(m)) {
+      return new BusError(`Kafka broker "${this.name}" closed the connection during SASL OAUTHBEARER authentication: the token was most likely rejected (check its audience, issuer, scope and signing key) (${m})`, 'BUS_AUTH');
+    }
+    return new BusError(`Cannot connect to Kafka broker "${this.name}" (${this.opts.brokers.join(', ')}): ${m}`, 'BUS_CONNECT');
+  }
+
   private async prod(): Promise<Any> {
     if (this.producer) return this.producer;
     const p = (await this.lib()).producer({ allowAutoTopicCreation: !!this.opts.createTopics });
-    await p.connect();
+    try {
+      await p.connect();
+    } catch (e) {
+      throw this.connectError(e);
+    }
     this.producer = p;
     return p;
   }
@@ -115,7 +164,11 @@ export class KafkaBusDriver implements BusDriver {
   private async adm(): Promise<Any> {
     if (this.admin) return this.admin;
     const a = (await this.lib()).admin();
-    await a.connect();
+    try {
+      await a.connect();
+    } catch (e) {
+      throw this.connectError(e);
+    }
     this.admin = a;
     return a;
   }
@@ -167,8 +220,18 @@ export class KafkaBusDriver implements BusDriver {
         for (const [k, v] of Object.entries((message.headers ?? {}) as Record<string, Any>)) headers[k] = Array.isArray(v) ? v.map((x) => payloadText(x)).join(',') : v === undefined || v === null ? '' : payloadText(v);
         const ts = Number(message.timestamp);
         if (ts < from) return;
+        // Schema-registry framed values (magic byte 0 + schema id) are decoded to JSON for filters and captures.
+        let body: { payload: string; binary?: boolean; format?: string; schemaId?: number; decodeError?: string } = decodePayload(message.value);
+        if (this.opts.serde && message.value && message.value.length >= 5 && message.value[0] === 0) {
+          try {
+            const d = await this.opts.serde.decode(message.value);
+            if (d) body = { payload: JSON.stringify(d.value), format: d.format, schemaId: d.schemaId };
+          } catch (e) {
+            body = { ...body, decodeError: (e as Error).message };
+          }
+        }
         sub.push({
-          destination: topic, ...decodePayload(message.value), ...(message.key ? { key: payloadText(message.key) } : {}), headers,
+          destination: topic, ...body, ...(message.key ? { key: payloadText(message.key) } : {}), headers,
           ...(headers['correlation-id'] ? { correlationId: headers['correlation-id'] } : {}),
           timestamp: ts, partition, offset: String(message.offset),
         });

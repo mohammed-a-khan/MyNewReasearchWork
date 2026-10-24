@@ -26,16 +26,62 @@ import { z } from 'zod';
 
 const secret = z.string().min(1);
 
+/**
+ * TLS for a broker connection: files relative to the project (or PEM text). The server
+ * certificate is always verified; `ca` adds trusted roots, `cert` + `key` (or `pfx`) is the
+ * client certificate (mTLS), `servername` the name to verify (SNI) when it differs from the host.
+ */
+export const BrokerTlsSchema = z.object({
+  ca: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
+  cert: z.string().min(1).optional(),
+  key: z.string().min(1).optional(),
+  pfx: z.string().min(1).optional(),
+  passphrase: secret.optional(),
+  servername: z.string().min(1).optional(),
+}).refine((t) => !(t.cert && !t.key) && !(t.key && !t.cert), { message: 'a client certificate needs both cert and key' });
+export type BrokerTls = z.infer<typeof BrokerTlsSchema>;
+
+/** Kafka SASL: PLAIN / SCRAM, OAUTHBEARER (client credentials through EZTest's OAuth client) or Amazon MSK IAM (SigV4). */
+export const KafkaSaslSchema = z.union([
+  z.object({ mechanism: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']), username: z.string().min(1), password: secret }),
+  z.object({
+    mechanism: z.literal('oauthbearer'),
+    tokenUrl: z.string().url(), clientId: z.string().min(1), clientSecret: secret,
+    scope: z.string().optional(), audience: z.string().optional(),
+    /** 'body' (default) or 'basic' client authentication at the token endpoint. */
+    authMethod: z.enum(['body', 'basic']).optional(),
+    /** SASL extensions sent with the token (e.g. Confluent Cloud logicalCluster / identityPoolId). */
+    extensions: z.record(z.string(), z.string()).optional(),
+  }),
+  z.object({
+    mechanism: z.literal('aws-msk-iam'), region: z.string().min(1),
+    /** Default: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. */
+    accessKeyId: secret.optional(), secretAccessKey: secret.optional(), sessionToken: secret.optional(),
+  }),
+]);
+
+/** A Confluent-compatible schema registry (Avro, Protobuf and JSON Schema payloads). */
+export const SchemaRegistrySchema = z.object({
+  url: z.string().url(),
+  username: z.string().optional(),
+  password: secret.optional(),
+  /** Bearer token instead of basic authentication. */
+  token: secret.optional(),
+  tls: BrokerTlsSchema.optional(),
+});
+
 export const BrokerSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('kafka'),
     brokers: z.array(z.string().min(1)).min(1),
     clientId: z.string().optional(),
-    ssl: z.boolean().optional(),
-    sasl: z.object({ mechanism: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']), username: z.string().min(1), password: secret }).optional(),
+    /** true for TLS with the system's trusted roots, or CA / client certificate / servername settings. */
+    ssl: z.union([z.boolean(), BrokerTlsSchema]).optional(),
+    sasl: KafkaSaslSchema.optional(),
     groupPrefix: z.string().optional(),
     /** Create missing topics (default false: publishing to or waiting on a missing topic is an error). */
     createTopics: z.boolean().optional(),
+    schemaRegistry: SchemaRegistrySchema.optional(),
   }),
   z.object({
     type: z.literal('amqp'), url: z.string().min(1), exchangeType: z.enum(['topic', 'direct', 'fanout', 'headers']).optional(),
@@ -43,10 +89,14 @@ export const BrokerSchema = z.discriminatedUnion('type', [
     declare: z.boolean().optional(),
     /** Older name of `declare`. */
     assertQueues: z.boolean().optional(),
+    /** TLS for amqps:// URLs. */
+    tls: BrokerTlsSchema.optional(),
   }),
   z.object({
     type: z.literal('mqtt'), url: z.string().min(1), username: z.string().optional(), password: secret.optional(), clientId: z.string().optional(),
     protocolVersion: z.union([z.literal(4), z.literal(5)]).optional(), qos: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+    /** TLS for mqtts:// and wss:// URLs. */
+    tls: BrokerTlsSchema.optional(),
   }),
   z.object({
     type: z.literal('ibmmq'), url: z.string().url(), queueManager: z.string().min(1), username: z.string().optional(), password: secret.optional(),

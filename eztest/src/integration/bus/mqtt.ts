@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { topicMatches } from './memory.js';
+import type { TlsOptions } from '../tls.js';
 import { BusError, BusSubscription, decodePayload, loadClient, payloadText, type BusDestination, type BusDriver, type OutgoingMessage, type PublishReceipt, type SubscribeOptions } from './types.js';
 
 export interface MqttOptions {
@@ -17,6 +18,8 @@ export interface MqttOptions {
   /** 4 (3.1.1) or 5 (default 5). */
   protocolVersion?: 4 | 5;
   qos?: 0 | 1 | 2;
+  /** TLS for mqtts:// and wss://: extra CA, client certificate and key, servername (verification stays on). */
+  tls?: TlsOptions;
   client?: unknown;
 }
 
@@ -43,6 +46,7 @@ export class MqttBusDriver implements BusDriver {
         connectTimeout: 10_000,
         reconnectPeriod: 0,
         clean: true,
+        ...(this.opts.tls ? { ...this.opts.tls, rejectUnauthorized: true } : {}),
       });
     } catch (e) {
       throw new BusError(`Cannot connect to MQTT broker "${this.name}": ${(e as Error).message}`, 'BUS_CONNECT');

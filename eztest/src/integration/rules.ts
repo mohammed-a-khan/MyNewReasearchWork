@@ -160,11 +160,18 @@ function waitClauseText(a: Args): string {
 function publishClauses(text: string, q: string[]): Args {
   const out: Args = {};
   const headers: Record<string, string> = {};
-  for (const raw of text.split(/\s+(?=with\s|retained\b|and\s+retain)/i)) {
+  for (const raw of text.split(/\s+(?=with\s|retained\b|and\s+retain|(?:encoded\s+)?as\s+(?:avro|protobuf|json\s+schema)\b)/i)) {
     const c = raw.trim();
     if (!c) continue;
     let m: RegExpExecArray | null;
-    if ((m = new RegExp(String.raw`^with\s+(?:the\s+)?routing\s+key\s+(${Q}|${VAR}|\S+)$`, 'i').exec(c))) out.routingKey = V(m[1], q);
+    if (/^(?:encoded\s+)?as\s+(?:avro|protobuf|json\s+schema)\b/i.test(c)) {
+      m = new RegExp(String.raw`^(?:encoded\s+)?as\s+(avro|protobuf|json\s+schema)\s+(?:using|under|for)\s+(?:the\s+)?(?:schema\s+registry\s+)?subject\s+(${Q})(?:\s+(?:message|type)\s+(${Q}|[\w.]+))?(?:\s+version\s+(\d+))?$`, 'i').exec(c);
+      if (!m) throw fatal(`Say which registry subject to encode with: as Avro using subject "orders-value" (Protobuf: as Protobuf using subject "orders-value" message "shop.Order")`);
+      out.encoding = m[1].toLowerCase().startsWith('json') ? 'json' : m[1].toLowerCase();
+      out.subject = V(m[2], q);
+      if (m[3]) out.messageType = nameOf(m[3], q);
+      if (m[4]) out.schemaVersion = Number(m[4]);
+    } else if ((m = new RegExp(String.raw`^with\s+(?:the\s+)?routing\s+key\s+(${Q}|${VAR}|\S+)$`, 'i').exec(c))) out.routingKey = V(m[1], q);
     else if ((m = new RegExp(String.raw`^with\s+(?:the\s+)?(?:message\s+)?key\s+(${Q}|${VAR}|\S+)$`, 'i').exec(c))) out.key = V(m[1], q);
     else if ((m = new RegExp(String.raw`^with\s+(?:the\s+)?correlation\s*id\s+(${Q}|${VAR}|\S+)$`, 'i').exec(c))) out.correlationId = V(m[1], q);
     else if ((m = new RegExp(String.raw`^with\s+(?:the\s+)?content\s*type\s+(${Q}|\S+)$`, 'i').exec(c))) out.contentType = V(m[1], q);
@@ -192,10 +199,14 @@ function publishClauseText(a: Args): string {
   if (a.contentType !== undefined) parts.push(`with content type ${quoteText(String(a.contentType))}`);
   if (a.qos !== undefined) parts.push(`with QoS ${String(a.qos)}`);
   if (a.retain) parts.push('retained');
+  if (a.encoding !== undefined) {
+    const fmt = { avro: 'Avro', protobuf: 'Protobuf', json: 'JSON Schema' }[String(a.encoding)] ?? String(a.encoding);
+    parts.push(`as ${fmt} using subject ${quoteText(String(a.subject))}${a.messageType !== undefined ? ` message ${quoteText(String(a.messageType))}` : ''}${a.schemaVersion !== undefined ? ` version ${String(a.schemaVersion)}` : ''}`);
+  }
   return parts.length ? ` ${parts.join(' ')}` : '';
 }
 
-const PUBLISH_KEYS = ['kind', 'op', 'broker', 'brokerKind', 'destType', 'dest', 'file', 'payload', 'routingKey', 'key', 'headers', 'correlationId', 'contentType', 'qos', 'retain'];
+const PUBLISH_KEYS = ['kind', 'op', 'broker', 'brokerKind', 'destType', 'dest', 'file', 'payload', 'routingKey', 'key', 'headers', 'correlationId', 'contentType', 'qos', 'retain', 'encoding', 'subject', 'messageType', 'schemaVersion'];
 const WAIT_KEYS = ['kind', 'op', 'broker', 'brokerKind', 'destType', 'dest', 'listener', 'count', 'filters', 'schema', 'timeoutMs'];
 
 function step(args: Args, keys: string[], captureAs?: string): StepBody {
@@ -209,7 +220,7 @@ function cat(category: string, rules: IntentRule[]): IntentRule[] {
 // ------------------------------------------------------------------ messaging
 const BUS_RULES: IntentRule[] = cat('Messaging', [
   { name: 'bus-publish', keywords: ['publish', 'send', 'produce', 'put', 'emit'], example: 'Publish message from file "order.json" to Kafka topic "orders" on bus with key "${orderId}"',
-    re: new RegExp(String.raw`^(?:publish|send|produce|put|post|emit)\s+(?:an?\s+|the\s+)?(?:message|event)?\s*(?:from\s+(?:the\s+)?file\s+(${Q})|(${Q}|${VAR}))\s+(?:to|on|onto|into)\s+${DEST}((?:\s+(?:with\s|retained|and\s+retain).*?)?)(?:\s+(?:and\s+)?(?:store|save|keep)\s+(?:it\s+)?as\s+${KEY}|\s+as\s+${KEY})?$`, 'i'),
+    re: new RegExp(String.raw`^(?:publish|send|produce|put|post|emit)\s+(?:an?\s+|the\s+)?(?:message|event)?\s*(?:from\s+(?:the\s+)?file\s+(${Q})|(${Q}|${VAR}))\s+(?:to|on|onto|into)\s+${DEST}((?:\s+(?:with\s|retained|and\s+retain|(?:encoded\s+)?as\s+(?:avro|protobuf|json\s+schema)\b).*?)?)(?:\s+(?:and\s+)?(?:store|save|keep)\s+(?:it\s+)?as\s+${KEY}|\s+as\s+${KEY})?$`, 'i'),
     build: (m, q) => {
       const a: Args = { kind: 'bus', op: 'publish', ...dest(m, 3, q), ...(m[1] ? { file: V(m[1], q) } : { payload: V(m[2], q) }), ...publishClauses(m[7] ?? '', q) };
       return step(a, PUBLISH_KEYS, m[8] ?? m[9]);
