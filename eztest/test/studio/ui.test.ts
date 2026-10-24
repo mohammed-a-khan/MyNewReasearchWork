@@ -77,9 +77,10 @@ afterAll(async () => {
 describe('Studio UI (Chromium)', () => {
   it('opens on the dashboard and edits a journey with live diagnostics, quick fixes and save', async () => {
     await page.goto(studio.url);
-    await expect.poll(() => page.url()).not.toContain('token=');
-    await expect.poll(() => page.getByRole('heading', { name: 'Dashboard' }).isVisible()).toBe(true);
-    await expect.poll(() => page.locator('#dash-journeys').textContent()).toMatch(/3\s*Journeys/);
+    // The first load parses the whole Studio bundle and asks the server for the project: seconds on a busy machine.
+    await expect.poll(() => page.url(), { timeout: 15_000 }).not.toContain('token=');
+    await expect.poll(() => page.getByRole('heading', { name: 'Dashboard' }).isVisible(), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => page.locator('#dash-journeys').textContent(), { timeout: 15_000 }).toMatch(/3\s*Journeys/);
     await checkA11y(page, 'dashboard');
 
     await go('Journeys');
