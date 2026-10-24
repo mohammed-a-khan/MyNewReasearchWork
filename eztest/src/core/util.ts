@@ -40,6 +40,17 @@ export function interpolate(
   });
 }
 
+/** Names of `${name}` placeholders (not escaped, no `:-default`) that `vars` has no value for. */
+export function unresolvedNames(template: string, vars: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const m of template.matchAll(/(\$?)\$\{([A-Za-z_][\w.]*)(:-[^}]*)?\}/g)) {
+    if (m[1] || m[3] !== undefined) continue;
+    const v = lookup(vars, m[2]);
+    if ((v === undefined || v === null) && !out.includes(m[2])) out.push(m[2]);
+  }
+  return out;
+}
+
 function lookup(vars: Record<string, unknown>, dotted: string): unknown {
   let cur: unknown = vars;
   for (const part of dotted.split('.')) {

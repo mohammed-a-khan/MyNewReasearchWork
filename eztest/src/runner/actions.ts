@@ -2,6 +2,7 @@
  * Action execution: one function per core ActionType. Missing handlers and
  * missing inputs are errors (never skips).
  */
+import { unresolvedNames } from '../core/util.js';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve as resolvePath } from 'node:path';
 import type { Locator } from '../browser/index.js';
@@ -43,7 +44,25 @@ export interface ActionOutcome {
 
 function requireValue(step: Step, ctx: StepContext): string {
   if (step.value === undefined) throw new EzTestError(`Step "${step.intent}" (${step.action}) needs a value`, 'MISSING_VALUE');
+  // Never type, select or open a placeholder literally: "${password}" in the Password field logs in with the wrong
+  // password and the failure looks like the app's ("Invalid credentials").
+  const missing = unresolvedNames(step.value, ctx.vars());
+  if (missing.length) throw missingVariables(missing);
   return ctx.interpolate(step.value);
+}
+
+/** A run-time value nobody supplied, with the three ways to supply it. */
+export function missingVariables(names: string[]): EzTestError {
+  const list = names.map((n) => `\${${n}}`).join(', ');
+  const first = names[0];
+  return new EzTestError(
+    `${list} ${names.length > 1 ? 'have' : 'has'} no value, so EZTest did not use ${names.length > 1 ? 'them' : 'it'}. ` +
+      `Supply ${names.length > 1 ? 'them' : 'it'} at run time: in Studio, the Run page's "Variables" fields; on the command line, ` +
+      `eztest run --var ${first}=...; or once for the project, vars: { ${first}: secret://env/${first.toUpperCase().replace(/\W/g, '_')} } in eztest.config.yaml ` +
+      `with that variable in .env (recorded passwords are never saved in journeys).`,
+    'MISSING_VARIABLE',
+    { names },
+  );
 }
 
 function key(step: Step, fallback?: string): string {

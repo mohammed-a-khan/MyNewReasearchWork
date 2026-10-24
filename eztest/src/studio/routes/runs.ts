@@ -6,6 +6,15 @@ import type { StudioRoute } from './route.js';
 
 export const runRoutes: StudioRoute[] = [
   {
+    method: 'POST',
+    path: '/api/runs/needs',
+    summary: 'Run-time variables the selected journeys need (e.g. a recorded password)',
+    async handler({ res, app, body }) {
+      const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : undefined);
+      sendJson(res, 200, { variables: await app.runs.needs({ journeys: list(body?.journeys), tags: list(body?.tags) }) });
+    },
+  },
+  {
     method: 'GET',
     path: '/api/runs',
     summary: 'Past runs (newest first) and the active run',

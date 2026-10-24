@@ -297,11 +297,17 @@ export function documentCheckHandler(config: EzTestConfig, dbs: DbRegistry, cwd:
  * `vars:` values that are secret references (`secret://env/NAME`, e.g. a credential an importer replaced by
  * ${NAME}) are resolved through the secret stores when the engine starts, and masked like every secret.
  */
+/** Variable names whose values are treated as secrets (masked in logs, reports and evidence). */
+export const SECRET_VAR_NAME = /pass|pwd|secret|token|pin\b|otp|apikey|api_key|key$|credential/i;
+
 export async function resolveVarSecrets(vars: Record<string, string>, resolveSecret: (ref: string) => Promise<string>, mask: (v: string) => void): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(vars)) {
     if (typeof v !== 'string' || !v.startsWith('secret://')) {
       out[k] = v;
+      // A plain value under a secret-sounding name (a --var password=..., EZTEST_VAR_password, a Studio Variables field)
+      // is masked like a secret reference.
+      if (typeof v === 'string' && v.length >= 3 && SECRET_VAR_NAME.test(k)) mask(v);
       continue;
     }
     try {

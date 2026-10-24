@@ -352,6 +352,8 @@ A step of its own, not a post-condition, even when it starts with `Expect`. It r
 
 Expressions are parsed by a small, safe evaluator, never by JavaScript. They support numbers, quoted text (with `${var}` inside), variables (`order.lines.0.sku`, `items[1]`), lists `[1, 2]`, `+ - * / %`, comparisons `== != < <= > >=`, `and or not`, `contains`, `in`, `matches`, `startsWith`, `endsWith`, and `cond ? a : b`. `+` adds when both sides are numbers (or numeric text) and joins text otherwise. Functions: `today now addDays addHours addMinutes addMonths daysBetween format formatNumber upper lower trim len substring replace split join concat contains startsWith endsWith padStart number int string round floor ceil abs min max sum random randomString uuid first last at keys pluck json parseJson match isEmpty coalesce range`.
 
+**Values supplied at run time.** A `${name}` that nothing sets (a recorded password, for example) is never typed literally: the step fails with `MISSING_VARIABLE` before touching the page. Supply it per run on the Studio Run page (a "Variables" field appears for each such name; the editor's Run button asks for them), with `eztest run --var password=...`, with the environment variable `EZTEST_VAR_password`, or once for the project with `vars: { password: secret://env/APP_PASSWORD }` in `eztest.config.yaml`. Names that look secret (`password`, `token`, `pin`, `apiKey`, ...) are masked in logs and results; Studio values are used for that run only and never saved.
+
 ### Shared data (see [shared-data.md](shared-data.md))
 
 | Purpose | Examples |

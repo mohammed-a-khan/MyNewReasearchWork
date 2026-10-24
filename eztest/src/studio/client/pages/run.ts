@@ -13,6 +13,7 @@ import { link, navigate, type Route } from '../core/router.js';
 import { activeRun, journeys, refreshJourneys, session } from '../core/state.js';
 import { badge, button, card, emptyState, stat, statusIcon, tag } from '../ui/badge.js';
 import { icon } from '../ui/icons.js';
+import { neededVariables, variableField } from '../core/run-variables.js';
 import { createSplit } from '../ui/split.js';
 import { toast, toastError } from '../ui/toast.js';
 
@@ -78,6 +79,27 @@ export function registerRunPage(): void {
       const lensWarn = h('input', { type: 'checkbox', id: uid('lens-warn'), checked: true });
       const startBtn = button('Start run', { kind: 'primary', icon: 'run', id: 'btn-run' });
       const cancelBtn = button('Cancel run', { kind: 'danger', icon: 'stop', id: 'btn-cancel', disabled: true, onclick: () => void cancelActiveRun() });
+      // Values the chosen journeys use as ${name} and the project does not set (a recorded password): asked per run, never saved.
+      const varsFields = h('div', { class: 'grid2' });
+      const varsBox = h(
+        'fieldset',
+        { class: 'fs', id: 'run-variables', hidden: true },
+        h('legend', { text: 'Variables' }),
+        h('p', { class: 'help', text: 'These journeys use values the project does not set. They are used for this run only and are not saved.' }),
+        varsFields,
+      );
+      let varInputs: HTMLInputElement[] = [];
+      let needsSeq = 0;
+      const refreshNeeds = async () => {
+        const seq = ++needsSeq;
+        const needed = await neededVariables([...selected], splitList(tagsIn.value)).catch(() => []);
+        if (seq !== needsSeq) return;
+        const typed = new Map(varInputs.map((i) => [i.dataset.var!, i.value]));
+        const fields = needed.map((v) => variableField(v, typed.get(v.name)));
+        varInputs = fields.map((f) => f.input);
+        clear(varsFields).append(...fields.map((f) => f.el));
+        varsBox.hidden = !fields.length;
+      };
       const check = (input: HTMLInputElement, label: string) => h('label', { class: 'check', for: input.id }, input, h('span', { text: label }));
       const form = h(
         'form',
@@ -112,6 +134,7 @@ export function registerRunPage(): void {
           browserRow,
           h('p', { class: 'help', text: 'Tick two or more to run every journey on each browser; results, history and readiness are kept per browser. Overrides the Browser field.' }),
         ),
+        varsBox,
         h('div', { class: 'row wrap' }, check(headed, 'Show the browser (headed)'), check(heal, 'Self-healing')),
         h(
           'fieldset',
@@ -165,7 +188,11 @@ export function registerRunPage(): void {
         if (!list.length) checklist.appendChild(h('p', { class: 'muted', text: journeys.get().length ? 'No journeys match the filter.' : 'No runnable journeys found.' }));
         updateCount();
       };
-      const updateCount = () => (selCount.textContent = selected.size ? `${plural(selected.size, 'journey')} selected` : 'All journeys will run');
+      const updateCount = () => {
+        selCount.textContent = selected.size ? `${plural(selected.size, 'journey')} selected` : 'All journeys will run';
+        void refreshNeeds();
+      };
+      tagsIn.addEventListener('change', () => void refreshNeeds());
       const setAll = (on: boolean) => {
         checklist.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
           cb.checked = on;
@@ -401,6 +428,13 @@ export function registerRunPage(): void {
         if (workersIn.value) body.workers = Number(workersIn.value);
         if (retriesIn.value) body.retries = Number(retriesIn.value);
         if (lenses.length) body.lenses = lenses;
+        const missing = varInputs.filter((i) => !i.value);
+        if (missing.length) {
+          status.textContent = `Enter a value for ${missing.map((i) => i.dataset.var).join(', ')} under Variables.`;
+          missing[0].focus();
+          return;
+        }
+        if (varInputs.length) body.variables = Object.fromEntries(varInputs.map((i) => [i.dataset.var!, i.value]));
         reset();
         status.textContent = 'Starting…';
         try {

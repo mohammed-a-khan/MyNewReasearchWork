@@ -3,6 +3,7 @@
  * to any number of SSE listeners (with replay for late subscribers), analyze
  * it afterwards, and read past runs from the output directory.
  */
+import { neededVariables, type NeededVariable } from './run-variables.js';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
@@ -41,6 +42,8 @@ export interface RunRequest {
   cycle?: string;
   /** Tester running the manual steps (shown in the guided runner). */
   tester?: string;
+  /** Run-time values for ${name} placeholders (a recorded password); secret-sounding names are masked, nothing is stored. */
+  variables?: Record<string, string>;
 }
 
 type Listener = (e: StudioEvent) => void;
@@ -176,6 +179,15 @@ export class RunManager {
   }
 
   /** Validate the request, load journeys and start the run in the background. */
+  /** Variables the selected journeys need that the project does not supply (the Run page asks for them). */
+  async needs(req: Pick<RunRequest, 'journeys' | 'tags'>): Promise<NeededVariable[]> {
+    const loaded = await loadStudioConfig(this.ctx, {});
+    const cfg = loaded.config;
+    const { journeys: all } = await loadJourneys(defaultJourneyPaths(cfg, this.ctx.cwd), this.ctx.cwd, { bdd: bddOptionsFrom(cfg) });
+    const picked = filterJourneys(all, { tags: req.tags?.length ? req.tags : undefined, ids: req.journeys?.length ? req.journeys : undefined });
+    return neededVariables(picked, cfg.vars);
+  }
+
   async start(req: RunRequest): Promise<ActiveRun> {
     if (this.current) throw new HttpError(409, `A run is already in progress (${this.current.id})`);
     const overrides: Record<string, unknown> = {};
@@ -202,6 +214,16 @@ export class RunManager {
       overrides.lenses = lenses;
     }
 
+    if (req.variables !== undefined) {
+      if (!req.variables || typeof req.variables !== 'object' || Array.isArray(req.variables)) throw new HttpError(400, 'variables must be an object of name: value');
+      const vars: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.variables)) {
+        if (!/^[A-Za-z_][\w]*$/.test(k)) throw new HttpError(400, `variables: "${k}" is not a variable name`);
+        if (typeof v !== 'string') throw new HttpError(400, `variables.${k} must be text`);
+        if (v !== '') vars[k] = v;
+      }
+      if (Object.keys(vars).length) overrides.vars = vars;
+    }
     const loaded = await loadStudioConfig(this.ctx, overrides);
     const cfg = loaded.config;
     const { journeys: all, errors } = await loadJourneys(defaultJourneyPaths(cfg, this.ctx.cwd), this.ctx.cwd, { bdd: bddOptionsFrom(cfg) });
@@ -217,7 +239,7 @@ export class RunManager {
 
     const id = newRunId();
     const run: ActiveRun = {
-      id, state: 'running', startedAt: new Date().toISOString(), request: req, events: [], listeners: new Set(), abort: new AbortController(),
+      id, state: 'running', startedAt: new Date().toISOString(), request: req.variables ? { ...req, variables: Object.fromEntries(Object.keys(req.variables).map((k) => [k, '****'])) } : req, events: [], listeners: new Set(), abort: new AbortController(),
       journeys: journeys.map((j) => ({ id: j.id, name: j.name, steps: j.steps.length })),
       plan: runPlan(journeys),
     };

@@ -219,6 +219,13 @@ export const ENV_ALIASES: Readonly<Record<string, string>> = {
 export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
   let out: Obj = {};
   for (const [name, value] of Object.entries(vars)) {
+    // EZTEST_VAR_<name>: a run-time variable for ${name} (the name is kept as written, e.g. EZTEST_VAR_password).
+    if (name.startsWith('EZTEST_VAR_') && value !== undefined && name.length > 'EZTEST_VAR_'.length) {
+      const v = name.slice('EZTEST_VAR_'.length);
+      out = deepMerge(out, { vars: { [v]: value } });
+      origin?.set(`vars.${v}`, name);
+      continue;
+    }
     if (!name.startsWith('EZTEST_') || value === undefined || RESERVED_ENV.has(name) || RESERVED_ENV_PREFIX.test(name)) continue;
     const canonical = ENV_ALIASES[name];
     if (canonical && vars[canonical] !== undefined) continue;

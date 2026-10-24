@@ -4,6 +4,7 @@
  * view, an outline of steps, and live reload when files change on disk.
  * Deep link: `#/journeys/<path>:<line>`.
  */
+import { askVariables } from '../../core/run-variables.js';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { api, ApiError } from '../../core/api.js';
@@ -634,7 +635,10 @@ async function runActive(): Promise<void> {
     return;
   }
   try {
-    const r = await api.post<{ id: string }>('/api/runs', { journeys: journeyIdsFor(active.path) });
+    const ids = journeyIdsFor(active.path);
+    const variables = await askVariables(ids);
+    if (!variables) return;
+    const r = await api.post<{ id: string }>('/api/runs', Object.keys(variables).length ? { journeys: ids, variables } : { journeys: ids });
     navigate(link('run', r.id));
   } catch (e) {
     toastError(`Could not start the run: ${(e as Error).message}`);

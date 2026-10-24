@@ -443,7 +443,7 @@ describe('Project workspace (Chromium)', () => {
       let dark = 0;
       for (let i = 0; i < d.length; i += 4) if (d[i] < 128) dark++;
       return dark;
-    }), { timeout: 20_000 }).toBeGreaterThan(500);
+    }), { timeout: 20_000 }).toBeGreaterThan(200); // a blank canvas has none; the count scales with the page width
     for (const hash of ['#/assurance/visual', '#/assurance/a11y', '#/workbench', '#/project/monitors', '#/project/perf']) {
       await p.goto(`${studio.origin}/${hash}`);
       // Wait on state (the page heading and no pending loads), never on a fixed delay.

@@ -2,6 +2,7 @@
  * The `eztest` command line. Every command is a thin layer over the public
  * modules, so anything the CLI does can also be done programmatically.
  */
+import { EzTestError } from '../core/index.js';
 import { Command, Option } from 'commander';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -101,6 +102,17 @@ export function exitCodeFor(run: RunResult, quarantined: Iterable<string> = []):
   return exitCodeWithQuarantine(run, quarantined);
 }
 
+/** --var name=value (repeatable): run-time values for ${name} placeholders. */
+function parseVarFlags(list: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const kv of list) {
+    const i = kv.indexOf('=');
+    if (i <= 0) throw new EzTestError(`--var ${kv}: expected name=value`, 'INVALID_INPUT');
+    out[kv.slice(0, i).trim()] = kv.slice(i + 1);
+  }
+  return out;
+}
+
 export function buildProgram(io: CliIO = defaultIO): Command {
   const program = new Command();
   program
@@ -147,6 +159,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .addOption(new Option('-b, --browser <name>').choices([...BROWSER_ENGINES]))
     .option('--browsers <names>', 'cross-browser run: every journey on each browser (chromium,firefox,msedge,chrome,...); result ids end in @<browser>', list)
     .option('--headed', 'show the browser')
+    .option('--var <name=value...>', 'run-time variables for ${name} placeholders (e.g. --var password=...); also EZTEST_VAR_<name> in the environment or .env')
     .option('-w, --workers <n>', 'journeys in parallel', (v) => parseInt(v, 10))
     .option('-r, --retries <n>', 'journey retries', (v) => parseInt(v, 10))
     .option('-u, --base-url <url>', 'base URL of the app under test')
@@ -198,6 +211,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       if (o.workers) overrides.concurrency = o.workers;
       if (o.retries !== undefined) overrides.retries = o.retries;
       if (o.baseUrl) overrides.baseUrl = o.baseUrl;
+      if (o.var?.length) overrides.vars = parseVarFlags(o.var);
       if (o.heal === false) overrides.healing = { enabled: false };
       if (o.lens) overrides.lenses = o.lens;
       // Visual assertion steps ("Expect X to look like the baseline") write baselines too.

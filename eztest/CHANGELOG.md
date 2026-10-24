@@ -11,6 +11,8 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 - An empty "Add an expectation" box, or pressing Enter twice, no longer sends an empty expectation.
 - A click on a plain container around a heading or link is recorded as that element (`Click the "Dashboard" heading`), and a repeated text as `the 2nd "Dashboard" text`, instead of a CSS path.
 - Studio's left bar is wider (104 px) with larger labels.
+- A recorded login failed with the app's own "Invalid credentials": `${password}` had no value and was typed literally. A `${name}` that nothing sets now stops the step with `MISSING_VARIABLE` and how to supply it, before anything is typed. Supply it on the Studio Run page (new "Variables" fields, masked for secret names; the editor's Run button asks), with `eztest run --var name=value`, with `EZTEST_VAR_<name>`, or with `vars:` in the config. Secret-sounding names are masked in logs and results.
+- Journeys can be deleted and renamed from the editor toolbar (Rename…, Delete…), the explorer's trash button or the Delete key, each after a confirmation.
 
 ### Documents, SOAP and AMQP 1.0
 
