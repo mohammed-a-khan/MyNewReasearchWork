@@ -212,7 +212,7 @@ describe.skipIf(!executable)('firefox driver', () => {
         expect(props.get('el')!.asElement()).not.toBeNull();
         expect(await props.get('nested')!.jsonValue()).toEqual({ b: 2 });
         await obj.dispose();
-        // The page cannot see the driver's utility world.
+        // The page cannot see the driver's engine world.
         expect(await page.evaluate(() => typeof (globalThis as Record<string, unknown>).__eztestEngine)).toBe('undefined');
       });
     });
@@ -260,8 +260,8 @@ describe.skipIf(!executable)('firefox driver', () => {
         await page.setContent(`<button id=a>One</button><button id=b>Two</button>
           <div id=late></div><script>setTimeout(() => { late.innerHTML = '<button id=c onclick="this.textContent=\\'done\\'">Late</button>'; }, 300)</script>
           <div id=cover style="position:fixed;inset:0;background:rgba(0,0,0,.1)"></div>`);
-        await expect(page.locator('button').click({ timeout: 500 })).rejects.toThrow(/strict mode violation.*resolved to 2 elements/s);
-        await expect(page.locator('#a').click({ timeout: 600 })).rejects.toThrow(/intercepts pointer events/);
+        await expect(page.locator('button').click({ timeout: 500 })).rejects.toThrow(/locator\('button'\) matched 2 elements, but this needs exactly one.*1\) .*2\) .*Narrow it down/s);
+        await expect(page.locator('#a').click({ timeout: 600 })).rejects.toThrow(/covers the element and would receive the pointer event/);
         await page.evaluate(() => document.getElementById('cover')!.remove());
         await page.getByRole('button', { name: 'Late' }).click();
         expect(await page.locator('#c').textContent()).toBe('done');
@@ -269,7 +269,7 @@ describe.skipIf(!executable)('firefox driver', () => {
         expect(await page.locator('button').nth(1).innerText()).toBe('Two');
         expect(await page.locator('button').filter({ hasText: /^One$/ }).count()).toBe(1);
         await page.setContent('<button disabled>Off</button><input id=ro readonly value=x>');
-        await expect(page.getByRole('button').click({ timeout: 400 })).rejects.toThrow(/Timeout 400ms/);
+        await expect(page.getByRole('button').click({ timeout: 400 })).rejects.toThrow(/timed out after 400 ms/);
         expect(await page.getByRole('button').isDisabled()).toBe(true);
         expect(await page.locator('#ro').isEditable()).toBe(false);
       });

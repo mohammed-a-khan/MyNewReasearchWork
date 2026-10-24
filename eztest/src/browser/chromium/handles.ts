@@ -5,7 +5,7 @@ import * as actions from '../actions.js';
 import { deserializeValue } from '../serializer.js';
 import type { FilePayload, Rect } from '../types.js';
 import type { ExecutionContext, RemoteObject } from './exec-context.js';
-import type { CrFrame } from './frame.js';
+import type { ChromiumFrame } from './frame.js';
 import { parseSelector } from '../selector-parser.js';
 import type { PageFunctionOn } from '../eval-types.js';
 
@@ -79,14 +79,14 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
     return this;
   }
 
-  get frame(): CrFrame {
+  get frame(): ChromiumFrame {
     return this.context.frame!;
   }
 
-  /** The handle in the frame's utility world (where the engine lives). */
-  async inUtility(): Promise<ElementHandle> {
-    if (this.context.world === 'utility') return this as unknown as ElementHandle;
-    const ctx = await this.frame.context('utility');
+  /** The handle in the frame's engine world (where the engine lives). */
+  async inEngineWorld(): Promise<ElementHandle> {
+    if (this.context.world === 'engine') return this as unknown as ElementHandle;
+    const ctx = await this.frame.context('engine');
     return ctx.adoptElement(this as unknown as ElementHandle);
   }
 
@@ -107,12 +107,12 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
     return (await main.context.evaluate(fn as any, [main, arg], false)) as JSHandle<R>;
   }
 
-  async ownerFrame(): Promise<CrFrame | null> {
+  async ownerFrame(): Promise<ChromiumFrame | null> {
     return this.frame;
   }
 
   /** The frame an <iframe>/<frame> element shows, or null. */
-  async contentFrame(): Promise<CrFrame | null> {
+  async contentFrame(): Promise<ChromiumFrame | null> {
     return this.context.contentFrameOf(this as unknown as ElementHandle);
   }
 
@@ -203,8 +203,8 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
   }
 
   async innerText(): Promise<string> {
-    const u = await this.inUtility();
-    return u.context.callUtility((_e, h, el) => h.innerText(el), [u]);
+    const u = await this.inEngineWorld();
+    return u.context.callEngine((_e, h, el) => h.innerText(el), [u]);
   }
 
   async innerHTML(): Promise<string> {
@@ -216,13 +216,13 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
   }
 
   async inputValue(): Promise<string> {
-    const u = await this.inUtility();
-    return u.context.callUtility((_e, h, el) => h.inputValue(el), [u]);
+    const u = await this.inEngineWorld();
+    return u.context.callEngine((_e, h, el) => h.inputValue(el), [u]);
   }
 
   private async state(s: ElementStateName): Promise<boolean> {
-    const u = await this.inUtility();
-    return u.context.callUtility((e, _h, el, st) => e.elementState(el, st), [u, s]);
+    const u = await this.inEngineWorld();
+    return u.context.callEngine((e, _h, el, st) => e.checkState(el, st), [u, s]);
   }
 
   isVisible(): Promise<boolean> {
@@ -264,15 +264,15 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
     return this.queryChain(parseSelector(selector));
   }
 
-  /** Query a chain under this element (utility-world handles). */
+  /** Query a chain under this element (engine-world handles). */
   async queryChain(chain: SelectorChain): Promise<ElementHandle[]> {
-    const u = await this.inUtility();
+    const u = await this.inEngineWorld();
     return u.context.queryElements(chain, u);
   }
 
   async $eval<R, Arg = unknown>(selector: string, fn: (el: Element, arg: Arg) => R | Promise<R>, arg?: Arg): Promise<R> {
     const el = await this.$(selector);
-    if (!el) throw new Error(`Failed to find element matching selector "${selector}"`);
+    if (!el) throw new Error(`$eval: nothing under this element matches the selector "${selector}"`);
     try {
       return await el.evaluate(fn as any, arg);
     } finally {

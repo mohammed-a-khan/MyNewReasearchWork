@@ -1,7 +1,7 @@
 /**
  * A Firefox page: one top-level WebDriver BiDi browsing context and its
  * descendants (frames). The page API (locators, delegation to the main
- * frame, waiting, events, routes and bindings bookkeeping) comes from CrPage,
+ * frame, waiting, events, routes and bindings bookkeeping) comes from ChromiumPage,
  * which holds the engine-independent page code; this class implements the
  * protocol halves with BiDi:
  *
@@ -9,7 +9,7 @@
  *   (contextCreated / navigationStarted / navigationCommitted /
  *   domContentLoaded / load / fragmentNavigated / historyUpdated / ...);
  * - worlds from script.realmCreated (main world, and our sandbox
- *   `__eztest_utility__` as the utility world);
+ *   `__eztest_engine_world__` as the engine world);
  * - input through input.performActions, screenshots through
  *   browsingContext.captureScreenshot, PDF through browsingContext.print;
  * - dialogs (userPromptOpened / handleUserPrompt), console messages and page
@@ -18,24 +18,25 @@
  */
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
-import { UTILITY_WORLD_NAME } from '../injected/contract.js';
+import { ENGINE_WORLD_NAME } from '../injected/contract.js';
 import { TargetClosedError, isClosedError } from '../errors.js';
+import { dialogHandledMessage } from '../messages.js';
 import { KEEP_NAMES_SHIM, deserializeValue, pageCodec, serializeArgument } from '../serializer.js';
 import type { LifecycleEvent, ViewportSize } from '../types.js';
 import { Deadline, sleep } from '../util.js';
-import { CrPage, ConsoleMessage, Dialog, FileChooser, Worker, remoteToText, type BindingEntry, type MediaOptions, type ScreenshotOptions, type TargetSession } from '../chromium/page.js';
-import type { CrFrame } from '../chromium/frame.js';
+import { ChromiumPage, ConsoleMessage, Dialog, FileChooser, Worker, remoteToText, type BindingEntry, type MediaOptions, type ScreenshotOptions, type TargetSession } from '../chromium/page.js';
+import type { ChromiumFrame } from '../chromium/frame.js';
 import type { ElementHandle, JSHandle } from '../chromium/handles.js';
 import { WebSocket, type Response } from '../chromium/network.js';
 import { debugLog } from '../debug.js';
 import type { BidiConnection } from './connection.js';
 import { isGoneBidiError } from './connection.js';
-import { FfFrame, PAGE_WORLD_NAME } from './frame.js';
-import { FfKeyboard, FfMouse, FfTouchscreen, type InputTarget } from './input.js';
-import { FfNetwork } from './network.js';
-import { FfRealm, exceptionToError, fromRemoteValue, remoteObjectOf, toLocalValue, type BidiValue } from './realm.js';
+import { FirefoxFrame, PAGE_WORLD_NAME } from './frame.js';
+import { FirefoxKeyboard, FirefoxMouse, FirefoxTouchscreen, type InputTarget } from './input.js';
+import { FirefoxNetwork } from './network.js';
+import { FirefoxRealm, exceptionToError, fromRemoteValue, remoteObjectOf, toLocalValue, type BidiValue } from './realm.js';
 import { targetSessionUnavailable } from './stubs.js';
-import type { FfBrowserContext } from './browser.js';
+import type { FirefoxContext } from './browser.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -109,31 +110,31 @@ export function initScriptPreload(source: string): string {
   return `function () {\n${source}\n}`;
 }
 
-class FfDialog extends Dialog {
-  constructor(page: CrPage, private readonly bidi: BidiConnection, private readonly contextId: string, type: string, message: string, defaultValue: string) {
+class FirefoxDialog extends Dialog {
+  constructor(page: ChromiumPage, private readonly bidi: BidiConnection, private readonly contextId: string, type: string, message: string, defaultValue: string) {
     super(page, null, type, message, defaultValue);
   }
   override async accept(promptText?: string): Promise<void> {
-    if (this.handled) throw new Error('Cannot accept dialog which is already handled!');
+    if (this.handled) throw new Error(dialogHandledMessage('accept'));
     this.handled = true;
     await this.bidi.send('browsingContext.handleUserPrompt', { context: this.contextId, accept: true, ...(promptText !== undefined ? { userText: promptText } : {}) }).catch(() => undefined);
   }
   override async dismiss(): Promise<void> {
-    if (this.handled) throw new Error('Cannot dismiss dialog which is already handled!');
+    if (this.handled) throw new Error(dialogHandledMessage('dismiss'));
     this.handled = true;
     await this.bidi.send('browsingContext.handleUserPrompt', { context: this.contextId, accept: false }).catch(() => undefined);
   }
 }
 
-/** The input devices need the page before CrPage's constructor returns: they go through this holder. */
+/** The input devices need the page before ChromiumPage's constructor returns: they go through this holder. */
 interface Holder {
-  page?: FfPage;
+  page?: FirefoxPage;
 }
 
-export class FfPage extends CrPage {
-  readonly ffNetwork: FfNetwork;
+export class FirefoxPage extends ChromiumPage {
+  readonly ffNetwork: FirefoxNetwork;
   /** Realms by id (all frames of this page, and workers). */
-  readonly realms = new Map<string, FfRealm>();
+  readonly realms = new Map<string, FirefoxRealm>();
   private readonly pendingRealms = new Map<string, any[]>();
   private readonly bindingChannels = new Map<string, string>();
   private readonly preloadScripts: string[] = [];
@@ -142,10 +143,10 @@ export class FfPage extends CrPage {
   hadOverrides = false;
 
   constructor(
-    readonly ffCtx: FfBrowserContext,
+    readonly ffCtx: FirefoxContext,
     readonly bidi: BidiConnection,
     contextId: string,
-    opener: CrPage | undefined,
+    opener: ChromiumPage | undefined,
     initialUrl: string,
   ) {
     const holder: Holder = {};
@@ -156,26 +157,26 @@ export class FfPage extends CrPage {
       viewport: () => holder.page!.viewportSize(),
     };
     const slowMo = () => ffCtx.browser().slowMo;
-    const keyboard = new FfKeyboard(target, slowMo);
-    const network = new FfNetwork(holder as unknown as FfPage, bidi);
+    const keyboard = new FirefoxKeyboard(target, slowMo);
+    const network = new FirefoxNetwork(holder as unknown as FirefoxPage, bidi);
     super(ffCtx, null, contextId, opener, {
       network,
       keyboard,
-      mouse: new FfMouse(target, keyboard, slowMo),
-      touchscreen: new FfTouchscreen(target, keyboard, () => !!ffCtx.options.hasTouch),
+      mouse: new FirefoxMouse(target, keyboard, slowMo),
+      touchscreen: new FirefoxTouchscreen(target, keyboard, () => !!ffCtx.options.hasTouch),
       mainSession: targetSessionUnavailable() as TargetSession,
     });
     holder.page = this;
     this.ffNetwork = network;
-    (network as unknown as { page: FfPage }).page = this;
-    const main = new FfFrame(this, contextId, bidi);
+    (network as unknown as { page: FirefoxPage }).page = this;
+    const main = new FirefoxFrame(this, contextId, bidi);
     this.frames_.set(contextId, main);
     this.mainFrame_ = main;
     main.onCommitted(initialUrl || 'about:blank', '', 'initial');
     main.onStoppedLoading(true);
   }
 
-  ffContext(): FfBrowserContext {
+  ffContext(): FirefoxContext {
     return this.ffCtx;
   }
 
@@ -193,8 +194,8 @@ export class FfPage extends CrPage {
       for (const realm of r.realms ?? []) this.onRealmCreated(realm);
     }));
     sends.push(this.bidi.send('browsingContext.getTree', { root: this.contextId }).then((r) => {
-      const visit = (node: any, parent: FfFrame | undefined) => {
-        const f = parent ? this.ensureFfFrame(node.context, parent.id, node.url) : (this.mainFrame() as FfFrame);
+      const visit = (node: any, parent: FirefoxFrame | undefined) => {
+        const f = parent ? this.ensureFfFrame(node.context, parent.id, node.url) : (this.mainFrame() as FirefoxFrame);
         if (!parent && node.url && node.url !== f.url()) f.onCommitted(node.url, f.name(), f.loaderId || 'initial');
         for (const c of node.children ?? []) visit(c, f);
       };
@@ -218,10 +219,10 @@ export class FfPage extends CrPage {
   }
 
   // ------------------------------------------------------------------ frames and lifecycle (BiDi events, routed by the browser)
-  private ensureFfFrame(id: string, parentId: string | undefined, url: string | undefined): FfFrame {
-    let f = this.frames_.get(id) as FfFrame | undefined;
+  private ensureFfFrame(id: string, parentId: string | undefined, url: string | undefined): FirefoxFrame {
+    let f = this.frames_.get(id) as FirefoxFrame | undefined;
     if (f) return f;
-    f = new FfFrame(this, id, this.bidi);
+    f = new FirefoxFrame(this, id, this.bidi);
     this.frames_.set(id, f);
     const parent = parentId ? this.frames_.get(parentId) : undefined;
     if (parent) {
@@ -258,8 +259,8 @@ export class FfPage extends CrPage {
     }
   }
 
-  private frameFor(e: any): FfFrame | undefined {
-    return this.frames_.get(e.context) as FfFrame | undefined;
+  private frameFor(e: any): FirefoxFrame | undefined {
+    return this.frames_.get(e.context) as FirefoxFrame | undefined;
   }
 
   onNavigationStarted(e: any): void {
@@ -331,8 +332,8 @@ export class FfPage extends CrPage {
     this.notifyChange();
   }
 
-  private updateFrameName(f: FfFrame): void {
-    const r = f.realm('utility') ?? f.realm('main');
+  private updateFrameName(f: FirefoxFrame): void {
+    const r = f.realm('engine') ?? f.realm('main');
     if (!r) return;
     void r.evaluate(() => window.name, [], true).then((n) => {
       if (typeof n === 'string') f.name_ = n;
@@ -343,18 +344,18 @@ export class FfPage extends CrPage {
   onRealmCreated(e: any): void {
     if (this.realms.has(e.realm)) return;
     if (e.type === 'window') {
-      const f = this.frames_.get(e.context) as FfFrame | undefined;
+      const f = this.frames_.get(e.context) as FirefoxFrame | undefined;
       if (!f) {
         this.pendingRealms.set(e.context, [...(this.pendingRealms.get(e.context) ?? []), e]);
         return;
       }
-      let world: 'main' | 'utility' | undefined;
+      let world: 'main' | 'engine' | undefined;
       const noScript = this.context_.options.javaScriptEnabled === false;
       if (!e.sandbox) world = noScript ? undefined : 'main';
-      else if (e.sandbox === UTILITY_WORLD_NAME) world = 'utility';
+      else if (e.sandbox === ENGINE_WORLD_NAME) world = 'engine';
       else if (e.sandbox === PAGE_WORLD_NAME && noScript) world = 'main';
       if (!world) return;
-      const realm = new FfRealm(this.bidi, e.realm, e.context, f, world);
+      const realm = new FirefoxRealm(this.bidi, e.realm, e.context, f, world);
       this.realms.set(e.realm, realm);
       f.contextCreated(world, realm);
       if (world === 'main') this.updateFrameName(f);
@@ -369,7 +370,7 @@ export class FfPage extends CrPage {
   }
 
   private onWorkerRealm(e: any): void {
-    const realm = new FfRealm(this.bidi, e.realm, undefined, undefined, 'worker');
+    const realm = new FirefoxRealm(this.bidi, e.realm, undefined, undefined, 'worker');
     this.realms.set(e.realm, realm);
     // A worker realm's origin is its script URL.
     const w = new Worker(null, String(e.origin ?? ''));
@@ -400,7 +401,7 @@ export class FfPage extends CrPage {
   // ------------------------------------------------------------------ page events
   onUserPrompt(e: any): void {
     const type = String(e.type ?? 'alert');
-    const d = new FfDialog(this, this.bidi, e.context, type, String(e.message ?? ''), String(e.defaultValue ?? ''));
+    const d = new FirefoxDialog(this, this.bidi, e.context, type, String(e.message ?? ''), String(e.defaultValue ?? ''));
     const listeners = this.listenerCount('dialog') + this.context_.listenerCount('dialog');
     if (!listeners) {
       void (type === 'beforeunload' ? d.accept() : d.dismiss()).catch(() => undefined);
@@ -411,16 +412,16 @@ export class FfPage extends CrPage {
   }
 
   async onFileDialog(e: any): Promise<void> {
-    const f = this.frameFor(e) ?? (this.mainFrame() as FfFrame);
+    const f = this.frameFor(e) ?? (this.mainFrame() as FirefoxFrame);
     if (!e.element?.sharedId) return;
-    const ctx = (await f.context('main')) as FfRealm;
+    const ctx = (await f.context('main')) as FirefoxRealm;
     const el = ctx.handleFor({ type: 'node', sharedId: e.element.sharedId, value: { localName: 'input' } }) as ElementHandle;
     this.emitEvent('filechooser', new FileChooser(this, el, !!e.multiple));
   }
 
   onLogEntry(e: any): void {
     const realm = e.source?.realm ? this.realms.get(e.source.realm) : undefined;
-    if (realm && realm.world === 'utility') return; // our own sandbox
+    if (realm && realm.world === 'engine') return; // our own sandbox
     if (e.type === 'javascript') {
       if (e.level !== 'error') return;
       // Uncaught exceptions ("TypeError: ...", "uncaught exception: ...") are page errors; other script
@@ -441,7 +442,7 @@ export class FfPage extends CrPage {
     const methods: Record<string, string> = { warn: 'warning', group: 'startGroup', groupCollapsed: 'startGroupCollapsed', groupEnd: 'endGroup' };
     const type = methods[e.method] ?? e.method ?? (e.level === 'warn' ? 'warning' : e.level ?? 'log');
     const args: BidiValue[] = e.args ?? [];
-    const ctx = realm ?? (this.frameFor(e.source ?? {}) as FfFrame | undefined)?.realm('main');
+    const ctx = realm ?? (this.frameFor(e.source ?? {}) as FirefoxFrame | undefined)?.realm('main');
     const handles: JSHandle[] = ctx ? args.map((a) => ctx.handleFor(a)) : [];
     const text = args.length ? args.map((a) => remoteToText(remoteObjectOf(a))).join(' ') : String(e.text ?? '');
     const top = e.stackTrace?.callFrames?.[0];
@@ -490,7 +491,7 @@ export class FfPage extends CrPage {
     const payload = fromRemoteValue(e.data) as { name: string; seq: number; args: unknown } | undefined;
     if (!payload || payload.name !== name) return true;
     const entry = this.bindings.get(name) ?? this.context_.binding(name);
-    const realm = this.realms.get(e.source?.realm) ?? (e.source?.context ? (this.frames_.get(e.source.context) as FfFrame | undefined)?.realm('main') : undefined);
+    const realm = this.realms.get(e.source?.realm) ?? (e.source?.context ? (this.frames_.get(e.source.context) as FirefoxFrame | undefined)?.realm('main') : undefined);
     if (!entry || !realm) return true;
     const args = deserializeValue(payload.args) as unknown[];
     let ok = true;
@@ -523,10 +524,10 @@ export class FfPage extends CrPage {
   }
 
   /** Frame whose document has the focus (following focused iframes down from the main frame). */
-  private async focusedFrame(): Promise<CrFrame> {
-    let frame: CrFrame = this.mainFrame();
+  private async focusedFrame(): Promise<ChromiumFrame> {
+    let frame: ChromiumFrame = this.mainFrame();
     for (let depth = 0; depth < 10; depth++) {
-      const h = await frame.utility((_e, _h) => {
+      const h = await frame.inEngine((_e, _h) => {
         const a = document.activeElement;
         return a && (a.localName === 'iframe' || a.localName === 'frame') ? a : null;
       }, [], false).catch(() => null) as unknown as JSHandle | null;
@@ -545,7 +546,7 @@ export class FfPage extends CrPage {
 
   async syntheticKey(type: 'keydown' | 'keyup', init: Record<string, unknown>): Promise<void> {
     const frame = await this.focusedFrame();
-    await frame.utility((_e, h, t, i) => {
+    await frame.inEngine((_e, h, t, i) => {
       const target = document.activeElement || document.body;
       if (target) h.dispatch(target, t, { bubbles: true, cancelable: true, composed: true, ...i });
     }, [type, init]);
@@ -553,7 +554,7 @@ export class FfPage extends CrPage {
 
   async insertTextAtCaret(text: string): Promise<boolean> {
     const frame = await this.focusedFrame();
-    return frame.utility((_e, _h, t) => {
+    return frame.inEngine((_e, _h, t) => {
       const a = document.activeElement as HTMLElement | null;
       if (!a) return false;
       const editable = a.isContentEditable || a.localName === 'textarea' || (a.localName === 'input' && !/^(checkbox|radio|button|submit|reset|file|image|color|range|hidden)$/i.test((a as HTMLInputElement).type));
@@ -615,7 +616,7 @@ export class FfPage extends CrPage {
   async runInAllFrames(fn: string, args: unknown[]): Promise<void> {
     await Promise.all(this.frames().map(async (f) => {
       try {
-        const realm = (await f.context('main', 5000)) as FfRealm;
+        const realm = (await f.context('main', 5000)) as FirefoxRealm;
         await this.bidi.send('script.callFunction', { functionDeclaration: fn, awaitPromise: false, target: { realm: realm.realmId }, arguments: args });
       } catch {
         /* frame went away */
@@ -720,7 +721,7 @@ export class FfPage extends CrPage {
     if (options.fullPage) {
       beyond = true;
     } else if (options.clip) {
-      const vv = await frame.utility(() => {
+      const vv = await frame.inEngine(() => {
         const v = window.visualViewport;
         return v ? { pageX: v.pageLeft, pageY: v.pageTop } : { pageX: window.scrollX, pageY: window.scrollY };
       });
@@ -730,7 +731,7 @@ export class FfPage extends CrPage {
     return this.capture({ type, quality: options.quality, clip, beyond, options, frame, path: options.path });
   }
 
-  override async capture(o: { type: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number; scale: number }; beyond: boolean; options: ScreenshotOptions; frame: CrFrame; path?: string }): Promise<Buffer> {
+  override async capture(o: { type: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number; scale: number }; beyond: boolean; options: ScreenshotOptions; frame: ChromiumFrame; path?: string }): Promise<Buffer> {
     const opts = o.options;
     const cleanups: Array<() => Promise<unknown>> = [];
     try {
@@ -741,8 +742,8 @@ export class FfPage extends CrPage {
       const rects: Array<{ x: number; y: number; width: number; height: number }> = [];
       for (const m of opts.mask ?? []) rects.push(...(await m.boundingBoxesAll()));
       if (rects.length || css.length) {
-        await this.mainFrame().utility((_e, h, r, color, style) => h.overlay(r, color, style), [rects, opts.maskColor ?? '#FF00FF', css.join('\n') || undefined]);
-        cleanups.push(() => this.mainFrame().utility((_e, h) => h.removeOverlay()).catch(() => undefined));
+        await this.mainFrame().inEngine((_e, h, r, color, style) => h.overlay(r, color, style), [rects, opts.maskColor ?? '#FF00FF', css.join('\n') || undefined]);
+        cleanups.push(() => this.mainFrame().inEngine((_e, h) => h.removeOverlay()).catch(() => undefined));
       }
       const r = await this.bidi.send('browsingContext.captureScreenshot', {
         context: this.contextId,

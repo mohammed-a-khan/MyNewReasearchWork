@@ -17,11 +17,9 @@
  *   The driver defines a no-op `__name` helper before evaluating, so the
  *   esbuild `keepNames` transform used by tsx / EZTest's testkit is harmless.)
  * - `src/browser/injected/index.ts` re-exports `engineSource` from the engine
- *   the driver should use. Until the real engine lands it points at
- *   `stub-engine.ts` (css, xpath, text and a rough role/label support).
- *   Switching engines is a one-line change in index.ts.
+ *   the driver uses.
  * - The driver evaluates the expression in an ISOLATED WORLD of every frame
- *   (CDP `Page.createIsolatedWorld`, world name {@link UTILITY_WORLD_NAME}) and
+ *   (CDP `Page.createIsolatedWorld`, world name {@link ENGINE_WORLD_NAME}) and
  *   stores the result at `globalThis[ENGINE_GLOBAL]`. Page scripts cannot see
  *   or tamper with it. It is re-installed lazily after every navigation.
  * - The engine shares the DOM with the page but not its JS globals; it must
@@ -53,7 +51,7 @@
  */
 
 /** Name of the isolated world the engine lives in. */
-export const UTILITY_WORLD_NAME = '__eztest_utility__';
+export const ENGINE_WORLD_NAME = '__eztest_engine_world__';
 
 /** Global property (inside the isolated world) holding the engine instance. */
 export const ENGINE_GLOBAL = '__eztestEngine';
@@ -148,7 +146,7 @@ export interface NthStep { nth: number }
 export interface HasTextStep { hasText: TextMatch; exact?: boolean }
 /** Keep elements whose text does NOT match. */
 export interface HasNotTextStep { hasNotText: TextMatch; exact?: boolean }
-/** Keep visible (true) or hidden (false) elements, see {@link InjectedEngine.elementState}. */
+/** Keep visible (true) or hidden (false) elements, see {@link InjectedEngine.checkState}. */
 export interface VisibleStep { visible: boolean }
 /** Keep elements that contain (descendant-or-self is NOT counted: descendants only) a match of the chain. */
 export interface HasStep { has: SelectorChain }
@@ -233,7 +231,7 @@ export interface ActionabilityOptions {
 
 export interface ActionabilityResult {
   ok: boolean;
-  /** Human-readable reason when !ok, e.g. "element is not visible", "<div class=modal> intercepts pointer events". */
+  /** Human-readable reason when !ok, e.g. "the element is hidden", "<div class=modal> covers the element". */
   reason?: string;
   /** True when waiting may fix it (not visible yet, animating, covered). False for permanent failures (e.g. not an <input>). */
   retry?: boolean;
@@ -247,7 +245,7 @@ export interface ActionabilityResult {
 
 export type ElementStateName = 'visible' | 'hidden' | 'enabled' | 'disabled' | 'editable' | 'checked' | 'unchecked' | 'focused' | 'attached';
 
-/** The engine object installed at `globalThis[ENGINE_GLOBAL]` in the utility world. */
+/** The engine object installed at `globalThis[ENGINE_GLOBAL]` in the engine world. */
 export interface InjectedEngine {
   /** Engine identifier, e.g. 'eztest-engine/1.0' (shown in debug logs). */
   readonly version: string;
@@ -263,10 +261,10 @@ export interface InjectedEngine {
 
   /**
    * Element state used by isVisible / isEnabled / isChecked ... `checked`
-   * throws an Error('Not a checkbox or radio button') for elements without a
+   * throws an Error (not a checkbox or radio button) for elements without a
    * checked state (native or aria-checked on a checkbox/radio/switch role).
    */
-  elementState(el: Element, state: ElementStateName): boolean;
+  checkState(el: Element, state: ElementStateName): boolean;
 
   /** Accessible name (accname 1.2). */
   accessibleName(el: Element): string;

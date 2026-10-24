@@ -1,10 +1,11 @@
 /**
  * A frame: its document lifecycle, execution contexts (main world and the
- * driver's isolated utility world), navigation, and the frame-level API.
+ * driver's isolated engine world), navigation, and the frame-level API.
  */
 import { readFile } from 'node:fs/promises';
-import { UTILITY_WORLD_NAME } from '../injected/contract.js';
+import { ENGINE_WORLD_NAME } from '../injected/contract.js';
 import { TimeoutError, TargetClosedError, isContextGoneError, rewriteError } from '../errors.js';
+import { FRAME_GONE_TEXT, timeoutMessage } from '../messages.js';
 import { FrameLocator, Locator, frameScope, type GetByRoleOptions, type LocatorOptions, type TextOptions } from '../locator.js';
 import type { LifecycleEvent, URLMatch } from '../types.js';
 import { Deadline, deferred, sleep, urlMatches, type Deferred } from '../util.js';
@@ -12,7 +13,7 @@ import * as actions from '../actions.js';
 import type { ExecutionContext, World } from './exec-context.js';
 import type { ElementHandle, JSHandle } from './handles.js';
 import type { PageFunction } from '../eval-types.js';
-import type { CrPage, TargetSession } from './page.js';
+import type { ChromiumPage, TargetSession } from './page.js';
 import type { Response } from './network.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,21 +24,21 @@ export interface GotoOptions {
   referer?: string;
 }
 
-export class CrFrame {
+export class ChromiumFrame {
   url_ = '';
   name_ = '';
   loaderId = '';
-  parent?: CrFrame;
-  readonly children = new Set<CrFrame>();
+  parent?: ChromiumFrame;
+  readonly children = new Set<ChromiumFrame>();
   detached = false;
   /** Lifecycle events reached, per document (loaderId). */
   protected readonly lifecycle = new Map<string, Set<string>>();
   protected readonly contexts: Partial<Record<World, ExecutionContext>> = {};
-  protected readonly contextWaiters: Record<'main' | 'utility', Array<Deferred<ExecutionContext>>> = { main: [], utility: [] };
-  private creatingUtility?: Promise<unknown>;
+  protected readonly contextWaiters: Record<'main' | 'engine', Array<Deferred<ExecutionContext>>> = { main: [], engine: [] };
+  private creatingEngineWorld?: Promise<unknown>;
 
   constructor(
-    readonly _page: CrPage,
+    readonly _page: ChromiumPage,
     readonly id: string,
     /** The target session that owns this frame (page session, or an out-of-process iframe's session). */
     public session: TargetSession,
@@ -52,11 +53,11 @@ export class CrFrame {
     return this.url_;
   }
 
-  parentFrame(): CrFrame | null {
+  parentFrame(): ChromiumFrame | null {
     return this.parent ?? null;
   }
 
-  childFrames(): CrFrame[] {
+  childFrames(): ChromiumFrame[] {
     return [...this.children];
   }
 
@@ -65,19 +66,19 @@ export class CrFrame {
   }
 
   /** The page this frame belongs to. */
-  page(): CrPage {
+  page(): ChromiumPage {
     return this._page;
   }
 
   /** The <iframe>/<frame> element hosting this frame (in the parent frame's main world). */
   async frameElement(): Promise<ElementHandle> {
     const h = await this.ownerElement('main');
-    if (!h) throw new Error('Frame has been detached.');
+    if (!h) throw new Error(FRAME_GONE_TEXT);
     return h;
   }
 
   /** Owner element in the parent frame, in the given world. */
-  async ownerElement(world: 'main' | 'utility'): Promise<ElementHandle | undefined> {
+  async ownerElement(world: 'main' | 'engine'): Promise<ElementHandle | undefined> {
     const parent = this.parent;
     if (!parent) return undefined;
     const { backendNodeId } = await parent.session.cdp.send('DOM.getFrameOwner', { frameId: this.id });
@@ -90,11 +91,11 @@ export class CrFrame {
   async viewportOffset(): Promise<{ x: number; y: number }> {
     let x = 0;
     let y = 0;
-    for (let f: CrFrame | undefined = this; f?.parent; f = f.parent) {
-      const owner = await f.ownerElement('utility');
+    for (let f: ChromiumFrame | undefined = this; f?.parent; f = f.parent) {
+      const owner = await f.ownerElement('engine');
       if (!owner) break;
       const ctx = owner.context;
-      const o = await ctx.callUtility((_e, h, el) => h.frameContentOffset(el), [owner]);
+      const o = await ctx.callEngine((_e, h, el) => h.frameContentOffset(el), [owner]);
       await owner.dispose();
       x += o.x;
       y += o.y;
@@ -162,32 +163,32 @@ export class CrFrame {
 
   contextDestroyed(ctx: ExecutionContext): void {
     ctx.disposed = true;
-    for (const w of ['main', 'utility'] as const) if (this.contexts[w] === ctx) delete this.contexts[w];
+    for (const w of ['main', 'engine'] as const) if (this.contexts[w] === ctx) delete this.contexts[w];
   }
 
   /** Drop all contexts (new document / session reset). */
   clearContexts(): void {
-    for (const w of ['main', 'utility'] as const) {
+    for (const w of ['main', 'engine'] as const) {
       const c = this.contexts[w];
       if (c) c.disposed = true;
       delete this.contexts[w];
     }
   }
 
-  /** The current execution context of a world, waiting for it (and creating the utility world) as needed. */
-  async context(world: 'main' | 'utility', timeout = 30_000): Promise<ExecutionContext> {
+  /** The current execution context of a world, waiting for it (and creating the engine world) as needed. */
+  async context(world: 'main' | 'engine', timeout = 30_000): Promise<ExecutionContext> {
     const existing = this.contexts[world];
     if (existing && !existing.disposed) return existing;
-    if (this.detached) throw new Error('Frame was detached');
+    if (this.detached) throw new Error(FRAME_GONE_TEXT);
     if (this._page.isClosed()) throw new TargetClosedError();
     const d = deferred<ExecutionContext>();
     this.contextWaiters[world].push(d);
     if (world === 'main') this.requestMainWorld();
-    if (world === 'utility' && !this.creatingUtility) {
-      this.creatingUtility = this.createUtilityWorld()
+    if (world === 'engine' && !this.creatingEngineWorld) {
+      this.creatingEngineWorld = this.createEngineWorld()
         .catch(() => undefined)
         .finally(() => {
-          this.creatingUtility = undefined;
+          this.creatingEngineWorld = undefined;
         });
     }
     const timer = setTimeout(() => d.reject(new TimeoutError(`Timed out waiting for the ${world} world of frame ${this.url_}`)), timeout);
@@ -205,22 +206,22 @@ export class CrFrame {
     /* the main world arrives by itself */
   }
 
-  /** Ask the browser for the utility world of the current document (it arrives as a context event). */
-  protected async createUtilityWorld(): Promise<unknown> {
-    return this.session.cdp.send('Page.createIsolatedWorld', { frameId: this.id, worldName: UTILITY_WORLD_NAME, grantUniveralAccess: true });
+  /** Ask the browser for the engine world of the current document (it arrives as a context event). */
+  protected async createEngineWorld(): Promise<unknown> {
+    return this.session.cdp.send('Page.createIsolatedWorld', { frameId: this.id, worldName: ENGINE_WORLD_NAME, grantUniveralAccess: true });
   }
 
   /** Internal: reject context waiters (detach / close). */
   failWaiters(e: Error): void {
-    for (const w of ['main', 'utility'] as const) for (const d of this.contextWaiters[w].splice(0)) d.reject(e);
+    for (const w of ['main', 'engine'] as const) for (const d of this.contextWaiters[w].splice(0)) d.reject(e);
   }
 
-  /** Run a utility-world call, retrying once the document changes under it. */
-  async utility<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[] = [], returnByValue = true): Promise<R> {
+  /** Run an engine-world call, retrying once the document changes under it. */
+  async inEngine<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[] = [], returnByValue = true): Promise<R> {
     for (let attempt = 0; ; attempt++) {
-      const ctx = await this.context('utility');
+      const ctx = await this.context('engine');
       try {
-        return await ctx.callUtility(fn, args, returnByValue);
+        return await ctx.callEngine(fn, args, returnByValue);
       } catch (e) {
         if (attempt < 5 && ((e as { contextGone?: boolean }).contextGone || isContextGoneError(e))) {
           await sleep(20);
@@ -277,7 +278,7 @@ export class CrFrame {
 
   async $eval<R, Arg = unknown>(selector: string, fn: (el: Element, arg: Arg) => R | Promise<R>, arg?: Arg): Promise<R> {
     const el = await this.$(selector);
-    if (!el) throw new Error(`Failed to find element matching selector "${selector}"`);
+    if (!el) throw new Error(`$eval: nothing on the page matches the selector "${selector}"`);
     try {
       return await el.evaluate(fn as any, arg);
     } finally {
@@ -310,7 +311,7 @@ export class CrFrame {
       } catch (e) {
         if (!isContextGoneError(e) && !(e as { contextGone?: boolean }).contextGone) throw rewriteError(e as Error, 'page.waitForFunction');
       }
-      if (deadline.expired()) throw new TimeoutError(`page.waitForFunction: Timeout ${deadline.timeout}ms exceeded.`);
+      if (deadline.expired()) throw new TimeoutError(timeoutMessage('page.waitForFunction', deadline.timeout, ['waiting for the function to return a truthy value']));
       await sleep(interval);
     }
   }
@@ -459,7 +460,7 @@ export class CrFrame {
 
   // ------------------------------------------------------------------ document
   async content(): Promise<string> {
-    return this.utility((_e, h) => h.content());
+    return this.inEngine((_e, h) => h.content());
   }
 
   /** Engine hook: Chromium cannot rewrite a document that hosted an <object>/<embed> frame (see setContent). */
@@ -474,23 +475,23 @@ export class CrFrame {
     // <iframe srcdoc> makes the browser process exit. Rewriting a fresh document from a new
     // navigation is safe, so start from an empty data: document in that case.
     if (this.objectFramesBreakRewrite()) {
-      const hasObject = await this.utility(() => document.querySelector('object, embed') !== null).catch(() => false);
+      const hasObject = await this.inEngine(() => document.querySelector('object, embed') !== null).catch(() => false);
       if (hasObject) await this.goto('data:text/html,', { timeout: deadline.remaining() });
     }
-    await this.utility((_e, h, s) => h.setContent(s), [html]);
+    await this.inEngine((_e, h, s) => h.setContent(s), [html]);
     const want = options.waitUntil ?? 'load';
     for (;;) {
-      const state = await this.utility(() => document.readyState).catch(() => 'loading');
+      const state = await this.inEngine(() => document.readyState).catch(() => 'loading');
       if (want === 'commit' || (want === 'domcontentloaded' && state !== 'loading') || state === 'complete') {
         if (want !== 'networkidle' || this._page.network.isIdle(500)) return;
       }
-      if (deadline.expired()) throw new TimeoutError(`page.setContent: Timeout ${deadline.timeout}ms exceeded.`);
+      if (deadline.expired()) throw new TimeoutError(timeoutMessage('page.setContent', deadline.timeout, ['waiting for the new content to finish loading']));
       await sleep(20);
     }
   }
 
   async title(): Promise<string> {
-    return this.utility(() => document.title);
+    return this.inEngine(() => document.title);
   }
 
   async addScriptTag(options: { url?: string; path?: string; content?: string; type?: string }): Promise<ElementHandle> {
@@ -591,12 +592,12 @@ export class CrFrame {
       result = await this.session.cdp.send('Page.navigate', { url: target, frameId: this.id, ...(referer ? { referrer: referer } : {}) });
     } catch (e) {
       const m = (e as Error).message;
-      if (/Cannot navigate to invalid URL/.test(m)) throw new Error(`page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL`);
+      if (/Cannot navigate to invalid URL/.test(m)) throw new Error(`page.goto: "${target}" is not a URL the browser can open (give a full URL, or set baseURL for relative ones)`);
       throw rewriteError(e as Error, 'page.goto');
     }
     if (result.errorText) {
-      if (result.errorText === 'net::ERR_ABORTED' && this._page.recentDownloadFor(this.id)) throw new Error('page.goto: Download is starting');
-      throw new Error(`page.goto: ${result.errorText} at ${target}`);
+      if (result.errorText === 'net::ERR_ABORTED' && this._page.recentDownloadFor(this.id)) throw new Error(`page.goto: ${target} started a download instead of opening a page (use page.waitForEvent('download') to catch it)`);
+      throw new Error(`page.goto: could not load ${target} (${result.errorText})`);
     }
     return result.loaderId as string | undefined;
   }
@@ -605,13 +606,13 @@ export class CrFrame {
   async waitForDocument(loaderId: string, waitUntil: LifecycleEvent, deadline: Deadline, api: string, url?: string): Promise<void> {
     let seen = false;
     await this._page.waitForCondition(() => {
-      if (this.detached) throw new Error(`${api}: Navigation failed because page was closed or frame was detached`);
+      if (this.detached) throw new Error(`${api}: the navigation never finished because the page was closed or the frame was removed`);
       const failed = this.navigationError(loaderId, api, url);
       if (failed) throw failed;
       if (this.loaderId === loaderId) seen = true;
       if (!seen && this.loaderId !== loaderId) return false;
       return this.hasLifecycle(waitUntil);
-    }, deadline, () => `${api}: Timeout ${deadline.timeout}ms exceeded.\nCall log:\n  - navigating to "${url ?? this.url_}", waiting until "${waitUntil}"`);
+    }, deadline, () => timeoutMessage(api, deadline.timeout, [`navigating to "${url ?? this.url_}", waiting until "${waitUntil}"`]));
   }
 
   /** Engine hook: an error for a navigation that failed after it started (BiDi reports these as events). */
@@ -621,15 +622,15 @@ export class CrFrame {
 
   async waitForLoadState(state: LifecycleEvent = 'load', options: { timeout?: number } = {}): Promise<void> {
     const deadline = new Deadline(options.timeout ?? this._page.defaultNavigationTimeout());
-    await this._page.waitForCondition(() => this.hasLifecycle(state), deadline, () => `page.waitForLoadState: Timeout ${deadline.timeout}ms exceeded.`);
+    await this._page.waitForCondition(() => this.hasLifecycle(state), deadline, () => timeoutMessage('page.waitForLoadState', deadline.timeout, [`waiting for "${state}"`]));
   }
 
   async waitForURL(url: URLMatch, options: { timeout?: number; waitUntil?: LifecycleEvent } = {}): Promise<void> {
     const deadline = new Deadline(options.timeout ?? this._page.defaultNavigationTimeout());
     const base = this._page.context().baseURL();
-    await this._page.waitForCondition(() => urlMatches(base, this.url_, url), deadline, () => `page.waitForURL: Timeout ${deadline.timeout}ms exceeded.\n=========================== logs ===========================\nwaiting for navigation to ${String(url)} until "${options.waitUntil ?? 'load'}"\n  navigated to "${this.url_}"\n============================================================`);
+    await this._page.waitForCondition(() => urlMatches(base, this.url_, url), deadline, () => timeoutMessage('page.waitForURL', deadline.timeout, [`waiting for the URL to match ${String(url)} (then "${options.waitUntil ?? 'load'}")`, `the page is at "${this.url_}"`]));
     const waitUntil = options.waitUntil ?? 'load';
-    await this._page.waitForCondition(() => this.hasLifecycle(waitUntil), deadline, () => `page.waitForURL: Timeout ${deadline.timeout}ms exceeded waiting for "${waitUntil}".`);
+    await this._page.waitForCondition(() => this.hasLifecycle(waitUntil), deadline, () => timeoutMessage('page.waitForURL', deadline.timeout, [`the URL matched; waiting for "${waitUntil}"`]));
   }
 
   /** Wait for the next navigation of this frame (new document or same-document). */

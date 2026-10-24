@@ -14,7 +14,7 @@
  *   from the same scope as the working set), measured with bounding boxes in
  *   the frame's viewport. With `nearest` (the default) only the elements at
  *   the smallest distance are kept, so "the field below Email" means the
- *   closest one; two at the same distance stay two (strict mode reports
+ *   closest one; two at the same distance stay two (the single-match check reports
  *   them).
  */
 import type { TextMatch } from '../contract.js';

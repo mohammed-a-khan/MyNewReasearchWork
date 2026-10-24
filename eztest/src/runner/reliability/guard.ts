@@ -65,7 +65,7 @@ export function causeOfBlock(b: BlockCause): FlakeCause {
   return b === 'overlay' ? 'overlay' : b === 'detached' ? 'detached' : 'timing';
 }
 
-const DETACHED = /not attached to the DOM|element is not attached|detached from the DOM|was detached|Element is not attached|stale element|Node is detached|Execution context was destroyed|frame was detached/i;
+const DETACHED = /no longer in the page|JavaScript context went away|not attached to the DOM|element is not attached|detached from the DOM|was detached|Element is not attached|stale element|Node is detached|Execution context was destroyed|frame was detached/i;
 
 export function isDetachedError(e: unknown): boolean {
   return e instanceof Error && DETACHED.test(e.message);

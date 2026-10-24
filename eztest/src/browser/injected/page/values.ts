@@ -52,9 +52,9 @@ function fire(el: Element, type: string, init: Record<string, unknown> = {}): bo
 }
 
 export function selectOptions(el: Element, specs: SelectOptionSpec[]): EngineOutcome<string[]> {
-  if (lowerTag(el) !== 'select') return { ok: false, reason: 'element is not a <select> element', retry: false };
+  if (lowerTag(el) !== 'select') return { ok: false, reason: 'selectOption() needs a <select>; this element is not one', retry: false };
   const select = el as HTMLSelectElement;
-  if (isDisabled(select)) return { ok: false, reason: 'element is not enabled', retry: true };
+  if (isDisabled(select)) return { ok: false, reason: 'the element is disabled', retry: true };
   const options = Array.from(select.options);
   const chosen: HTMLOptionElement[] = [];
   for (const spec of specs) {
@@ -83,9 +83,9 @@ export function selectOptions(el: Element, specs: SelectOptionSpec[]): EngineOut
  */
 export function setChecked(el: Element, checked: boolean): EngineOutcome<boolean> {
   const state = checkedState(el);
-  if (state === undefined) return { ok: false, reason: 'Not a checkbox or radio button', retry: false };
+  if (state === undefined) return { ok: false, reason: 'The element is not a checkbox or radio button (nor an element with a checked state such as role=checkbox)', retry: false };
   if (state === checked) return { ok: true, value: false };
-  if (isDisabled(el)) return { ok: false, reason: 'element is not enabled', retry: true };
+  if (isDisabled(el)) return { ok: false, reason: 'the element is disabled', retry: true };
   if (!checked && lowerTag(el) === 'input' && (el as HTMLInputElement).type === 'radio') {
     return { ok: false, reason: 'cannot uncheck a radio button', retry: false };
   }
@@ -106,8 +106,8 @@ function nativeValueSetter(el: Element): ((v: string) => void) | undefined {
 export function fill(el: Element, value: string): EngineOutcome {
   const why = notFillableReason(el);
   if (why) return { ok: false, reason: why, retry: false };
-  if (isDisabled(el)) return { ok: false, reason: 'element is not enabled', retry: true };
-  if (isReadonly(el)) return { ok: false, reason: 'element is not editable (readonly)', retry: true };
+  if (isDisabled(el)) return { ok: false, reason: 'the element is disabled', retry: true };
+  if (isReadonly(el)) return { ok: false, reason: 'the element is read-only', retry: true };
   const tag = lowerTag(el);
   (el as HTMLElement).focus();
   if (tag === 'input' || tag === 'textarea') {

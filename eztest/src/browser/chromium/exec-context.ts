@@ -6,13 +6,14 @@ import { ENGINE_GLOBAL } from '../injected/contract.js';
 import { driverHelpersSource } from '../injected/driver-helpers.js';
 import { engineSource } from '../injected/index.js';
 import { isContextGoneError } from '../errors.js';
+import { CONTEXT_GONE_TEXT, DISPOSED_HANDLE_TEXT, FOREIGN_HANDLE_TEXT } from '../messages.js';
 import { KEEP_NAMES_SHIM, deserializeValue, functionSource, pageCodec, serializeArgument } from '../serializer.js';
 import type { CDPSession, ProtocolResult } from '../transport/connection.js';
-import type { CrFrame } from './frame.js';
+import type { ChromiumFrame } from './frame.js';
 import { ElementHandle, JSHandle } from './handles.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export type World = 'main' | 'utility' | 'worker';
+export type World = 'main' | 'engine' | 'worker';
 
 const HELPERS_GLOBAL = '__eztestDriver';
 const CODEC = `(${pageCodec.toString()})()`;
@@ -35,7 +36,7 @@ export class ExecutionContext {
   constructor(
     readonly session: CDPSession,
     readonly id: number,
-    readonly frame: CrFrame | undefined,
+    readonly frame: ChromiumFrame | undefined,
     readonly world: World,
     /** Owning worker, for worker contexts. */
     readonly worker?: unknown,
@@ -123,9 +124,9 @@ export class ExecutionContext {
 
   /** objectId usable in this context for a handle (adopting element handles from other worlds). */
   private async adoptArgument(h: JSHandle): Promise<string> {
-    if (h.disposed) throw new Error('JSHandle is disposed');
+    if (h.disposed) throw new Error(DISPOSED_HANDLE_TEXT);
     if (h.context === this) return h.objectId!;
-    if (!(h instanceof ElementHandle)) throw new Error('JSHandles can be evaluated only in the context they were created!');
+    if (!(h instanceof ElementHandle)) throw new Error(FOREIGN_HANDLE_TEXT);
     const adopted = await this.adoptElement(h);
     return adopted.objectId!;
   }
@@ -156,7 +157,7 @@ export class ExecutionContext {
   }
 
   /** The frame an <iframe>/<frame> element handle shows, or null. */
-  async contentFrameOf(h: ElementHandle): Promise<CrFrame | null> {
+  async contentFrameOf(h: ElementHandle): Promise<ChromiumFrame | null> {
     const { node } = await this.session.send('DOM.describeNode', { objectId: h.objectId });
     const frameId = (node.frameId as string | undefined) ?? (node.contentDocument?.frameId as string | undefined);
     if (!frameId || !/^(iframe|frame)$/i.test(String(node.nodeName))) return null;
@@ -169,7 +170,7 @@ export class ExecutionContext {
     await this.session.send('DOM.setFileInputFiles', { files: paths, objectId: h.objectId });
   }
 
-  /** Make sure the selector engine and driver helpers exist in this (utility) context. */
+  /** Make sure the selector engine and driver helpers exist in this (engine-world) context. */
   ensureEngine(): Promise<void> {
     if (!this.installing) {
       this.installing = (async () => {
@@ -194,8 +195,8 @@ export class ExecutionContext {
    */
   async queryElements(chain: unknown, scope?: ElementHandle): Promise<ElementHandle[]> {
     const arr = (await (scope
-      ? this.callUtility((e, h, el, c) => h.query(e, c, el), [scope, chain], false)
-      : this.callUtility((e, h, c) => h.query(e, c), [chain], false))) as unknown as JSHandle;
+      ? this.callEngine((e, h, el, c) => h.query(e, c, el), [scope, chain], false)
+      : this.callEngine((e, h, c) => h.query(e, c), [chain], false))) as unknown as JSHandle;
     const props = await arr.getProperties();
     void arr.dispose();
     const out: ElementHandle[] = [];
@@ -209,10 +210,10 @@ export class ExecutionContext {
   }
 
   /**
-   * Call `fn(engine, helpers, ...args)` in this utility context. Arguments are
+   * Call `fn(engine, helpers, ...args)` in this engine context. Arguments are
    * JSON values or element handles (passed as the elements themselves).
    */
-  async callUtility<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[], returnByValue = true): Promise<R> {
+  async callEngine<R>(fn: (engine: any, helpers: any, ...args: any[]) => R | Promise<R>, args: unknown[], returnByValue = true): Promise<R> {
     await this.ensureEngine();
     const handles: JSHandle[] = [];
     const encoded = serializeArgument(args, (v) => v instanceof JSHandle, handles as unknown[]);
@@ -244,7 +245,7 @@ export class ExecutionContext {
 
   private rewrite(e: Error): Error {
     if (isContextGoneError(e)) {
-      const err = new Error('Execution context was destroyed, most likely because of a navigation');
+      const err = new Error(CONTEXT_GONE_TEXT);
       err.name = 'Error';
       (err as Error & { contextGone?: boolean }).contextGone = true;
       return err;

@@ -444,7 +444,7 @@ export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Pro
     }),
   ]);
   clearTimeout(timer);
-  if (endpoint === 'timeout') return fail(`browserType.launch: Timeout ${timeout}ms exceeded waiting for the WebDriver BiDi endpoint`);
+  if (endpoint === 'timeout') return fail(`browserType.launch: timed out after ${timeout} ms waiting for the WebDriver BiDi endpoint`);
   if (endpoint.startsWith('exit:')) return fail(`browserType.launch: Firefox exited (code ${endpoint.slice(5)}) before its WebDriver BiDi endpoint was ready`);
   let transport: Transport;
   try {

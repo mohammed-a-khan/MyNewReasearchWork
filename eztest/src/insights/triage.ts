@@ -91,18 +91,18 @@ const ERROR_PATTERNS: Pattern[] = [
   { re: /ECONNREFUSED|ERR_CONNECTION_(?:REFUSED|RESET|CLOSED|TIMED_OUT)|ECONNRESET|socket hang up|EPIPE/i, category: 'environment', confidence: 0.85, rule: 'connection-failure', reason: 'connection to the server failed' },
   { re: /ERR_CERT_|certificate|self[- ]signed/i, category: 'environment', confidence: 0.75, rule: 'tls-failure', reason: 'TLS / certificate problem' },
   { re: /(?:page\.goto|navigation|waitForNavigation|waitForURL)[^\n]*timeout|timeout[^\n]*exceeded[^\n]*navigat|ETIMEDOUT/i, category: 'environment', confidence: 0.7, rule: 'navigation-timeout', reason: 'navigation timed out' },
-  { re: /browser has been closed|Target (?:page, context or browser )?(?:has been )?closed|out of memory|ENOSPC/i, category: 'environment', confidence: 0.7, rule: 'infrastructure', reason: 'browser or host infrastructure failure' },
+  { re: /browser has been closed|Target (?:page, context or browser )?(?:has been )?closed|page, context or browser was closed|browser connection closed|out of memory|ENOSPC/i, category: 'environment', confidence: 0.7, rule: 'infrastructure', reason: 'browser or host infrastructure failure' },
   { re: /UNIQUE constraint|duplicate key|ER_DUP_ENTRY|ORA-00001|violates (?:unique|foreign key|not-null|check) constraint|FOREIGN KEY constraint|NOT NULL constraint/i, category: 'data', confidence: 0.8, rule: 'data-constraint', reason: 'a data constraint was violated' },
   { re: /no (?:matching )?(?:record|row|data)s? (?:found|matched|available)|data need|test data (?:missing|exhausted)|already exists/i, category: 'data', confidence: 0.7, rule: 'data-missing', reason: 'required test data was missing or already used' },
-  { re: /is covered by .*\(an overlay\)|intercepts pointer events/i, category: 'test-issue', confidence: 0.6, rule: 'overlay-blocked', reason: 'an overlay covered the element (dismiss it in the journey, or a dialog is stuck open)' },
-  { re: /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element(?:s)? (?:matches|found)|element (?:is )?not found|strict mode violation|locator\.\w+: Timeout|not attached to the DOM/i, category: 'test-issue', confidence: 0.65, rule: 'locator-not-found', reason: 'the target element could not be located' },
+  { re: /is covered by .*\(an overlay\)|covers the element and would receive/i, category: 'test-issue', confidence: 0.6, rule: 'overlay-blocked', reason: 'an overlay covered the element (dismiss it in the journey, or a dialog is stuck open)' },
+  { re: /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element(?:s)? (?:matches|found)|element (?:is )?not found|matched \d+ elements, but this needs exactly one|locator\.\w+: (?:Timeout|timed out)|no longer in the page|not attached to the DOM/i, category: 'test-issue', confidence: 0.65, rule: 'locator-not-found', reason: 'the target element could not be located' },
   { re: /Unknown variable|ZodError|Invalid journey|is not a function|Cannot read propert(?:y|ies) of undefined/i, category: 'test-issue', confidence: 0.7, rule: 'test-code-error', reason: 'error in the test definition or test code' },
   { re: /expect\(|assert(?:ion)?(?:Error)? |expected .* (?:to|but)|toEqual|toBe|mismatch/i, category: 'product-bug', confidence: 0.55, rule: 'assertion-failed', reason: 'an assertion on application behaviour failed' },
   // A post-condition comparing a captured value: "ledgerEquals: premium.tax is "189", expected "160.65"".
   { re: /post-condition failed: \w+: [^\n]* is "[^"]*", expected "[^"]*"/i, category: 'product-bug', confidence: 0.55, rule: 'value-mismatch', reason: 'a value the application produced differs from the expected value' },
 ];
 
-const LOCATOR_FAILURE = /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element|not found|strict mode violation|locator\.\w+: Timeout/i;
+const LOCATOR_FAILURE = /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element|not found|matched \d+ elements, but this needs exactly one|locator\.\w+: (?:Timeout|timed out)/i;
 
 const isStepFailure = (s: StepResult) => (s.status === 'failed' || s.status === 'blocked') && !s.soft;
 

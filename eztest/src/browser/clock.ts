@@ -22,7 +22,7 @@
  * frames of all pages follow every change. The script is EZTest's own code
  * with the state passed as JSON numbers; nothing from a journey is evaluated.
  */
-import type { CrBrowserContext } from './chromium/browser.js';
+import type { ChromiumContext } from './chromium/browser.js';
 
 /** Clock state replayed into new documents. */
 interface ClockState {
@@ -254,7 +254,7 @@ export class BrowserClock {
   /** Changes applied so far, for evidence and traces (`{ at, op, time? }`). */
   readonly history: Array<{ at: string; op: string; fakeTime: string }> = [];
 
-  constructor(private readonly context: CrBrowserContext) {}
+  constructor(private readonly context: ChromiumContext) {}
 
   /** True once the fake clock is installed. */
   get installed(): boolean {
@@ -389,14 +389,14 @@ export class BrowserClock {
 const CLOCKS = new WeakMap<object, BrowserClock>();
 
 /** The clock of a browser context (one per context, created on first use; nothing is installed until a call). */
-export function contextClock(context: CrBrowserContext): BrowserClock {
+export function contextClock(context: ChromiumContext): BrowserClock {
   let c = CLOCKS.get(context);
   if (!c) CLOCKS.set(context, (c = new BrowserClock(context)));
   return c;
 }
 
 /** The context's clock when it was installed, else undefined. */
-export function installedClock(context: CrBrowserContext): BrowserClock | undefined {
+export function installedClock(context: ChromiumContext): BrowserClock | undefined {
   const c = CLOCKS.get(context);
   return c?.installed ? c : undefined;
 }

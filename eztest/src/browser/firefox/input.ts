@@ -93,7 +93,7 @@ export interface InputTarget {
 const MOD_BITS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
 const STUB = cdpUnavailable('Input') as never;
 
-export class FfKeyboard extends Keyboard {
+export class FirefoxKeyboard extends Keyboard {
   constructor(private readonly target: InputTarget, slowMo: () => number) {
     super(() => STUB, slowMo);
   }
@@ -139,7 +139,7 @@ export class FfKeyboard extends Keyboard {
 
 const BUTTONS: Record<MouseButton, number> = { left: 0, middle: 1, right: 2 };
 
-export class FfMouse extends Mouse {
+export class FirefoxMouse extends Mouse {
   constructor(private readonly target: InputTarget, keyboard: Keyboard, slowMo: () => number) {
     super(() => STUB, keyboard, slowMo);
   }
@@ -205,13 +205,13 @@ export class FfMouse extends Mouse {
   }
 }
 
-export class FfTouchscreen extends Touchscreen {
+export class FirefoxTouchscreen extends Touchscreen {
   constructor(private readonly target: InputTarget, keyboard: Keyboard, hasTouch: () => boolean) {
     super(() => STUB, keyboard, hasTouch);
   }
 
   override async tap(x: number, y: number): Promise<void> {
-    if (!this.hasTouch()) throw new Error('hasTouch must be enabled on the browser context before using the touchscreen.');
+    if (!this.hasTouch()) throw new Error('touchscreen.tap: this context has no touch support; create it with newContext({ hasTouch: true })');
     this.touchesSent++;
     await this.target.performActions([{
       type: 'pointer', id: 'ez-touch', parameters: { pointerType: 'touch' },

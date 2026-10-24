@@ -104,7 +104,7 @@ const ENV_TEXT: Array<[RegExp, string]> = [
   [/ECONNREFUSED|ERR_CONNECTION_REFUSED/i, 'connection refused'],
   [/ERR_CONNECTION_(?:RESET|CLOSED|TIMED_OUT)|ECONNRESET|socket hang up|EPIPE|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED/i, 'connection dropped'],
   [/ERR_CERT_|SSL_ERROR|ERR_SSL/i, 'TLS problem'],
-  [/(?:page\.goto|page\.reload|navigation)[^\n]*Timeout|Timeout[^\n]*exceeded[^\n]*navigat|ETIMEDOUT/i, 'navigation timed out'],
+  [/(?:page\.goto|page\.reload|navigation)[^\n]*Timeout|Timeout[^\n]*exceeded[^\n]*navigat|(?:page\.goto|page\.reload|page\.waitForURL)[^\n]*timed out|ETIMEDOUT/i, 'navigation timed out'],
   [/environment unavailable/i, 'environment unavailable'],
 ];
 

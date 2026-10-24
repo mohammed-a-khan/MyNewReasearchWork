@@ -22,16 +22,17 @@ import { dirname, join } from 'node:path';
 import { debugLog } from '../debug.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError } from '../errors.js';
+import { DOWNLOADS_OFF_TEXT, bindingTakenMessage, closedMessage } from '../messages.js';
 import type { BrowserContextOptions, Cookie, Geolocation, HTTPCredentials, LaunchOptions, SetCookie, URLMatch } from '../types.js';
 import { deferred, sleep, withTimeout, type Deferred } from '../util.js';
-import { CrBrowserContext, Download, browserVp8Encoder, type CrBrowser } from '../chromium/browser.js';
+import { ChromiumContext, Download, browserVp8Encoder, type ChromiumBrowser } from '../chromium/browser.js';
 import { initScriptSource, type BindingEntry } from '../chromium/page.js';
 import type { RouteHandlerFn } from '../chromium/network.js';
 import type { Vp8Encoder } from '../video/webm.js';
 import { BidiConnection, isGoneBidiError } from './connection.js';
 import { WebSocketTransport } from '../transport/transport.js';
 import { launchFirefoxProcess, findFirefox, type LaunchedFirefox, type FirefoxLaunchOptions } from './launch.js';
-import { FfPage, bindingPreload, initScriptPreload, webSocketObserverPreload } from './page.js';
+import { FirefoxPage, bindingPreload, initScriptPreload, webSocketObserverPreload } from './page.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -63,12 +64,12 @@ const EVENTS = [
 
 // ---------------------------------------------------------------------- downloads
 
-export class FfDownload extends Download {
+export class FirefoxDownload extends Download {
   private filePath?: string;
   private readonly finishedState: Deferred<'completed' | 'canceled'> = deferred();
 
-  constructor(page: FfPage, url: string, suggested: string, browser: FfBrowser, private readonly acceptedDownloads: boolean) {
-    super(page, url, suggested, '', browser as unknown as CrBrowser, randomUUID(), acceptedDownloads);
+  constructor(page: FirefoxPage, url: string, suggested: string, browser: FirefoxBrowser, private readonly acceptedDownloads: boolean) {
+    super(page, url, suggested, '', browser as unknown as ChromiumBrowser, randomUUID(), acceptedDownloads);
   }
 
   /** Internal: downloadEnd. */
@@ -80,27 +81,27 @@ export class FfDownload extends Download {
   }
 
   override async path(): Promise<string | null> {
-    if (!this.acceptedDownloads) throw new Error('Pass { acceptDownloads: true } when you are creating your browser context.');
+    if (!this.acceptedDownloads) throw new Error(DOWNLOADS_OFF_TEXT);
     const s = await this.finishedState.promise;
     return s === 'completed' ? (this.filePath ?? null) : null;
   }
 
   override async failure(): Promise<string | null> {
-    if (!this.acceptedDownloads) return 'Pass { acceptDownloads: true } when you are creating your browser context.';
+    if (!this.acceptedDownloads) return DOWNLOADS_OFF_TEXT;
     const s = await this.finishedState.promise;
     return s === 'completed' ? null : 'canceled';
   }
 
   override async saveAs(path: string): Promise<void> {
     const p = await this.path();
-    if (!p) throw new Error('Download was canceled');
+    if (!p) throw new Error('download.saveAs: the download did not complete (it was canceled or failed), so there is no file to save');
     await mkdir(dirname(path), { recursive: true });
     await copyFile(p, path);
   }
 
   override async createReadStream(): Promise<ReadStream> {
     const p = await this.path();
-    if (!p) throw new Error('Download failed');
+    if (!p) throw new Error('download.createReadStream: the download did not complete, so there is no file to read');
     return createReadStream(p);
   }
 
@@ -137,7 +138,7 @@ function toCookie(c: any): Cookie {
   };
 }
 
-export class FfBrowserContext extends CrBrowserContext {
+export class FirefoxContext extends ChromiumContext {
   private collector?: string;
   private collectsRequests = false;
   private latencyMs = 0;
@@ -147,19 +148,19 @@ export class FfBrowserContext extends CrBrowserContext {
   private readonly preloadScripts: string[] = [];
 
   constructor(
-    private readonly ffBrowser_: FfBrowser,
+    private readonly ffBrowser_: FirefoxBrowser,
     /** BiDi user context id ('default' for the browser's default context). */
     readonly userContext: string,
     options: BrowserContextOptions,
   ) {
-    super(ffBrowser_ as unknown as CrBrowser, userContext === 'default' ? undefined : userContext, options);
+    super(ffBrowser_ as unknown as ChromiumBrowser, userContext === 'default' ? undefined : userContext, options);
   }
 
   private get bidi(): BidiConnection {
     return this.ffBrowser_.bidi;
   }
 
-  ffBrowser(): FfBrowser {
+  ffBrowser(): FirefoxBrowser {
     return this.ffBrowser_;
   }
 
@@ -246,7 +247,7 @@ export class FfBrowserContext extends CrBrowserContext {
     const steps: Array<Promise<unknown>> = [];
     if (o.locale) steps.push(optional('emulation.setLocaleOverride', { locale: o.locale }));
     if (o.timezoneId) steps.push(this.bidi.send('emulation.setTimezoneOverride', { timezone: o.timezoneId, ...this.scope() }).catch((e) => {
-      if (/invalid argument/i.test((e as Error).message)) throw new Error(`Invalid timezone ID: ${o.timezoneId}`);
+      if (/invalid argument/i.test((e as Error).message)) throw new Error(`newContext: "${o.timezoneId}" is not a time zone this Firefox knows (use an IANA name such as Europe/London)`);
     }));
     if (o.userAgent) steps.push(optional('emulation.setUserAgentOverride', { userAgent: o.userAgent }));
     if (this.geo) steps.push(this.applyGeolocation());
@@ -275,7 +276,7 @@ export class FfBrowserContext extends CrBrowserContext {
   private headersApplied = false;
 
   /** Internal: privileged per-page emulation (media features, touch, JavaScript). */
-  async applyPageOverrides(page: FfPage): Promise<void> {
+  async applyPageOverrides(page: FirefoxPage): Promise<void> {
     const o = this.options;
     const m = page.mediaOverrides();
     const pick = <T>(k: keyof typeof m, ctxValue: T | null | undefined): T | null | undefined => (k in m ? (m[k] as T | null | undefined) : ctxValue);
@@ -317,17 +318,17 @@ export class FfBrowserContext extends CrBrowserContext {
   }
 
   // ------------------------------------------------------------------ pages
-  override async newPage(): Promise<FfPage> {
-    if (this.closed) throw new TargetClosedError('browserContext.newPage: Target page, context or browser has been closed');
-    if (this.ownerPage) throw new Error('Please use browser.newContext() for multi-page scripts');
+  override async newPage(): Promise<FirefoxPage> {
+    if (this.closed) throw new TargetClosedError(closedMessage('browserContext.newPage'));
+    if (this.ownerPage) throw new Error('This context belongs to browser.newPage() and holds one page; create a context with browser.newContext() to open more pages');
     const { context } = await this.bidi.send('browsingContext.create', { type: 'window', userContext: this.userContext });
-    return (await this.waitForPage(context)) as FfPage;
+    return (await this.waitForPage(context)) as FirefoxPage;
   }
 
   /** Internal: a top-level browsing context of this user context appeared. */
   async onTopLevelCreated(e: any): Promise<void> {
     const opener = e.originalOpener ? this.ffBrowser_.pageByContext(e.originalOpener) : undefined;
-    const page = new FfPage(this, this.bidi, e.context, opener, e.url);
+    const page = new FirefoxPage(this, this.bidi, e.context, opener, e.url);
     this.pages_.add(page);
     this.ffBrowser_.registerPage(page);
     try {
@@ -369,7 +370,7 @@ export class FfBrowserContext extends CrBrowserContext {
 
   override async addCookies(cookies: SetCookie[]): Promise<void> {
     for (const c of cookies) {
-      if (!c.url && !(c.domain && c.path)) throw new Error(`Cookie should have a url or a domain/path pair`);
+      if (!c.url && !(c.domain && c.path)) throw new Error(`addCookies: cookie "${c.name}" needs either a url or both a domain and a path`);
       const cookie: Record<string, unknown> = { name: c.name, value: { type: 'string', value: c.value } };
       if (c.url) {
         const u = new URL(c.url);
@@ -403,7 +404,7 @@ export class FfBrowserContext extends CrBrowserContext {
 
   // ------------------------------------------------------------------ permissions and emulation
   override async grantPermissions(permissions: string[], options: { origin?: string } = {}): Promise<void> {
-    for (const p of permissions) if (!PERMISSION_NAMES.has(p)) throw new Error(`Unknown permission: ${p}`);
+    for (const p of permissions) if (!PERMISSION_NAMES.has(p)) throw new Error(`grantPermissions: "${p}" is not a permission EZTest knows (known: ${[...PERMISSION_NAMES].join(', ')})`);
     this.grants.push({ permissions: [...permissions], ...(options.origin ? { origin: new URL(options.origin).origin } : {}) });
     const origins = new Set<string>();
     if (options.origin) origins.add(new URL(options.origin).origin);
@@ -450,7 +451,7 @@ export class FfBrowserContext extends CrBrowserContext {
   override async setGeolocation(geolocation: Geolocation | null): Promise<void> {
     if (geolocation) {
       const { latitude, longitude } = geolocation;
-      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) throw new Error(`Invalid geolocation ${JSON.stringify(geolocation)}`);
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) throw new Error(`setGeolocation: latitude must be -90..90 and longitude -180..180 (got ${JSON.stringify(geolocation)})`);
     }
     this.geo = geolocation ?? undefined;
     await this.applyGeolocation();
@@ -502,8 +503,8 @@ export class FfBrowserContext extends CrBrowserContext {
   }
 
   override async exposeBinding(name: string, callback: BindingEntry['callback'], _options: { handle?: boolean } = {}): Promise<void> {
-    if (this.bindings.has(name)) throw new Error(`Function "${name}" has been already registered`);
-    for (const p of this.pages()) if (p.bindings.has(name)) throw new Error(`Function "${name}" has been already registered in one of the pages`);
+    if (this.bindings.has(name)) throw new Error(bindingTakenMessage(name));
+    for (const p of this.pages()) if (p.bindings.has(name)) throw new Error(bindingTakenMessage(name, ' on one of the pages'));
     const entry: BindingEntry = { name, callback, source: '' };
     this.bindings.set(name, entry);
     const channel = `ez-binding-${randomUUID()}`;
@@ -512,7 +513,7 @@ export class FfBrowserContext extends CrBrowserContext {
     const arg = { type: 'channel', value: { channel, ownership: 'none' } };
     const { script } = await this.bidi.send('script.addPreloadScript', { functionDeclaration: fn, arguments: [arg], ...this.scope() });
     this.preloadScripts.push(script);
-    for (const p of this.pages()) await (p as FfPage).runInAllFrames(fn, [arg]);
+    for (const p of this.pages()) await (p as FirefoxPage).runInAllFrames(fn, [arg]);
   }
 
   /** Internal: binding name of a context-level channel. */
@@ -539,15 +540,15 @@ export class FfBrowserContext extends CrBrowserContext {
     throw new Error('browserContext.newCDPSession: CDP sessions are not available in Firefox (WebDriver BiDi)');
   }
 
-  override pages(): FfPage[] {
-    return super.pages() as FfPage[];
+  override pages(): FirefoxPage[] {
+    return super.pages() as FirefoxPage[];
   }
 
   // ------------------------------------------------------------------ close
   override async close(_options: { reason?: string } = {}): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    const pages = [...this.pages_] as FfPage[];
+    const pages = [...this.pages_] as FirefoxPage[];
     const videos = pages.map((p) => p.video()).filter((v): v is NonNullable<typeof v> => !!v);
     // What this context registered in the browser goes first, while the user context still exists:
     // a data collector (it holds every response body it collected) or preload script left behind by
@@ -589,15 +590,15 @@ export function acceptLanguage(locale: string): string {
 
 // ---------------------------------------------------------------------- browser
 
-export interface FfBrowserEvents {
-  disconnected: FfBrowser;
+export interface FirefoxBrowserEvents {
+  disconnected: FirefoxBrowser;
 }
 
-export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
-  readonly contexts_ = new Map<string, FfBrowserContext>();
-  private defaultContext_?: FfBrowserContext;
-  private readonly pagesByContext = new Map<string, FfPage>();
-  private readonly downloads = new Map<string, FfDownload>();
+export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
+  readonly contexts_ = new Map<string, FirefoxContext>();
+  private defaultContext_?: FirefoxContext;
+  private readonly pagesByContext = new Map<string, FirefoxPage>();
+  private readonly downloads = new Map<string, FirefoxDownload>();
   private version_ = '';
   private userAgent_ = '';
   readonly downloadsDir: string;
@@ -629,8 +630,8 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
     return 'disconnected';
   }
 
-  static async create(bidi: BidiConnection, proc: LaunchedFirefox | undefined, slowMo: number, type: FirefoxBrowserType, options: { downloadsPath?: string; persistent?: boolean } = {}): Promise<FfBrowser> {
-    const b = new FfBrowser(bidi, proc, slowMo, type, options.downloadsPath);
+  static async create(bidi: BidiConnection, proc: LaunchedFirefox | undefined, slowMo: number, type: FirefoxBrowserType, options: { downloadsPath?: string; persistent?: boolean } = {}): Promise<FirefoxBrowser> {
+    const b = new FirefoxBrowser(bidi, proc, slowMo, type, options.downloadsPath);
     b.usesDefaultContext = !!options.persistent;
     const s = await bidi.send('session.new', { capabilities: { alwaysMatch: { acceptInsecureCerts: false, unhandledPromptBehavior: { default: 'ignore', file: 'dismiss' } } } });
     b.version_ = String(s.capabilities?.browserVersion ?? '');
@@ -710,7 +711,7 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
         page(e)?.onRealmCreated(e);
         return;
       }
-      const owner = (e.owners ?? []).map((r: string) => [...new Set(this.pagesByContext.values())].find((p) => p.hasRealm(r))).find(Boolean) as FfPage | undefined;
+      const owner = (e.owners ?? []).map((r: string) => [...new Set(this.pagesByContext.values())].find((p) => p.hasRealm(r))).find(Boolean) as FirefoxPage | undefined;
       owner?.onRealmCreated(e);
     });
     on('script.realmDestroyed', (e) => {
@@ -765,7 +766,7 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
   }
 
   /** The page a browsing context (top-level or frame) belongs to. */
-  pageOwning(contextId: string | undefined): FfPage | undefined {
+  pageOwning(contextId: string | undefined): FirefoxPage | undefined {
     if (!contextId) return undefined;
     const p = this.pagesByContext.get(contextId);
     if (p) return p;
@@ -773,11 +774,11 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
     return undefined;
   }
 
-  pageByContext(contextId: string): FfPage | undefined {
+  pageByContext(contextId: string): FirefoxPage | undefined {
     return this.pagesByContext.get(contextId);
   }
 
-  registerPage(page: FfPage): void {
+  registerPage(page: FirefoxPage): void {
     this.pagesByContext.set(page.contextId, page);
     page.once('close', () => {
       for (const [k, v] of this.pagesByContext) if (v === page) this.pagesByContext.delete(k);
@@ -789,7 +790,7 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
     if (!page) return;
     page.onDownloadWillBegin(e);
     const accepted = page.context().options.acceptDownloads !== false;
-    const d = new FfDownload(page, String(e.url), String(e.suggestedFilename ?? ''), this, accepted);
+    const d = new FirefoxDownload(page, String(e.url), String(e.suggestedFilename ?? ''), this, accepted);
     if (e.navigation) this.downloads.set(e.navigation, d);
     page.onDownload(d, e.context);
   }
@@ -869,41 +870,41 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
     return this.userAgent_;
   }
 
-  private allContexts(): FfBrowserContext[] {
+  private allContexts(): FirefoxContext[] {
     return [...this.contexts_.values(), ...(this.defaultContext_ ? [this.defaultContext_] : [])];
   }
 
-  defaultContext(): FfBrowserContext {
-    if (!this.defaultContext_) this.defaultContext_ = new FfBrowserContext(this, 'default', { viewport: null });
+  defaultContext(): FirefoxContext {
+    if (!this.defaultContext_) this.defaultContext_ = new FirefoxContext(this, 'default', { viewport: null });
     return this.defaultContext_;
   }
 
-  contextClosed(ctx: FfBrowserContext): void {
+  contextClosed(ctx: FirefoxContext): void {
     if (ctx.userContext !== 'default') this.contexts_.delete(ctx.userContext);
     void this.updateIntercepts();
   }
 
-  async newContext(options: BrowserContextOptions = {}): Promise<FfBrowserContext> {
-    if (!this.connected) throw new TargetClosedError('browser.newContext: Target page, context or browser has been closed');
+  async newContext(options: BrowserContextOptions = {}): Promise<FirefoxContext> {
+    if (!this.connected) throw new TargetClosedError(closedMessage('browser.newContext'));
     const params: Record<string, unknown> = {};
     if (options.ignoreHTTPSErrors) params.acceptInsecureCerts = true;
     if (options.proxy) params.proxy = bidiProxy(options.proxy);
     const { userContext } = await this.bidi.send('browser.createUserContext', params);
-    const ctx = new FfBrowserContext(this, userContext, options);
+    const ctx = new FirefoxContext(this, userContext, options);
     this.contexts_.set(userContext, ctx);
     if (options.bypassCSP || ctx.needsInterception()) await this.updateIntercepts();
     await ctx.initialize();
     return ctx;
   }
 
-  async newPage(options: BrowserContextOptions = {}): Promise<FfPage> {
+  async newPage(options: BrowserContextOptions = {}): Promise<FirefoxPage> {
     const ctx = await this.newContext(options);
     const page = await ctx.newPage();
     ctx.ownerPage = page;
     return page;
   }
 
-  contexts(): FfBrowserContext[] {
+  contexts(): FirefoxContext[] {
     return [...(this.defaultContext_ && this.defaultContext_.pages().length ? [this.defaultContext_] : []), ...this.contexts_.values()];
   }
 
@@ -960,8 +961,8 @@ export class FfBrowser extends TypedEmitter<FfBrowserEvents> {
     return this.proc?.process;
   }
 
-  /** Internal: CrBrowserContext compatibility (no CDP targets in Firefox). */
-  pageByTargetId(id: string): FfPage | undefined {
+  /** Internal: ChromiumContext compatibility (no CDP targets in Firefox). */
+  pageByTargetId(id: string): FirefoxPage | undefined {
     return this.pagesByContext.get(id);
   }
 }
@@ -1013,14 +1014,14 @@ export class FirefoxBrowserType {
     };
   }
 
-  async launch(options: LaunchOptions & FirefoxLaunchExtras = {}): Promise<FfBrowser> {
+  async launch(options: LaunchOptions & FirefoxLaunchExtras = {}): Promise<FirefoxBrowser> {
     const proc = await launchFirefoxProcess(this.processOptions(options));
     const bidi = new BidiConnection(proc.transport);
     try {
       return await withTimeout(
-        FfBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath }),
+        FirefoxBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath }),
         options.timeout ?? 180_000,
-        () => `browserType.launch: Timeout ${options.timeout ?? 180_000}ms exceeded.\n${proc.stderrTail.slice(-15).join('\n')}`,
+        () => `browserType.launch: timed out after ${options.timeout ?? 180_000} ms waiting for Firefox to start\n${proc.stderrTail.slice(-15).join('\n')}`,
       );
     } catch (e) {
       await proc.kill().catch(() => undefined);
@@ -1031,12 +1032,12 @@ export class FirefoxBrowserType {
   }
 
   /** Launch with a persistent profile directory and return its default context. */
-  async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions & FirefoxLaunchExtras = {}): Promise<FfBrowserContext> {
+  async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions & FirefoxLaunchExtras = {}): Promise<FirefoxContext> {
     const dir = userDataDir || mkdtempSync(join(tmpdir(), 'eztest-firefox-profile-'));
     await mkdir(dir, { recursive: true });
     const proc = await launchFirefoxProcess(this.processOptions(options, dir));
     const bidi = new BidiConnection(proc.transport);
-    const b = await FfBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath, persistent: true });
+    const b = await FirefoxBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath, persistent: true });
     const ctx = b.defaultContext();
     Object.assign(ctx.options, options);
     await ctx.initialize();
@@ -1053,7 +1054,7 @@ export class FirefoxBrowserType {
    * Closing the returned browser removes only the user contexts created through it and ends the
    * session; Firefox keeps running.
    */
-  async connectOverBiDi(endpoint: string, options: { headers?: Record<string, string>; timeout?: number; slowMo?: number; downloadsPath?: string } = {}): Promise<FfBrowser> {
+  async connectOverBiDi(endpoint: string, options: { headers?: Record<string, string>; timeout?: number; slowMo?: number; downloadsPath?: string } = {}): Promise<FirefoxBrowser> {
     const timeout = options.timeout ?? 30_000;
     const u = new URL(endpoint);
     if (u.protocol === 'http:' || u.protocol === 'https:') u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1062,9 +1063,9 @@ export class FirefoxBrowserType {
     const bidi = new BidiConnection(transport);
     try {
       return await withTimeout(
-        FfBrowser.create(bidi, undefined, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath }),
+        FirefoxBrowser.create(bidi, undefined, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath }),
         timeout,
-        () => `firefox.connectOverBiDi: Timeout ${timeout}ms exceeded starting a WebDriver BiDi session`,
+        () => `firefox.connectOverBiDi: timed out after ${timeout} ms starting a WebDriver BiDi session`,
       );
     } catch (e) {
       bidi.close();
@@ -1075,7 +1076,7 @@ export class FirefoxBrowserType {
   }
 
   /** Same as connectOverBiDi (Firefox's own protocol; there is no other wire protocol to connect with). */
-  async connect(endpoint: string | { wsEndpoint: string }, options: { headers?: Record<string, string>; timeout?: number; slowMo?: number } = {}): Promise<FfBrowser> {
+  async connect(endpoint: string | { wsEndpoint: string }, options: { headers?: Record<string, string>; timeout?: number; slowMo?: number } = {}): Promise<FirefoxBrowser> {
     return this.connectOverBiDi(typeof endpoint === 'string' ? endpoint : endpoint.wsEndpoint, options);
   }
 

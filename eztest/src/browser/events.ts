@@ -4,6 +4,7 @@
  */
 import { EventEmitter } from 'node:events';
 import { TargetClosedError, TimeoutError } from './errors.js';
+import { closedMessage, timeoutMessage } from './messages.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Listener = (...args: any[]) => unknown;
@@ -146,14 +147,14 @@ export class TypedEmitter<E extends { [K in keyof E]: unknown }> {
       };
       const onClose = () => {
         cleanup();
-        reject(new TargetClosedError(`waitForEvent('${event}'): Target page, context or browser has been closed`));
+        reject(new TargetClosedError(closedMessage(`waitForEvent('${event}')`)));
       };
       this.em.on(event, onEvent);
       if (closeName && closeName !== event) this.em.on(closeName, onClose);
       if (timeout > 0) {
         timer = setTimeout(() => {
           cleanup();
-          reject(new TimeoutError(`waitForEvent('${event}'): Timeout ${timeout}ms exceeded while waiting for event "${event}"`));
+          reject(new TimeoutError(timeoutMessage(`waitForEvent('${event}')`, timeout, [`waiting for a "${event}" event`])));
         }, timeout);
       }
     });

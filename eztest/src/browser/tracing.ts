@@ -9,9 +9,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { SelectorChain } from './injected/contract.js';
-import type { CrBrowserContext } from './chromium/browser.js';
-import type { CrFrame } from './chromium/frame.js';
-import type { CrPage } from './chromium/page.js';
+import type { ChromiumContext } from './chromium/browser.js';
+import type { ChromiumFrame } from './chromium/frame.js';
+import type { ChromiumPage } from './chromium/page.js';
 import type { Request, Response } from './chromium/network.js';
 import {
   BROWSER_TRACE_FORMAT, BROWSER_TRACE_MANIFEST, BROWSER_TRACE_VERSION,
@@ -87,11 +87,11 @@ export class Tracing {
   private options: TracingStartOptions = {};
   private callSeq = 0;
   private stopScreencasts: Array<() => Promise<void>> = [];
-  private readonly pageIds = new WeakMap<CrPage, string>();
+  private readonly pageIds = new WeakMap<ChromiumPage, string>();
   private pageSeq = 0;
-  private onPage?: (p: CrPage) => void;
+  private onPage?: (p: ChromiumPage) => void;
 
-  constructor(private readonly context: CrBrowserContext) {}
+  constructor(private readonly context: ChromiumContext) {}
 
   isRecording(): boolean {
     return this.recording;
@@ -101,7 +101,7 @@ export class Tracing {
     return Math.round((performance.now() - this.t0) * 10) / 10;
   }
 
-  private pageId(p: CrPage): string {
+  private pageId(p: ChromiumPage): string {
     let id = this.pageIds.get(p);
     if (!id) this.pageIds.set(p, (id = `page-${++this.pageSeq}`));
     return id;
@@ -122,7 +122,7 @@ export class Tracing {
   }
 
   async start(options: TracingStartOptions = {}): Promise<void> {
-    if (this.recording) throw new Error('Tracing has been already started');
+    if (this.recording) throw new Error('tracing.start: a trace is already being recorded; call tracing.stop() first');
     this.recording = true;
     this.options = options;
     this.t0 = performance.now();
@@ -140,7 +140,7 @@ export class Tracing {
     }
   }
 
-  private async screencast(page: CrPage): Promise<void> {
+  private async screencast(page: ChromiumPage): Promise<void> {
     try {
       const stop = await page.startScreencast({ format: 'jpeg', quality: 60, maxWidth: 800, maxHeight: 800 }, (f) => {
         if (!this.recording) return;
@@ -204,14 +204,14 @@ export class Tracing {
   }
 
   /** Capture a snapshot of the main frame of `page`; returns its file name. */
-  private async snapshot(page: CrPage, id: string, phase: 'before' | 'after', chain?: SelectorChain): Promise<string | undefined> {
+  private async snapshot(page: ChromiumPage, id: string, phase: 'before' | 'after', chain?: SelectorChain): Promise<string | undefined> {
     if (!this.options.snapshots || page.isClosed()) return undefined;
     try {
       const frame = page.mainFrame();
-      const ctx = await frame.context('utility', 5000);
+      const ctx = await frame.context('engine', 5000);
       let target: unknown = null;
       if (chain) {
-        const h = (await ctx.callUtility((e, h, c) => h.query(e, c)[0] ?? null, [chain], false)) as unknown as { asElement(): unknown };
+        const h = (await ctx.callEngine((e, h, c) => h.query(e, c)[0] ?? null, [chain], false)) as unknown as { asElement(): unknown };
         target = h.asElement() ?? null;
       }
       const snap = (await ctx.evaluate(`(${snapshotDom.toString()})`, [!!chain, target], true)) as any;
@@ -228,7 +228,7 @@ export class Tracing {
   }
 
   /** Record one API call around `fn`. */
-  async action<T>(page: CrPage, cls: string, method: string, params: Record<string, unknown>, fn: () => Promise<T>, chain?: SelectorChain): Promise<T> {
+  async action<T>(page: ChromiumPage, cls: string, method: string, params: Record<string, unknown>, fn: () => Promise<T>, chain?: SelectorChain): Promise<T> {
     if (!this.recording) return fn();
     const id = `a${++this.callSeq}`;
     const before = await this.snapshot(page, id, 'before', chain);
@@ -246,7 +246,7 @@ export class Tracing {
     }
   }
 
-  onNavigation(_page: CrPage, _frame: CrFrame): void {
+  onNavigation(_page: ChromiumPage, _frame: ChromiumFrame): void {
     /* navigations show in snapshots and network */
   }
 

@@ -20,7 +20,7 @@ export type DateFormat = 'M/d/yyyy' | 'd/M/yyyy' | 'yyyy-MM-dd';
 const POLL = 100;
 
 /** Poll `fn` until it returns a value (not undefined) or the deadline passes. */
-const NAVIGATION_RACE = /Execution context was destroyed|Cannot find context with specified id|frame (?:was|got) detached/i;
+const NAVIGATION_RACE = /JavaScript context went away|frame was removed from the page|Execution context was destroyed|Cannot find context with specified id|frame (?:was|got) detached/i;
 
 export function isNavigationRace(e: unknown): boolean {
   return e instanceof Error && NAVIGATION_RACE.test(e.message);

@@ -59,7 +59,7 @@ export class CDPSession extends EventEmitter {
   send<T extends ProtocolResult = ProtocolResult>(method: string, params?: ProtocolParams): Promise<T>;
   send(method: string, params: ProtocolParams = {}): Promise<ProtocolResult> {
     if (this.closedReason !== undefined) {
-      return Promise.reject(new TargetClosedError(`Protocol error (${method}): Target closed (${this.closedReason})`));
+      return Promise.reject(new TargetClosedError(`${method}: the browser target closed (${this.closedReason})`));
     }
     return this.connection.rawSend(method, params, this.sessionId);
   }
@@ -120,7 +120,7 @@ export class CDPConnection extends EventEmitter {
 
   rawSend(method: string, params: ProtocolParams, sessionId?: string): Promise<ProtocolResult> {
     if (this.closedReason !== undefined) {
-      return Promise.reject(new TargetClosedError(`Protocol error (${method}): Browser has been closed (${this.closedReason})`));
+      return Promise.reject(new TargetClosedError(`${method}: the browser connection closed (${this.closedReason})`));
     }
     const id = ++this.lastId;
     const msg: Record<string, unknown> = { id, method, params };
@@ -173,7 +173,7 @@ export class CDPConnection extends EventEmitter {
     for (const [id, p] of this.pending) {
       if (p.sessionId !== sessionId) continue;
       this.pending.delete(id);
-      p.reject(new TargetClosedError(`Protocol error (${p.method}): Target closed (${reason})`));
+      p.reject(new TargetClosedError(`${p.method}: the browser target closed (${reason})`));
     }
   }
 
@@ -182,7 +182,7 @@ export class CDPConnection extends EventEmitter {
     this.closedReason = reason;
     for (const [id, p] of this.pending) {
       this.pending.delete(id);
-      p.reject(new TargetClosedError(`Protocol error (${p.method}): Browser has been closed`));
+      p.reject(new TargetClosedError(`${p.method}: the browser connection closed`));
     }
     for (const s of [...this.sessions.values()]) s.markClosed(reason);
     this.root.markClosed(reason);

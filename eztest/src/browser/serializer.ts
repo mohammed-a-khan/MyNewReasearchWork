@@ -137,7 +137,7 @@ export function serializeArgument(value: unknown, isHandle: (v: unknown) => bool
     }
     if (t === 'string' || t === 'boolean') return v;
     if (t === 'bigint') return { __ez$: 'b', v: String(v) };
-    if (t === 'function') throw new Error('Functions cannot be passed to evaluate() as arguments');
+    if (t === 'function') throw new Error('evaluate(): a function cannot be an argument (pass data; put the function in the page code instead)');
     if (t === 'symbol') return { __ez$: 'u' };
     const o = v as object;
     if (o instanceof Date) return { __ez$: 'd', v: Number.isNaN(o.getTime()) ? null : o.toISOString() };
