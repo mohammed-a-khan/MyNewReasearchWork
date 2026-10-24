@@ -270,10 +270,12 @@ export function advancedStepToText(s: Step): string {
     case 'compareData': {
       if (a.expectedQuery || a.ignore || a.caseInsensitiveColumns) {
         if (a.columns || a.map || a.failOnExtra === false || s.captureAs) cannot(s, 'compare options are YAML/JSON only');
-        const eq = a.expectedQuery as { name: string; connection?: string; params?: string[] } | undefined;
+        const eq = a.expectedQuery as { name: string; connection?: string; params?: string[]; binds?: Record<string, string> } | undefined;
         const keys = Array.isArray(a.key) ? (a.key as string[]) : [String(a.key)];
+        const bare = (p: string) => (/^[\w.-]+$|^\$\{[\w.]+\}$/.test(p) ? p : q(p));
+        const binds = eq?.binds && Object.keys(eq.binds).length ? ` with ${Object.entries(eq.binds).map(([k, v]) => `${k}=${bare(v)}`).join(', ')}` : '';
         const target = eq
-          ? `query ${q(eq.name)}${eq.connection ? ` on ${eq.connection}` : ''}${eq.params?.length ? ` with params ${eq.params.map((p) => (/^[\w.-]+$|^\$\{[\w.]+\}$/.test(p) ? p : q(p))).join(', ')}` : ''}`
+          ? `query ${q(eq.name)}${eq.connection ? ` on ${eq.connection}` : ''}${eq.params?.length ? ` with params ${eq.params.map(bare).join(', ')}` : binds}`
           : `rows ${String(a.expected)}`;
         const ignore = (a.ignore as string[] | undefined)?.length ? ` ignoring columns ${(a.ignore as string[]).map((c) => q(c)).join(', ')}` : '';
         return `Expect rows ${String(a.actual)} equal ${target} by key ${keys.map((k) => q(k)).join(', ')}${ignore}${a.tolerance !== undefined ? ` with tolerance ${String(a.tolerance)}` : ''}${a.ignoreCase ? ' ignoring case' : ''}`;

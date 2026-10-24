@@ -63,6 +63,8 @@ identity:
       successUrl: /dashboard                           # also used to re-check cached sessions
       fields: { username: "Email", submit: "Log in" }  # optional field descriptions
       api: { tokenUrl: /oauth/token, clientId: app, clientSecret: secret://env/CLIENT_SECRET }
+    broker:                                            # API-only role: no username or loginUrl;
+      api: { tokenUrl: /oauth/token, clientId: broker, clientSecret: secret://env/BROKER_SECRET }  # used by "as broker" API steps only
 
 db:
   connections:
@@ -88,6 +90,8 @@ data:
   entities:
     Customer: { provider: sql, connection: shop, table: customers }
     Lead:     { provider: synthetic, columns: { name: fullName, email: email } }
+    # defaults fill the columns a "Create" leaves out; gen:unique:PREFIX gives a value unique to the run
+    Order:    { provider: sql, connection: shop, table: orders, defaults: { ref: "gen:unique:ORD-", status: OPEN } }
 
 documents:
   invoice-vs-order:                   # used by "Compare document <x> to ... using invoice-vs-order"

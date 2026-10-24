@@ -282,10 +282,11 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
   for (const id of ['keyboard.trap', 'focus.visible', 'focus.hidden-stop', 'focus.order', 'focus.not-obscured']) bucket(m, id);
   try {
     if (prep.tabbables === 0) return;
-    const limit = Math.max(3, Math.min(prep.tabbables + 3, opts.maxTabStops ?? 80));
+    let limit = Math.max(3, Math.min(prep.tabbables + 3, opts.maxTabStops ?? 80));
     const stops: FocusStop[] = [];
     const seen = new Map<number, number>();
     let cycleStart = -1;
+    let inside = 0;
     for (let i = 0; i < limit; i++) {
       await page.keyboard.press('Tab');
       const s = await call<FocusStop>(main, 'kbProbe()', true);
@@ -296,9 +297,17 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
       if (seen.has(s.key)) {
         // Tab from the last stop moved focus to the browser UI and the document kept it (Firefox).
         if (s.last && stops[stops.length - 1]?.key === s.key) break;
+        // The same element again right away: Tab moves between the parts of a composite native control
+        // (the day, month and year of <input type=date>, the fields of time inputs). Not a cycle.
+        if (stops[stops.length - 1]?.key === s.key && inside < 8) {
+          inside++;
+          limit++;
+          continue;
+        }
         cycleStart = seen.get(s.key)!;
         break;
       }
+      inside = 0;
       seen.set(s.key, stops.length);
       stops.push(s);
       // The next Tab would leave the page for the browser UI (and Firefox does not hand focus back): stop here.

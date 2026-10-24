@@ -151,6 +151,12 @@ export interface PerfGateItem {
   journeyId?: string;
   evidence?: string[];
 }
+/** An accessibility scan that ran: what a passing a11y gate cites when no scan found anything. */
+export interface A11yScanRef {
+  evidence: string;
+  journeyId?: string;
+}
+
 export interface A11yGateItem {
   ruleId: string;
   impact: string | null | undefined;
@@ -177,6 +183,7 @@ export interface ReadinessInput {
   flaky?: FlakyScore[];
   perf?: PerfGateItem[];
   a11y?: A11yGateItem[];
+  a11yScans?: A11yScanRef[];
   docs?: DocsGateInput;
   openBugs?: OpenBug[];
   /** Overrides/extends policy requirement list. */
@@ -511,7 +518,10 @@ export function evaluateReadiness(policyIn: ReadinessPolicy | string, inputIn: R
             journeys: fs.map((f) => f.journeyId).filter((x): x is string => !!x && journeyIds.has(x)),
             evidence: fs.flatMap((f) => f.evidence ?? []).filter((x) => known.has(x)),
           });
-        if (bad.length === 0) push(name, cfg, 'pass', `No ${impacts.join('/')} accessibility violations.`, c(input.a11y));
+        if (bad.length === 0) {
+          const scanned = (input.a11yScans ?? []).map((s) => ({ ruleId: 'scan', impact: null, evidence: [s.evidence], ...(s.journeyId ? { journeyId: s.journeyId } : {}) }));
+          push(name, cfg, 'pass', `No ${impacts.join('/')} accessibility violations.`, c([...input.a11y, ...scanned]));
+        }
         else {
           const rules = [...new Set(bad.map((b) => b.ruleId))];
           push(name, cfg, 'fail', `${bad.length} ${impacts.join('/')} accessibility violation(s): ${rules.join(', ')}.`, c(bad));

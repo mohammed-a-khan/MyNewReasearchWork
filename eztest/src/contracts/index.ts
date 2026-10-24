@@ -20,4 +20,4 @@ export * from './from-mocks.js';
 export * from './readiness.js';
 export { evaluateApiContract, type ContractConditionEnv } from './condition.js';
 export { rememberApiRequest, apiRequestOf, CONTRACT_CONDITION_RULES, apiContractConditionText, type ApiRequestMeta } from './condition-rules.js';
-export { ContractsSchema, ProviderStateSchema, ApiSpecOptionsSchema, type ContractsConfig, type ProviderStateConfig } from './config.js';
+export { ContractsSchema, ProviderStateSchema, ApiSpecOptionsSchema, ApiSpecEntrySchema, apiSpecEntries, type ApiSpecEntry, type ContractsConfig, type ProviderStateConfig } from './config.js';

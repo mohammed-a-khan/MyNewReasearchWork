@@ -21,6 +21,8 @@ interface ScanResult {
   gaps: number;
   virtualized: boolean;
   ms: number;
+  /** Data rows the grid declares (aria-rowcount less its header rows), when it does. */
+  declaredRows?: number;
 }
 
 interface Reveal {
@@ -156,7 +158,7 @@ export class Grid {
   }
 
   /** Scan every row (scrolling and paging) collecting matches of `where`, or all rows with collect. */
-  async scan(where: CellCondition[], opts: { collect?: boolean; first?: boolean; maxRows?: number; countOnly?: boolean } = {}): Promise<{ matches: Array<GridRow & { page: number }>; matchCount: number; rows: GridRow[]; total: number; pages: number; virtualized: boolean; columns: GridColumn[]; ms: number; truncated: boolean }> {
+  async scan(where: CellCondition[], opts: { collect?: boolean; first?: boolean; maxRows?: number; countOnly?: boolean } = {}): Promise<{ matches: Array<GridRow & { page: number }>; matchCount: number; rows: GridRow[]; total: number; pages: number; virtualized: boolean; columns: GridColumn[]; ms: number; truncated: boolean; incomplete?: { declared: number; read: number } }> {
     const t0 = Date.now();
     const deadline = t0 + this.budget;
     const p0 = await this.pager();
@@ -171,6 +173,8 @@ export class Grid {
     let virtualized = false;
     let truncated = false;
     let columns: GridColumn[] = [];
+    let declared: number | undefined;
+    let stoppedEarly = false;
     for (;;) {
       pages++;
       const left = Math.max(1000, deadline - Date.now());
@@ -178,6 +182,7 @@ export class Grid {
         d: this.d, where, collect: opts.collect, first: opts.first, budgetMs: left, maxRows: opts.maxRows, page: this.page, countOnly: opts.countOnly,
       }, left + this.timeout);
       columns = r.columns;
+      if (pages === 1) declared = r.declaredRows;
       virtualized ||= r.virtualized;
       matchCount += r.matchCount;
       lastPageMatches = r.matchCount;
@@ -195,8 +200,14 @@ export class Grid {
         truncated = true;
         break;
       }
-      if (opts.first && matches.length) break;
-      if (opts.maxRows && (opts.collect ? rows.length : total) >= opts.maxRows) break;
+      if (opts.first && matches.length) {
+        stoppedEarly = true;
+        break;
+      }
+      if (opts.maxRows && (opts.collect ? rows.length : total) >= opts.maxRows) {
+        stoppedEarly = true;
+        break;
+      }
       if (Date.now() > deadline) {
         truncated = true;
         break;
@@ -209,7 +220,21 @@ export class Grid {
       total = new Set([...rows.map((r) => r.key), ...matches.map((m) => m.key)]).size || total;
       matchCount = lastPageMatches;
     }
-    return { matches, matchCount, rows, total, pages, virtualized, columns, ms: ms(t0), truncated };
+    // A one-page grid that declares more rows (aria-rowcount) than are rendered, with no viewport to
+    // scroll, was not read completely (a virtualized grid whose viewport cannot scroll): never report
+    // that read as complete. A grid that was scrolled to its end or paged through was read in full,
+    // so a stale aria-rowcount there (many libraries leave it unchanged after filtering) is ignored.
+    const incomplete = !truncated && !stoppedEarly && !virtualized && pages === 1 && declared !== undefined && total < declared ? { declared, read: total } : undefined;
+    return { matches, matchCount, rows, total, pages, virtualized, columns, ms: ms(t0), truncated, ...(incomplete ? { incomplete } : {}) };
+  }
+
+  private incompleteError(r: { incomplete?: { declared: number; read: number } }): ComponentError | undefined {
+    if (!r.incomplete) return undefined;
+    const { declared, read } = r.incomplete;
+    return new ComponentError(
+      `the grid declares ${declared} data rows (aria-rowcount) but only ${read} could be read: no scrollable viewport was found for its virtualized rows (check the viewport has a fixed height and overflow auto or scroll)`,
+      'COMPONENT_INCOMPLETE',
+    );
   }
 
   /** Find the one row matching `where` (all pages, all virtualized rows). */
@@ -220,6 +245,8 @@ export class Grid {
       throw new ComponentError(`stopped scanning the grid after ${r.ms} ms (${r.total} rows read); raise the step timeout or filter the grid first`, 'COMPONENT_BUDGET');
     }
     if (!r.matches.length) {
+      const incomplete = this.incompleteError(r);
+      if (incomplete) throw incomplete;
       throw new ComponentError(`no row where ${describeWhere(where)} (read ${r.total} rows${r.pages > 1 ? ` on ${r.pages} pages` : ''}${r.virtualized ? ', scrolling the virtualized grid' : ''})`, 'COMPONENT_NO_ROW');
     }
     if (r.matchCount > 1 && !opts.first) {
@@ -475,12 +502,16 @@ export class Grid {
     if (r.truncated) {
       throw new ComponentError(`reading the grid stopped after ${r.ms} ms with ${r.rows.length} rows read (bound: ${this.budget} ms); raise the step timeout or filter the grid first`, 'COMPONENT_BUDGET');
     }
+    const incomplete = this.incompleteError(r);
+    if (incomplete) throw incomplete;
     return { columns: r.columns.filter((c) => c.text), rows: r.rows, total: r.rows.length, pages: r.pages, virtualized: r.virtualized, ms: r.ms, truncated: r.truncated };
   }
 
   async countRows(where: CellCondition[] = []): Promise<{ count: number; total: number; pages: number; ms: number; virtualized: boolean }> {
     const r = await this.scan(where, { collect: !where.length, countOnly: !!where.length });
     if (r.truncated) throw new ComponentError(`counting rows stopped after ${r.ms} ms (bound: ${this.budget} ms)`, 'COMPONENT_BUDGET');
+    const incomplete = this.incompleteError(r);
+    if (incomplete) throw incomplete;
     return { count: where.length ? r.matchCount : r.rows.length, total: where.length ? r.total : r.rows.length, pages: r.pages, ms: r.ms, virtualized: r.virtualized };
   }
 

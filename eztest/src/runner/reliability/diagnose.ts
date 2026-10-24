@@ -134,6 +134,26 @@ export async function removeOutlines(page: Page): Promise<void> {
 }
 
 
+/** Visible form controls the browser's constraint validation rejects, as "label: message" (at most 5). */
+export async function nativeInvalidFields(page: Page): Promise<string[]> {
+  return page
+    .evaluate(() => {
+      const out: string[] = [];
+      for (const el of Array.from(document.querySelectorAll('input:invalid, select:invalid, textarea:invalid'))) {
+        const f = el as HTMLInputElement;
+        const r = f.getBoundingClientRect();
+        if (!r.width || !r.height || f.type === 'hidden') continue;
+        // A form with novalidate submits anyway: its fields' native validity does not explain anything.
+        if (f.form?.noValidate) continue;
+        const label = (f.labels && f.labels[0] ? f.labels[0].textContent : '') || f.getAttribute('aria-label') || f.name || f.id || f.tagName.toLowerCase();
+        out.push(`${label.trim()}: ${f.validationMessage || 'invalid'}`.slice(0, 200));
+        if (out.length >= 5) break;
+      }
+      return out;
+    })
+    .catch(() => []);
+}
+
 /** Build the diagnosis of a failed step. Never throws (a diagnosis must not hide the failure). */
 export async function diagnoseFailure(d: DiagnoseInput): Promise<FailureDiagnosis | undefined> {
   const { step, ctx } = d;
@@ -170,6 +190,7 @@ export async function diagnoseFailure(d: DiagnoseInput): Promise<FailureDiagnosi
         .filter((n) => n.stepId === step.id && ((n.status ?? 0) >= 400 || n.failure))
         .map((n) => `${n.method} ${shortUrl(n.url)} -> ${n.failure ?? `HTTP ${n.status}`}`),
     ])].slice(-10);
+    const invalidFields = /^(?:click|dblclick|press|check|uncheck|submit)$/.test(step.action) ? await nativeInvalidFields(page) : [];
     let outlined = 0;
     if (d.outline !== false) {
       const root = target ? rootFor(page, [...(ctx.session?.frames ?? []), ...(target.frames ?? [])]) : undefined;
@@ -190,7 +211,7 @@ export async function diagnoseFailure(d: DiagnoseInput): Promise<FailureDiagnosi
     return {
       expected, found, candidates,
       similar: similar.map(({ locator, description, score }) => ({ locator, description, score })),
-      consoleErrors, failedRequests, url: page.url(), ...(outlined ? { outlined } : {}),
+      consoleErrors, failedRequests, url: page.url(), ...(outlined ? { outlined } : {}), ...(invalidFields.length ? { invalidFields } : {}),
     };
   } catch {
     return undefined;
@@ -206,6 +227,7 @@ export function diagnosisHint(d: FailureDiagnosis): string {
   } catch {
     /* not a URL */
   }
+  if (d.invalidFields?.length) parts.push(`the browser's form validation rejects ${d.invalidFields.slice(0, 2).join('; ')} (the form was probably not submitted)`);
   if (d.similar.length) parts.push(`did you mean ${d.similar.map((s) => `${s.locator} (${s.score})`).join(' or ')}?`);
   if (d.failedRequests.length) parts.push(`failed calls: ${d.failedRequests.slice(0, 2).join(', ')}`);
   if (d.consoleErrors.length) parts.push(`console error: ${d.consoleErrors[d.consoleErrors.length - 1].slice(0, 120)}`);

@@ -12,6 +12,7 @@ import { EvidenceVault } from '../core/index.js';
 import { readEvidenceManifest } from '../insights/artifacts.js';
 import { apiCoverageMarkdown, callsFromNetworkLogs, computeApiCoverage, type ApiCall, type ApiCoverageReport } from './coverage.js';
 import type { ContractEvidence } from './hook.js';
+import { urlUnder } from './hook.js';
 import { cachedSpec } from './openapi.js';
 
 export const API_COVERAGE_FILE = 'api-coverage.json';
@@ -43,13 +44,20 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
   return calls;
 }
 
-export async function computeRunApiCoverage(runDir: string, specFiles: string[]): Promise<ApiCoverageReport[]> {
+/**
+ * API coverage of a run per spec. A spec given as `{ file, baseUrl }` (api.spec entries) counts only the
+ * calls to its base URL, so a suite that calls several services is not measured against one service's spec.
+ */
+export async function computeRunApiCoverage(runDir: string, specFiles: Array<string | { file: string; baseUrl?: string }>): Promise<ApiCoverageReport[]> {
   const calls = await apiCallsOfRun(runDir);
-  return specFiles.map((f) => computeApiCoverage(cachedSpec(resolve(f)), calls));
+  return specFiles.map((f) => {
+    const { file, baseUrl } = typeof f === 'string' ? { file: f, baseUrl: undefined } : f;
+    return computeApiCoverage(cachedSpec(resolve(file)), baseUrl ? calls.filter((c) => urlUnder(c.url, baseUrl)) : calls);
+  });
 }
 
 /** Compute, write (api-coverage.json/.md) and record the run's API coverage as evidence. */
-export async function recordApiCoverage(runDir: string, specFiles: string[]): Promise<{ reports: ApiCoverageReport[]; evidenceId?: string }> {
+export async function recordApiCoverage(runDir: string, specFiles: Array<string | { file: string; baseUrl?: string }>): Promise<{ reports: ApiCoverageReport[]; evidenceId?: string }> {
   const reports = await computeRunApiCoverage(runDir, specFiles);
   const json = JSON.stringify({ version: 1, reports }, null, 2);
   let evidenceId: string | undefined;

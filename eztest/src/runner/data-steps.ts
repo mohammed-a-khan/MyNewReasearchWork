@@ -45,6 +45,21 @@ function withQuery(url: string, query: Record<string, string>): string {
 }
 
 /** Build the concrete call (interpolated; form/multipart/file/GraphQL/SOAP bodies prepared). */
+/**
+ * An inline body written as JSON text with placeholders (`'{"amount": ${amount}}'`) cannot be parsed
+ * when the line is read, only after the values are filled in. When the filled-in text is a JSON object
+ * or array (and no content type was given), it is sent as JSON, like a body that parsed up front.
+ */
+function jsonOrText(text: string, hasContentType: boolean): unknown {
+  const t = text.trim();
+  if (hasContentType || !(t.startsWith('{') || t.startsWith('['))) return text;
+  try {
+    return JSON.parse(t) as unknown;
+  } catch {
+    return text;
+  }
+}
+
 export async function buildApiCall(step: Step, ctx: StepContext, opts: RunOptions): Promise<ApiCall> {
   if (!step.api) throw new EzTestError(`Step "${step.intent}" has no api call`, 'MISSING_API');
   const I = (s: string) => ctx.interpolate(s);
@@ -92,7 +107,7 @@ export async function buildApiCall(step: Step, ctx: StepContext, opts: RunOption
     else call.body = new Uint8Array(await readFile(path));
     if (!hasHeader('content-type')) headers['content-type'] = ct ?? 'application/octet-stream';
   } else if (src.body !== undefined) {
-    call.body = typeof src.body === 'string' ? B(src.body) : interpolateDeep(src.body, B);
+    call.body = typeof src.body === 'string' ? jsonOrText(B(src.body), hasHeader('content-type')) : interpolateDeep(src.body, B);
   }
   return call;
 }
@@ -343,7 +358,7 @@ function rowsOf(v: unknown, what: string): Array<Record<string, unknown>> {
 export async function compareDataAction(step: Step, ctx: StepContext, opts: RunOptions = { outputDir: '.' }): Promise<ActionOutcome> {
   const a = step.args ?? {};
   const vars = ctx.vars();
-  const eq = a.expectedQuery as { name: string; connection?: string; params?: string[] } | undefined;
+  const eq = a.expectedQuery as { name: string; connection?: string; params?: string[]; binds?: Record<string, string> } | undefined;
   const expected = eq ? await namedQueryRows(eq, ctx, opts) : rowsOf(evaluateExpression(String(a.expected), vars), String(a.expected));
   const actual = rowsOf(evaluateExpression(String(a.actual), vars), String(a.actual));
   const map = (a.map ?? {}) as Record<string, string>;
@@ -407,17 +422,19 @@ function sniffDelimiter(text: string): string {
 }
 
 /** Run a named query from the catalogue (<queriesDir>/<NAME>.sql) and return its rows. */
-async function namedQueryRows(q: { name: string; connection?: string; params?: string[] }, ctx: StepContext, opts: RunOptions): Promise<Array<Record<string, unknown>>> {
+async function namedQueryRows(q: { name: string; connection?: string; params?: string[]; binds?: Record<string, string> }, ctx: StepContext, opts: RunOptions): Promise<Array<Record<string, unknown>>> {
   if (!opts.db) throw new EzTestError('No db handler configured (RunOptions.db)', 'NO_HANDLER');
   if (!/^[A-Za-z0-9_.-]+$/.test(q.name)) throw new EzTestError(`Invalid query name "${q.name}"`, 'BAD_QUERY_NAME');
-  const params0 = (q.params ?? []).map((p) => {
+  const value = (p: string) => {
     const m = /^\$\{([\w.]+)\}$/.exec(p);
     if (m) return sqlParam(lookupVar(ctx.vars(), m[1]), m[1]);
     return ctx.interpolate(p);
-  });
+  };
+  const params0 = (q.params ?? []).map(value);
+  const binds = q.binds ? Object.fromEntries(Object.entries(q.binds).map(([k, v]) => [k, value(v)])) : undefined;
   // Through the engine: the named-query catalogue (headers, fragments, :name binds, default connection).
   if (opts.db.namedQuery) {
-    const compiled = await opts.db.namedQuery(q.name, q.connection ?? '', params0.length ? { params: params0 } : {});
+    const compiled = await opts.db.namedQuery(q.name, q.connection ?? '', binds ? { binds: binds as Record<string, string | number | boolean | null> } : params0.length ? { params: params0 } : {});
     return opts.db.query(compiled.connection, compiled.sql, compiled.params as DbQueryParams);
   }
   const dir = opts.queriesDir ?? resolve(opts.baseDir ?? process.cwd(), 'queries');

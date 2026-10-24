@@ -3,7 +3,7 @@
  * "Order created" message is visible', "there are 2 rows in the Recent orders
  * table") parsed into declarative core Conditions, and rendered back.
  */
-import type { Condition, Target } from '../core/index.js';
+import { checkExpression, type Condition, type Target } from '../core/index.js';
 import { isQuoted, literal, protectQuotes, quoteText, restoreQuotes } from './quotes.js';
 import { describeTarget } from './target.js';
 import { tableRowsTarget } from './table-target.js';
@@ -28,6 +28,14 @@ export { tableRowsTarget };
 
 /** Ordered condition grammar. The first rule whose regex matches and whose builder succeeds wins. */
 export const CONDITION_RULES: CondRule[] = [
+  // A captured value, not an element: "${mail.text} contains "CLM-1"", "${body} does not contain "error"".
+  { name: 'value-contains', re: /^\$\{([A-Za-z_][\w.-]*)\}\s+(does\s+not\s+contain|doesn't\s+contain|contains|includes)\s+(.+)$/i,
+    build: (m, q) => {
+      const text = val(m[3], q);
+      const lit = `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      const has = `string(${m[1]}) contains ${lit}`;
+      return { type: 'expr', expr: /not|n't/i.test(m[2]) ? `not (${has})` : has };
+    } },
   // "The screen" of a desktop, terminal, SAP or Citrix surface (and the web page): see docs/desktop-and-legacy.md.
   { name: 'screen-not-contains', re: /^(?:the\s+)?(?:terminal\s+|mainframe\s+|sap\s+|desktop\s+)?screen\s+(?:does\s+not|doesn't|do\s+not)\s+(?:contain|show|display|include|have)(?:\s+(?:the\s+)?text)?\s+(.+)$/i,
     build: (m, q) => ({ type: 'pageNotContainsText', value: val(m[1], q) }) },
@@ -51,6 +59,9 @@ export const CONDITION_RULES: CondRule[] = [
     build: (m, q) => ({ type: 'pageNotContainsText', value: val(m[1], q) }) },
   { name: 'text-shown', re: /^(?:the\s+)?text\s+(⟦\d+⟧)\s+(?:is\s+(?:visible|shown|displayed|present|on\s+the\s+page)|appears)$/i,
     build: (m, q) => ({ type: 'pageContainsText', value: val(m[1], q) }) },
+  // "the URL does not contain "/app/home"": a URL pattern that excludes the text (the URL is not a variable).
+  { name: 'url-not-contains', re: /^(?:the\s+)?(?:current\s+|page\s+)?(?:url|address)\s+(?:does\s+not|doesn't)\s+(?:contain|include|have)\s+(.+)$/i,
+    build: (m, q) => ({ type: 'urlMatches', pattern: `^(?!.*${val(m[1], q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})` }) },
   { name: 'url-contains', re: /^(?:the\s+)?(?:current\s+|page\s+)?(?:url|address)\s+(?:contains|includes|has)\s+(.+)$/i,
     build: (m, q) => ({ type: 'urlContains', value: val(m[1], q) }) },
   { name: 'url-matches', re: /^(?:the\s+)?(?:current\s+|page\s+)?(?:url|address)\s+matches\s+(.+)$/i,
@@ -111,6 +122,13 @@ export const CONDITION_RULES: CondRule[] = [
 function ledger(key: string, rhs: string, q: string[]): Condition {
   const other = /^\$\{([\w.]+)\}$/.exec(rhs.trim());
   if (other) return { type: 'ledgerEquals', key, otherKey: other[1] };
+  // "${payout} == round(approved - excess, 2)": an unquoted right side with a call or arithmetic is an
+  // expression, not literal text. Plain words and numbers stay literals ("${status} is Open", "== 0").
+  const t = rhs.trim();
+  if (!isQuoted(t) && /[()*/%+]|\s-\s/.test(t)) {
+    const expr = `${key} == (${restoreQuotes(t, q)})`;
+    if (!checkExpression(expr)) return { type: 'expr', expr };
+  }
   return { type: 'ledgerEquals', key, expected: val(rhs, q) };
 }
 

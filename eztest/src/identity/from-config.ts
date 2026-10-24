@@ -55,7 +55,7 @@ export function identityVaultFromConfig(
     let pw: RoleDefinition['password'];
     if (passwordRotation) pw = rotationHandle(createPasswordRotationProvider(passwordRotation, { registry, role: name }), registry, name);
     else if (password !== undefined) pw = password;
-    else throw new EzTestError(`Role ${name}: needs "password" or "passwordRotation"`, 'IDENTITY_CONFIG');
+    else if (!(r.api && r.username === undefined && r.loginUrl === undefined)) throw new EzTestError(`Role ${name}: needs "password" or "passwordRotation"`, 'IDENTITY_CONFIG');
     roles[name] = { ...rest, password: pw };
   }
   return new IdentityVault({

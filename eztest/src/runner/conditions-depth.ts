@@ -15,6 +15,7 @@ import type { Condition, ConditionResult } from '../core/index.js';
 import { unifiedDiff } from '../heal/apply.js';
 import type { ConditionEnv } from './conditions.js';
 import { strictLocator } from './conditions-advanced.js';
+import { rootFor } from './locate.js';
 
 type Depth = Extract<Condition, { type: 'accessible' | 'ariaSnapshot' | 'textNot' | 'pageMatches' }>;
 
@@ -50,7 +51,7 @@ export async function evaluateDepthCondition(c: Depth, env: ConditionEnv): Promi
       return hit ? fail(c, `${c.target.description} ${c.field} "${actual}" ${c.mode === 'contains' ? 'contains' : 'is'} "${bad}"`, actual) : ok(c, actual);
     }
     case 'pageMatches': {
-      const text = c.what === 'title' ? await env.page.title() : norm(await env.page.locator('body').innerText({ timeout: 2000 }).catch(() => ''));
+      const text = c.what === 'title' ? await env.page.title() : norm(await rootFor(env.page, env.frames).locator('body').innerText({ timeout: 2000 }).catch(() => ''));
       const re = new RegExp(I(c.pattern), c.flags);
       const hit = re.test(text);
       const what = c.what === 'title' ? 'title' : 'page text';
@@ -196,7 +197,7 @@ async function ariaSnapshotCondition(c: Extract<Condition, { type: 'ariaSnapshot
     const r = await strictLocator(env, c.target);
     if (!r.locator) return fail(c, `${c.target.description}: not found exactly once (${r.notes.join('; ')})`);
     loc = r.locator;
-  } else loc = env.page.locator('body');
+  } else loc = rootFor(env.page, env.frames).locator('body');
   const actualText = await loc.ariaSnapshot({ timeout: 2000 });
   const file = baselinePath(c, env);
   const update = process.env.EZTEST_UPDATE_SNAPSHOTS === '1';

@@ -10,7 +10,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { computeRunApiCoverage, isContractFile, isMessageExpectation, lintSpec, loadApiCoverage, loadApiSpec, readContractFile, CONTRACT_RESULTS_FILE } from '../../contracts/index.js';
+import { apiSpecEntries, computeRunApiCoverage, isContractFile, isMessageExpectation, lintSpec, loadApiCoverage, loadApiSpec, readContractFile, CONTRACT_RESULTS_FILE } from '../../contracts/index.js';
 import { identityVaultFromConfig } from '../../identity/index.js';
 import { readEvidenceManifest } from '../../insights/index.js';
 import { ResultsClient } from '../../server/client.js';
@@ -23,8 +23,7 @@ import type { StudioRoute } from './route.js';
 
 async function specFiles(app: StudioApp): Promise<string[]> {
   try {
-    const s = (await app.config()).config.api.spec;
-    return (Array.isArray(s) ? s : s ? [s] : []).map((f) => resolve(app.cwd, f));
+    return apiSpecEntries((await app.config()).config.api.spec).map((f) => resolve(app.cwd, f.file));
   } catch {
     return [];
   }

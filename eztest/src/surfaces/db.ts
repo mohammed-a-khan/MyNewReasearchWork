@@ -14,8 +14,15 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 function openSqlite(file: string): DatabaseSync {
   const mod = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite') | undefined;
   if (!mod) throw new Error('node:sqlite is not available in this Node.js version (needs Node 22.5+)');
-  return new mod.DatabaseSync(file);
+  const db = new mod.DatabaseSync(file);
+  // Without a busy timeout, a write while the application under test holds the file's lock fails at
+  // once with "database is locked": a race that shows up as flakiness in parallel runs.
+  db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+  return db;
 }
+
+/** How long a statement waits for another connection's (or process's) write lock. */
+export const SQLITE_BUSY_TIMEOUT_MS = 5000;
 import { EzTestError, NotSupportedError } from '../core/index.js';
 import type { SqlDialect } from './db-sql.js';
 import { caseInsensitiveRow } from './db-rows.js';

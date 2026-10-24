@@ -199,6 +199,11 @@ export interface RunOptions {
   compareDocument?: CompareDocumentHandler;
   customSteps?: Record<string, CustomStepHandler>;
   lenses?: Lens[];
+  /**
+   * Builds a lens by its config name ("a11y", "security:warn", a plugin's lens), for journeys whose
+   * `Lenses:` header names a lens the run does not have: that journey gets its own instance.
+   */
+  lensFactory?: (spec: string) => Lens;
   /** Masks secrets in captured text (dialogs, cookies, storage, network, evidence). The engine passes the config masker. */
   mask?: (text: string) => string;
   /** Default handling of dialogs nobody armed for. */

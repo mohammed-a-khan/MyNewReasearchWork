@@ -110,6 +110,8 @@ export const STRUCTURE_RULES: Record<string, RuleFn> = {
     for (const d of c.docs) {
       const html = d.doc.documentElement;
       if (!html || lowerTag(html) !== 'html') continue;
+      // A frame still on its initial about:blank document has no content of its own to declare a language for.
+      if (!d.top && d.doc.URL === 'about:blank') continue;
       const v = (html.getAttribute('lang') || html.getAttribute('xml:lang') || '').trim();
       if (v) c.pass(html);
       else c.fail(html, `The <html> element${d.top ? '' : ' of this frame'} has no lang attribute (for example lang="en").`);

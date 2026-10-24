@@ -27,6 +27,9 @@ interface ScanFile {
   spec?: string;
   token?: string;
   otherToken?: string;
+  /** Identity Vault roles with API credentials (identity.roles.<role>.api, OAuth2): tokens are fetched, never written down. */
+  role?: string;
+  otherRole?: string;
   authHeader?: string;
   ids?: Record<string, [string, string]>;
   sample?: Record<string, string>;
@@ -40,7 +43,7 @@ export function registerSecurityCommands(program: Command, io: CliIO, load: Load
   program
     .command('api-scan')
     .description('run the deterministic API security scan pack (OWASP API Top 10) against a configured non-production host')
-    .argument('[scanfile]', 'a scan file (YAML/JSON): baseUrl, spec, token/otherToken (secret://), ids, targets, probes')
+    .argument('[scanfile]', 'a scan file (YAML/JSON): baseUrl, spec, role/otherRole (Identity Vault API roles) or token/otherToken (secret://), ids, targets, probes')
     .option('-c, --config <file>', 'config file')
     .option('-e, --env <name>', 'environment name')
     .option('--project <name>', 'project overlay')
@@ -64,8 +67,15 @@ export function registerSecurityCommands(program: Command, io: CliIO, load: Load
         loaded.masker.add(s);
         return s;
       };
-      const token = await secret(file.token);
-      const otherToken = await secret(file.otherToken);
+      // A role's OAuth2 token (client credentials through the vault) or a fixed token from a secret store.
+      const roleToken = async (role?: string): Promise<string | undefined> => {
+        if (!role) return undefined;
+        const t = await vault.apiToken(role);
+        loaded.masker.add(t);
+        return t;
+      };
+      const token = (await roleToken(file.role)) ?? (await secret(file.token));
+      const otherToken = (await roleToken(file.otherRole)) ?? (await secret(file.otherToken));
 
       let targets: ApiTarget[] = file.targets ?? [];
       const specFile = o.spec ?? file.spec;

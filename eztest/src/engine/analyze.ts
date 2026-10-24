@@ -9,6 +9,7 @@ import type { FlakyScore, TriageReport, ReadinessResult, QuarantineStatus } from
 import { writeReports, type ReportFormat } from '../report/index.js';
 import { contractReadinessInputs } from '../contracts/readiness.js';
 import { a11yReadinessInputs } from '../a11y/readiness.js';
+import { docsReadinessInputs } from '../docs/readiness.js';
 import { loadReadinessInputs } from '../load/readiness.js';
 import { apiSecurityReadinessInput } from '../lenses/security-api.js';
 import { failureTags, type JourneyFailureTags, type UiCoverageGateInput } from '../insights/index.js';
@@ -134,6 +135,8 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
         ...(uiInput ? { uiCoverage: uiInput } : {}), failureTags: tags, ...(a11yNew ? { a11yNew } : {}),
         // Accessibility findings recorded by the a11y lens / "Check accessibility" steps feed a11yNoCritical.
         ...(await a11yReadinessInputs(runDir, evidence)),
+        // The journeys' "Compare document" checks feed docsReconciled.
+        ...(await docsReadinessInputs(runDir, evidence)),
       };
       readiness = evaluateReadiness(policy, input);
       // Cross-browser runs: a decision per browser next to the combined one.

@@ -41,7 +41,7 @@ export const MIGRATION_RULES: IntentRule[] = [
     }) },
   { name: 'expect-rows-query', keywords: ['expect', 'verify', 'compare'], category: 'Database', example: 'Expect rows r equal query "INVOICE_LINES" on demo by key "Id" ignoring columns "Updated" with tolerance 0.01',
     re: new RegExp(
-      String.raw`^(?:expect|verify|assert|check)\s+(?:that\s+)?(?:the\s+)?rows\s+(\$\{[\w.]+\}|[\w.]+)\s+(?:equal|equals|match|matches)\s+(?:the\s+)?(?:(?:named\s+)?query\s+(${Q})(?:\s+on\s+([\w.-]+))?(?:\s+with\s+params?\s+((?:${Q}|\$\{[\w.]+\}|[\w.-]+)(?:\s*,\s*(?:${Q}|\$\{[\w.]+\}|[\w.-]+))*))?|(?:rows\s+)?(\$\{[\w.]+\}|[\w.]+))` +
+      String.raw`^(?:expect|verify|assert|check)\s+(?:that\s+)?(?:the\s+)?rows\s+(\$\{[\w.]+\}|[\w.]+)\s+(?:equal|equals|match|matches)\s+(?:the\s+)?(?:(?:named\s+)?query\s+(${Q})(?:\s+on\s+([\w.-]+))?(?:\s+with\s+params?\s+((?:${Q}|\$\{[\w.]+\}|[\w.-]+)(?:\s*,\s*(?:${Q}|\$\{[\w.]+\}|[\w.-]+))*)|\s+with\s+((?:[A-Za-z_]\w*\s*=\s*(?:${Q}|\$\{[\w.]+\}|[\w.-]+))(?:\s*,\s*[A-Za-z_]\w*\s*=\s*(?:${Q}|\$\{[\w.]+\}|[\w.-]+))*))?|(?:rows\s+)?(\$\{[\w.]+\}|[\w.]+))` +
         String.raw`\s+(?:by|on|using)\s+(?:key|keys|column|columns)\s+((?:${Q}|[\w.-]+)(?:\s*(?:,|and)\s*(?:${Q}|[\w.-]+))*)` +
         String.raw`(?:\s+ignoring\s+(?:columns?\s+)?((?:${Q}|[\w.-]+)(?:\s*(?:,|and)\s*(?:${Q}|[\w.-]+))*))?` +
         String.raw`(?:\s+(?:with\s+)?tolerance\s+(\d+(?:\.\d+)?))?(?:\s+ignoring\s+case)?$`,
@@ -49,16 +49,20 @@ export const MIGRATION_RULES: IntentRule[] = [
     ),
     build: (m, q) => {
       const strip = (s: string) => s.replace(/^\$\{|\}$/g, '');
-      const keys = quotedList(m[6], q);
+      const keys = quotedList(m[7], q);
       const params = m[4] ? [...m[4].matchAll(new RegExp(`${Q}|\\$\\{[\\w.]+\\}|[\\w.-]+`, 'g'))].map((x) => (x[0].startsWith('⟦') ? literal(x[0], q) : x[0])) : undefined;
+      // Named binds, like the other named-query phrasings: with batch_id="${jobId}", region=EU
+      const binds = m[5]
+        ? Object.fromEntries([...m[5].matchAll(new RegExp(`([A-Za-z_]\\w*)\\s*=\\s*(${Q}|\\$\\{[\\w.]+\\}|[\\w.-]+)`, 'g'))].map((x) => [x[1], x[2].startsWith('⟦') ? literal(x[2], q) : x[2]]))
+        : undefined;
       return {
         action: 'compareData',
         args: {
           actual: strip(m[1]),
-          ...(m[2] ? { expectedQuery: { name: literal(m[2], q), ...(m[3] ? { connection: m[3] } : {}), ...(params ? { params } : {}) } } : { expected: strip(m[5]) }),
+          ...(m[2] ? { expectedQuery: { name: literal(m[2], q), ...(m[3] ? { connection: m[3] } : {}), ...(params ? { params } : {}), ...(binds ? { binds } : {}) } } : { expected: strip(m[6]) }),
           key: keys.length === 1 ? keys[0] : keys,
-          ...(m[7] ? { ignore: quotedList(m[7], q) } : {}),
-          ...(m[8] ? { tolerance: Number(m[8]) } : {}),
+          ...(m[8] ? { ignore: quotedList(m[8], q) } : {}),
+          ...(m[9] ? { tolerance: Number(m[9]) } : {}),
           ...(/ignoring\s+case$/i.test(m[0]) ? { ignoreCase: true } : {}),
           caseInsensitiveColumns: true,
         },

@@ -90,7 +90,7 @@ async function buildProviders(config: EzTestConfig, dbs: DbRegistry, vault: Iden
     if (e.provider === 'sql') {
       if (!e.connection || !e.table) throw new EzTestError(`data.entities.${entity}: sql provider needs "connection" and "table"`, 'CONFIG');
       const m = sqlByConn.get(e.connection) ?? {};
-      m[entity] = { table: e.table, key: e.key, columns: e.columns };
+      m[entity] = { table: e.table, key: e.key, columns: e.columns, ...(e.defaults ? { defaults: e.defaults } : {}) };
       sqlByConn.set(e.connection, m);
     } else if (e.provider === 'api') {
       if (!e.connection) throw new EzTestError(`data.entities.${entity}: api provider needs "connection"`, 'CONFIG');
@@ -391,6 +391,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     : undefined;
   const rel = config.reliability;
   const loginPaths = Object.values(config.identity.roles).map((r) => {
+    if (!r.loginUrl) return undefined; // API-only role
     try {
       return new URL(r.loginUrl, config.baseUrl ?? 'http://localhost').pathname;
     } catch {
@@ -458,6 +459,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     data,
     compareDocument: documentCheckHandler(config, dbs, cwd),
     lenses: lensesFromConfig(config.lenses, cwd, { branchBaselines: config.vcs.branchScope.baselines, defaultBranch: config.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(config) }),
+    lensFactory: (spec: string) => lensesFromConfig([spec], cwd, { branchBaselines: config.vcs.branchScope.baselines, defaultBranch: config.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(config) })[0],
     // Advanced engine: masking of captured text, page-script opt-in, dialog policy, file base, journey refs.
     mask: (s: string) => loaded.masker.mask(s),
     allowPageScripts: config.security.allowPageScripts,
@@ -518,7 +520,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
       const run = await runJourneys(journeys, hooks ? { ...runOptions, hooks: { ...hooks, ...(runOptions.hooks ?? {}) } } : runOptions);
       // API coverage against api.spec, recorded next to the run (report, Studio and the apiCoverage gate read it).
       if (integration.specs.length && run.journeys.length) {
-        await recordApiCoverage(join(runOptions.outputDir, run.runId), integration.specs).catch((e: Error) => logger.warn(`API coverage not recorded: ${e.message}`));
+        await recordApiCoverage(join(runOptions.outputDir, run.runId), integration.specEntries).catch((e: Error) => logger.warn(`API coverage not recorded: ${e.message}`));
       }
       return run;
     },
