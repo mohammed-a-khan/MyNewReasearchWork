@@ -26,6 +26,8 @@ export const ServerConfigSchema = z.object({
   host: z.string().default('127.0.0.1'),
   port: z.number().int().min(0).max(65535).default(8080),
   dataDir: z.string().min(1).default('eztest-server-data'),
+  /** The audit log's key file (outside the database; created on first start). Default <dataDir>/audit-key.json. */
+  auditKeyFile: z.string().min(1).optional(),
   /** External URL (used for the OIDC redirect URI and secure cookies), e.g. https://eztest.example.com. */
   publicUrl: z.string().url().optional(),
   /** Behind a TLS-terminating proxy: trust X-Forwarded-For / X-Forwarded-Proto. */
@@ -81,5 +83,6 @@ export async function loadServerConfig(o: { file?: string; cwd?: string; env?: R
   const baseDir = file ? resolve(file, '..') : cwd;
   const cfg = r.data;
   cfg.dataDir = isAbsolute(cfg.dataDir) ? cfg.dataDir : resolve(baseDir, cfg.dataDir);
+  if (cfg.auditKeyFile && !isAbsolute(cfg.auditKeyFile)) cfg.auditKeyFile = resolve(baseDir, cfg.auditKeyFile);
   return { ...cfg, baseDir };
 }

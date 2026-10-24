@@ -438,7 +438,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
           await store.save();
           deferred.push({ idx, j, attempts, ...(ho ? { seed: ho.seed, summary: ho.summary } : {}) });
         } else {
-          await settle(idx, await finalize(j, attempts, ho?.summary), true);
+          await settle(idx, withLostLocks(await finalize(j, attempts, ho?.summary), item.locksLost?.(), logger), true);
         }
       } finally {
         await item.release();
@@ -527,6 +527,14 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   options.events?.emit({ type: 'run:end', runId });
   logger.info('run end', { runId, ...run.summary });
   return run;
+}
+
+/** A journey whose resource locks were lost while it ran: recorded on its result (and logged), never silent. */
+function withLostLocks(r: JourneyResult, lost: string[] | undefined, logger: { warn(m: string, d?: Record<string, unknown>): void }): JourneyResult {
+  if (!lost?.length) return r;
+  (r.reliability ??= {}).locksLost = lost;
+  logger.warn('resource lock lost while the journey ran', { journeyId: r.journeyId, locks: lost });
+  return r;
 }
 
 /** Was the run cancelled from outside (a signal, see cancel.ts), as opposed to stopped early (--max-failures)? */

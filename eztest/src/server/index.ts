@@ -11,7 +11,7 @@ export { loadServerConfig, ServerConfigSchema, type ServerConfig } from './confi
 export { ResultsClient, ServerLockBackend, ServerRequestError, type ResultsClientOptions } from './client.js';
 export { syncSharedState, localChanges, type SyncReport } from './shared-state.js';
 export { ResultsService, ServiceError, STATE_KINDS, type StateKind, type RunRow } from './service.js';
-export { AuditLog, auditHash, type AuditEntry } from './audit.js';
+export { AuditKeyring, AuditLog, auditHash, auditHmac, auditKeyFileFor, type AuditEntry, type AuditVerification } from './audit.js';
 export { ROLES, PERMISSIONS, can, roleFor, createToken, listTokens, revokeToken, setGrant, RateLimiter, type Role, type Grant, type Principal, type Action } from './auth.js';
 export { OidcClient, pkceChallenge, safeNext, type OidcConfig } from './oidc.js';
 export { Store, dialectSql } from './store.js';

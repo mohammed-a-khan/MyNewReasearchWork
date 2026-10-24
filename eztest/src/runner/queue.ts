@@ -15,6 +15,8 @@ export interface QueueItem {
   release: () => Promise<void>;
   /** Set when the journey's locks could not be acquired in time. */
   lockError?: string;
+  /** Locks lost while the journey held them (renewal refused or expired). */
+  locksLost?: () => string[];
 }
 
 const noop = async () => {};
@@ -88,6 +90,7 @@ export class JourneyQueue {
             await release();
             this.notify();
           },
+          ...(release.lost ? { locksLost: release.lost } : {}),
         };
       }
       const since = this.waitingSince.get(index) ?? now;

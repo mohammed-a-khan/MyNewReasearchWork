@@ -1,13 +1,27 @@
 /**
- * Append-only, hash-chained audit log. Every entry hashes its own fields and
- * the previous entry's hash, so editing, deleting or reordering any entry
- * breaks the chain from that point on. The server never updates or deletes
- * audit rows; `verifyAudit` recomputes the chain.
+ * Append-only, keyed hash chain audit log. Every entry is an HMAC-SHA256 of
+ * its own fields and the previous entry's hash, under a server secret that is
+ * NOT in the database (a key file next to the data, see {@link AuditKeyring}).
+ * Editing, deleting or reordering any entry breaks the chain from that point
+ * on, and someone with write access to the database alone cannot forge a
+ * valid chain, because they do not have the key. The server never updates or
+ * deletes audit rows; `verify` recomputes the chain with the key.
+ *
+ * - The key is generated at the first start (`<dataDir>/audit-key.json`,
+ *   mode 0600, or `auditKeyFile`), and can be rotated: old keys stay in the
+ *   file to verify the entries they signed. An entry's hash names its key:
+ *   `hmac-sha256:<keyId>:<hex>`.
+ * - Entries written before the log was keyed (plain SHA-256 hashes) are still
+ *   verified, with a warning: they prove order and integrity against
+ *   accidents, not against someone who can write to the database.
  *
  * Recorded: runs published, heals accepted/rejected, readiness signed,
- * quarantine and triage changes, tokens and grants, retention runs, logins.
+ * quarantine and triage changes, tokens and grants, retention runs, logins,
+ * audit key rotations.
  */
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { num, optStr, type Store } from './store.js';
 
 export interface AuditEntry {
@@ -24,9 +38,115 @@ export interface AuditEntry {
 
 export const AUDIT_GENESIS = '0'.repeat(64);
 
+function canonical(e: Omit<AuditEntry, 'hash'>): string {
+  return JSON.stringify([e.seq, e.prevHash, e.at, e.actor, e.action, e.project ?? null, e.target ?? null, e.details ?? null]);
+}
+
+/** The unkeyed hash of entries written before the audit log was keyed (verification of old chains only). */
 export function auditHash(e: Omit<AuditEntry, 'hash'>): string {
-  const canonical = JSON.stringify([e.seq, e.prevHash, e.at, e.actor, e.action, e.project ?? null, e.target ?? null, e.details ?? null]);
-  return createHash('sha256').update(canonical).digest('hex');
+  return createHash('sha256').update(canonical(e)).digest('hex');
+}
+
+/** The keyed hash of an entry: `hmac-sha256:<keyId>:<hex>`. */
+export function auditHmac(e: Omit<AuditEntry, 'hash'>, key: { id: string; secret: Buffer }): string {
+  return `hmac-sha256:${key.id}:${createHmac('sha256', key.secret).update(canonical(e)).digest('hex')}`;
+}
+
+const KEYED = /^hmac-sha256:([\w-]+):([0-9a-f]{64})$/;
+const LEGACY = /^[0-9a-f]{64}$/;
+
+interface KeyFile {
+  version: 1;
+  current: string;
+  keys: Record<string, { secret: string; createdAt: string; retiredAt?: string }>;
+}
+
+/**
+ * The audit log's secrets, in a file outside the database (mode 0600). Created with a fresh
+ * 256-bit key on first use; `rotate()` adds a new current key and keeps the old ones for
+ * verification.
+ */
+export class AuditKeyring {
+  private data: KeyFile;
+
+  private constructor(readonly file: string, data: KeyFile) {
+    this.data = data;
+  }
+
+  /** Open the key file, creating it (with a new key) when it does not exist. */
+  static open(file: string): AuditKeyring {
+    if (existsSync(file)) {
+      let data: KeyFile;
+      try {
+        data = JSON.parse(readFileSync(file, 'utf8')) as KeyFile;
+      } catch (e) {
+        throw new Error(`audit: the key file ${file} is not readable JSON (${(e as Error).message}); restore it from backup - without it the audit chain cannot be verified`);
+      }
+      if (!data?.keys?.[data.current]) throw new Error(`audit: the key file ${file} has no current key`);
+      return new AuditKeyring(file, data);
+    }
+    const ring = new AuditKeyring(file, { version: 1, current: '', keys: {} });
+    ring.addKey();
+    return ring;
+  }
+
+  private addKey(): string {
+    const id = `k${Date.now().toString(36)}${randomUUID().slice(0, 4)}`;
+    const now = new Date().toISOString();
+    const prev = this.data.keys[this.data.current];
+    if (prev) prev.retiredAt = now;
+    this.data.keys[id] = { secret: randomBytes(32).toString('base64'), createdAt: now };
+    this.data.current = id;
+    this.save();
+    return id;
+  }
+
+  private save(): void {
+    mkdirSync(dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+    renameSync(tmp, this.file);
+    try {
+      chmodSync(this.file, 0o600);
+    } catch {
+      /* not supported on this file system */
+    }
+  }
+
+  current(): { id: string; secret: Buffer } {
+    return { id: this.data.current, secret: Buffer.from(this.data.keys[this.data.current].secret, 'base64') };
+  }
+
+  get(id: string): { id: string; secret: Buffer } | undefined {
+    const k = this.data.keys[id];
+    return k ? { id, secret: Buffer.from(k.secret, 'base64') } : undefined;
+  }
+
+  /** Start signing with a new key; the old ones stay for verification. Returns the new key id. */
+  rotate(): string {
+    return this.addKey();
+  }
+
+  ids(): string[] {
+    return Object.keys(this.data.keys);
+  }
+}
+
+/** Where a server keeps its audit key: `auditKeyFile`, else `<dataDir>/audit-key.json`. */
+export function auditKeyFileFor(cfg: { dataDir: string; auditKeyFile?: string }): string {
+  return cfg.auditKeyFile ?? join(cfg.dataDir, 'audit-key.json');
+}
+
+export interface AuditVerification {
+  ok: boolean;
+  entries: number;
+  head: string;
+  problems: string[];
+  /** Not problems, but worth knowing (entries from before the log was keyed). */
+  warnings: string[];
+  /** Entries checked with a key, and unkeyed (older) ones. */
+  keyed: number;
+  legacy: number;
 }
 
 function fromRow(r: Record<string, unknown>): AuditEntry {
@@ -45,8 +165,22 @@ function fromRow(r: Record<string, unknown>): AuditEntry {
 
 export class AuditLog {
   private tail: Promise<unknown> = Promise.resolve();
+  private ring?: AuditKeyring;
 
-  constructor(private readonly store: Store) {}
+  /** `keyFile`: the audit key file (see {@link auditKeyFileFor}); created with a new key when missing. */
+  constructor(private readonly store: Store, readonly keyFile: string) {}
+
+  private keys(): AuditKeyring {
+    return (this.ring ??= AuditKeyring.open(this.keyFile));
+  }
+
+  /** Rotate the audit key: later entries are signed with a new key; the rotation itself is audited. */
+  async rotateKey(actor: string): Promise<{ keyId: string }> {
+    const previous = this.keys().current().id;
+    const keyId = this.keys().rotate();
+    await this.append({ actor, action: 'audit.key.rotate', details: { previous, current: keyId } });
+    return { keyId };
+  }
 
   /** Append an entry. Appends are serialised in-process; a concurrent writer elsewhere loses the primary-key race and retries. */
   append(e: { actor: string; action: string; project?: string; target?: string; details?: Record<string, unknown> }): Promise<AuditEntry> {
@@ -63,7 +197,7 @@ export class AuditLog {
           details: e.details,
           prevHash: last ? String(last.hash) : AUDIT_GENESIS,
         };
-        const entry: AuditEntry = { ...base, hash: auditHash(base) };
+        const entry: AuditEntry = { ...base, hash: auditHmac(base, this.keys().current()) };
         const ok = await this.store.tryInsert(
           'INSERT INTO ez_audit (seq, at, actor, action, project, target, details, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [entry.seq, entry.at, entry.actor, entry.action, entry.project ?? null, entry.target ?? null, entry.details ? JSON.stringify(entry.details) : null, entry.prevHash, entry.hash],
@@ -91,21 +225,44 @@ export class AuditLog {
     return rows.map(fromRow);
   }
 
-  /** Walk the whole chain. */
-  async verify(): Promise<{ ok: boolean; entries: number; head: string; problems: string[] }> {
+  /** Walk the whole chain, checking every keyed entry with its key. */
+  async verify(): Promise<AuditVerification> {
     const rows = await this.store.all('SELECT * FROM ez_audit ORDER BY seq');
     const problems: string[] = [];
     let prev = AUDIT_GENESIS;
     let expected = 1;
+    let keyed = 0;
+    let legacy = 0;
+    let lastLegacy = 0;
+    const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
     for (const r of rows) {
       const e = fromRow(r);
       if (e.seq !== expected) problems.push(`entry ${e.seq}: expected sequence ${expected} (an entry was removed or inserted)`);
       if (e.prevHash !== prev) problems.push(`entry ${e.seq}: chain broken (previous hash mismatch)`);
       const { hash, ...rest } = e;
-      if (auditHash(rest) !== hash) problems.push(`entry ${e.seq}: content altered (hash mismatch)`);
+      const k = KEYED.exec(hash);
+      if (k) {
+        keyed++;
+        const key = this.keys().get(k[1]);
+        if (!key) problems.push(`entry ${e.seq}: signed with audit key "${k[1]}", which is not in ${this.keyFile} (the key file was replaced, or the entry forged)`);
+        else if (!same(auditHmac(rest, key), hash)) problems.push(`entry ${e.seq}: content altered or forged (keyed hash mismatch)`);
+      } else if (LEGACY.test(hash)) {
+        // Unkeyed entries are only valid before the first keyed one: one after it was written without the key.
+        if (keyed) problems.push(`entry ${e.seq}: unkeyed hash after keyed entries (written without the audit key: forged)`);
+        else {
+          legacy++;
+          lastLegacy = e.seq;
+          if (auditHash(rest) !== hash) problems.push(`entry ${e.seq}: content altered (hash mismatch)`);
+        }
+      } else {
+        problems.push(`entry ${e.seq}: hash "${hash.slice(0, 24)}..." is in no known format`);
+      }
       prev = hash;
       expected = e.seq + 1;
     }
-    return { ok: problems.length === 0, entries: rows.length, head: prev, problems };
+    const warnings = legacy
+      ? [`entries 1-${lastLegacy} were written before the audit log was keyed: their chain is intact, but it proves integrity against accidents only, not against someone who could write to the database`]
+      : [];
+    return { ok: problems.length === 0, entries: rows.length, head: prev, problems, warnings, keyed, legacy };
   }
 }

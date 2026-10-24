@@ -48,6 +48,8 @@ export interface JourneyReliability {
   relogins?: Array<{ stepId: string; role: string; reason: string; evidence?: string }>;
   /** The pooled account this journey ran as. */
   account?: { role: string; account: string };
+  /** Resource locks lost while the journey held them (its exclusive use of the resource is not guaranteed). */
+  locksLost?: string[];
 }
 
 export interface CandidateDiagnosis {

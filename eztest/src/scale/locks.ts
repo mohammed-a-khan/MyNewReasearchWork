@@ -20,6 +20,13 @@ import { LeaseRegistry, type Lease } from '../data/index.js';
 export interface LockHandle {
   key: string;
   release(): Promise<void>;
+  /** Why the lock was lost while held (renewal refused, or not renewed before it expired); undefined while it is held. */
+  lost?(): string | undefined;
+}
+
+/** Report a lost lock once: a process warning (it reaches the console and CI logs). */
+export function reportLostLock(reason: string): void {
+  process.emitWarning(reason, 'EZTestLockLost');
 }
 
 export interface LockBackend {
@@ -52,12 +59,31 @@ export class FileLockBackend implements LockBackend {
   async tryAcquire(key: string): Promise<LockHandle | undefined> {
     let lease: Lease | undefined = await this.registry.tryAcquire(`lock:${key}`);
     if (!lease) return undefined;
+    let lost: string | undefined;
+    let lastRenewed = Date.now();
+    let lastError = '';
     const timer = setInterval(() => {
-      if (lease) void this.registry.renew(lease).then((l) => (lease = l)).catch(() => undefined);
+      if (!lease || lost) return;
+      void this.registry.renew(lease).then(
+        (l) => {
+          lease = l;
+          lastRenewed = Date.now();
+        },
+        (e: Error & { code?: string }) => {
+          lastError = e.message;
+          // Someone else holds the lease file now, or it has not been renewed within its lifetime.
+          if (e.code === 'LEASE_LOST' || Date.now() - lastRenewed >= this.registry.ttlMs) {
+            lost = `lock "${key}" was lost while held: ${e.code === 'LEASE_LOST' ? 'another holder took the lease over' : `it could not be renewed for ${Date.now() - lastRenewed} ms (${lastError}) and expired`}; another run may be using the resource`;
+            clearInterval(timer);
+            reportLostLock(lost);
+          }
+        },
+      );
     }, Math.max(1000, Math.floor(this.registry.ttlMs / 3)));
     timer.unref();
     return {
       key,
+      lost: () => lost,
       release: async () => {
         clearInterval(timer);
         const l = lease;
@@ -112,8 +138,11 @@ export class JourneyLocker {
     return resolveLockKeys(journey as Journey & { locks?: string[] });
   }
 
-  /** Acquire every key, or none. Returns a release function, or undefined when any key is busy. */
-  async tryAcquire(journey: Journey): Promise<(() => Promise<void>) | undefined> {
+  /**
+   * Acquire every key, or none. Returns a release function (with `lost()`: the locks lost while
+   * held), or undefined when any key is busy.
+   */
+  async tryAcquire(journey: Journey): Promise<((() => Promise<void>) & { lost?: () => string[] }) | undefined> {
     const keys = this.keys(journey);
     if (!keys.length) return async () => {};
     if (keys.some((k) => this.local.has(k))) return undefined;
@@ -135,12 +164,13 @@ export class JourneyLocker {
       throw e;
     }
     let released = false;
-    return async () => {
+    const release = async () => {
       if (released) return;
       released = true;
       await Promise.all(held.map((x) => x.release().catch(() => undefined)));
       keys.forEach((x) => this.local.delete(x));
     };
+    return Object.assign(release, { lost: () => held.map((h) => h.lost?.()).filter((x): x is string => !!x) });
   }
 
   async describeHolders(journey: Journey): Promise<string> {
