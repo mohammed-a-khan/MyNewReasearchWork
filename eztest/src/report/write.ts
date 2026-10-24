@@ -13,13 +13,16 @@ import { buildJsonReport, type JsonReport } from './json.js';
 import { renderJUnit } from './junit.js';
 import { renderTestsCsv } from './csv.js';
 import { renderSummaryHtml } from './summary.js';
+import { renderEmailHtml } from './email.js';
+import { renderReportXlsx } from './xlsx.js';
+import { renderReportPdf } from './pdf.js';
 import { applyIntegrationLinks, buildReportModel, type ReportModel, type ReportModelInput, type StepArtifacts } from './data.js';
 import { loadOrCaptureContext } from './context.js';
 import { readIntegrations } from './integrations.js';
 import type { ReportInsights } from './model.js';
 
-export type ReportFormat = 'html' | 'json' | 'junit' | 'csv' | 'summary';
-export const REPORT_FORMATS: ReportFormat[] = ['html', 'json', 'junit', 'csv', 'summary'];
+export type ReportFormat = 'html' | 'json' | 'junit' | 'csv' | 'summary' | 'email' | 'xlsx' | 'pdf';
+export const REPORT_FORMATS: ReportFormat[] = ['html', 'json', 'junit', 'csv', 'summary', 'email', 'xlsx', 'pdf'];
 
 export const REPORT_FILES: Record<ReportFormat, string> = {
   html: 'report.html',
@@ -27,6 +30,9 @@ export const REPORT_FILES: Record<ReportFormat, string> = {
   junit: 'junit.xml',
   csv: 'tests.csv',
   summary: 'summary.html',
+  email: 'email.html',
+  xlsx: 'report.xlsx',
+  pdf: 'report.pdf',
 };
 
 /** The report model, kept next to the reports so they can be rendered again (after publishing). */
@@ -110,11 +116,25 @@ const dataUri = async (path: string | undefined, max = 1_500_000): Promise<strin
  * positions, the time-travel trace (per-step heal notes, requests, console and sanitised DOM
  * snapshots), visual comparisons (baseline, actual, diff) and the trace zips.
  */
-export async function collectStepArtifacts(runDir: string, run: RunResult, evidence: EvidenceRef[], o: { maxFiles?: number; snapshotBudget?: number } = {}): Promise<StepArtifacts> {
-  const out: StepArtifacts = { api: new Map(), network: new Map(), console: new Map(), chapters: new Map(), traces: new Map(), snapshots: new Map(), visual: new Map(), traceZips: new Map() };
+export async function collectStepArtifacts(runDir: string, run: RunResult, evidence: EvidenceRef[], o: { maxFiles?: number; snapshotBudget?: number; maxLensFiles?: number } = {}): Promise<StepArtifacts> {
+  const out: StepArtifacts = { api: new Map(), network: new Map(), console: new Map(), chapters: new Map(), traces: new Map(), snapshots: new Map(), visual: new Map(), traceZips: new Map(), lenses: [] };
   const failing = new Set(run.journeys.filter((j) => j.status === 'failed' || j.status === 'error' || j.attempt > 1).map((j) => j.journeyId));
   out.evidenceMeta = await evidenceMeta(runDir, evidence);
   let budget = o.maxFiles ?? 4000;
+  // Lens findings (accessibility, security, performance) for the run-level Quality section.
+  let lensBudget = o.maxLensFiles ?? 3000;
+  for (const ev of evidence) {
+    if (lensBudget <= 0) break;
+    if (ev.kind !== 'data' || !ev.journeyId || !/(^|\/)lens-(a11y|security|perf)-[^/]*\.json$/.test(ev.path)) continue;
+    const abs = inside(runDir, ev.path);
+    if (!abs || !existsSync(abs)) continue;
+    lensBudget--;
+    try {
+      out.lenses!.push({ journeyId: ev.journeyId, ...(ev.stepId ? { stepId: ev.stepId } : {}), evidenceId: ev.id, findings: JSON.parse(await readFile(abs, 'utf8')) as unknown });
+    } catch {
+      // unreadable evidence is reported by the evidence verifier
+    }
+  }
   for (const ev of evidence) {
     if (budget <= 0) break;
     const isApi = ev.kind === 'network' && ev.path.startsWith('api/') && ev.stepId && ev.journeyId;
@@ -249,15 +269,17 @@ function exportsOf(formats: ReportFormat[]): Array<{ label: string; href: string
   if (formats.includes('junit')) x.push({ label: 'JUnit XML', href: REPORT_FILES.junit });
   if (formats.includes('csv')) x.push({ label: 'CSV of tests', href: REPORT_FILES.csv });
   if (formats.includes('summary')) x.push({ label: 'One-page summary (PDF-ready)', href: REPORT_FILES.summary });
+  if (formats.includes('pdf')) x.push({ label: 'PDF report', href: REPORT_FILES.pdf });
+  if (formats.includes('xlsx')) x.push({ label: 'Excel workbook', href: REPORT_FILES.xlsx });
+  if (formats.includes('email')) x.push({ label: 'E-mail summary (HTML)', href: REPORT_FILES.email });
   return x;
 }
 
-/** Formats written for a request: the HTML report always brings its CSV and one-page summary. */
+/** Formats written for a request: the HTML report always brings its CSV, one-page summary, e-mail summary, Excel workbook and PDF. */
 export function expandFormats(formats: ReportFormat[]): ReportFormat[] {
   const set = new Set(formats);
   if (set.has('html')) {
-    set.add('csv');
-    set.add('summary');
+    for (const f of ['csv', 'summary', 'email', 'xlsx', 'pdf'] as const) set.add(f);
   }
   return REPORT_FORMATS.filter((f) => set.has(f));
 }
@@ -267,8 +289,11 @@ async function writeModelOutputs(runDir: string, model: ReportModel, formats: Re
   const large = model.tests.length > 2000;
   for (const f of formats) {
     const path = join(runDir, REPORT_FILES[f]);
-    let content: string;
+    let content: string | Buffer;
     if (f === 'html') content = renderReportModelHtml(model, { exports: exportsList });
+    else if (f === 'email') content = renderEmailHtml(model);
+    else if (f === 'xlsx') content = await renderReportXlsx(model);
+    else if (f === 'pdf') content = renderReportPdf(model, { runDir });
     else if (f === 'json') {
       let doc: JsonReport;
       if (run) doc = buildJsonReport(run, insights, model);
@@ -334,8 +359,11 @@ export async function rerenderReports(runDir: string): Promise<Partial<Record<Re
   const exportsList = exportsOf(all);
   for (const f of formats) {
     const path = join(runDir, REPORT_FILES[f]);
-    let content: string;
+    let content: string | Buffer;
     if (f === 'html') content = renderReportModelHtml(model, { exports: exportsList });
+    else if (f === 'email') content = renderEmailHtml(model);
+    else if (f === 'xlsx') content = await renderReportXlsx(model);
+    else if (f === 'pdf') content = renderReportPdf(model, { runDir });
     else if (f === 'json') {
       const prev = JSON.parse(await readFile(path, 'utf8')) as JsonReport;
       content = JSON.stringify({ ...prev, version: 2, generatedAt: model.generatedAt, model }, null, model.tests.length > 2000 ? undefined : 2);

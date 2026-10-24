@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium, type Browser } from '../../src/browser/index.js';
-import { buildReportModel, renderReportModelHtml, writeReports } from '../../src/report/index.js';
+import { buildReportModel, renderEmailHtml, renderReportModelHtml, renderReportPdf, renderReportXlsx, writeReports } from '../../src/report/index.js';
 import { scriptJson } from '../../src/scale/report.js';
 import { syntheticRun } from './synthetic.js';
 
@@ -45,6 +45,25 @@ describe('report of a 10,000-test run', () => {
     const out = await writeReports(dir, run, { formats: ['html', 'json'], evidence, context: { browsers: [], devices: [], eztestVersion: 'x', node: 'v22', machine: { os: 'linux' }, startedAt: run.startedAt, finishedAt: run.finishedAt, timeZone: 'UTC', extra: {} } });
     console.log(`[report-perf] writeReports: ${Math.round(performance.now() - t)} ms, html ${((await stat(out.html!)).size / 1e6).toFixed(1)} MB, json ${((await stat(out.json!)).size / 1e6).toFixed(1)} MB`);
     expect(performance.now() - t).toBeLessThan(20_000);
+  }, 60_000);
+
+  it('writes the PDF, Excel and e-mail exports of the 10,000 tests within their budget', async () => {
+    const model = buildReportModel(run, { evidence });
+    let t = performance.now();
+    const xlsx = await renderReportXlsx(model);
+    const xlsxMs = performance.now() - t;
+    t = performance.now();
+    const pdf = renderReportPdf(model);
+    const pdfMs = performance.now() - t;
+    t = performance.now();
+    const mail = renderEmailHtml(model);
+    const mailMs = performance.now() - t;
+    console.log(`[report-perf] xlsx ${(xlsx.length / 1e6).toFixed(1)} MB in ${Math.round(xlsxMs)} ms; pdf ${(pdf.length / 1e6).toFixed(1)} MB in ${Math.round(pdfMs)} ms; e-mail ${Math.round(mail.length / 1024)} KiB in ${Math.round(mailMs)} ms`);
+    expect(xlsxMs).toBeLessThan(6_000);
+    expect(pdfMs).toBeLessThan(8_000);
+    expect(mailMs).toBeLessThan(1_000);
+    // The e-mail stays small whatever the run size (top failures only).
+    expect(mail.length).toBeLessThan(120_000);
   }, 60_000);
 
   it('embedded data cannot break out of its script element', () => {

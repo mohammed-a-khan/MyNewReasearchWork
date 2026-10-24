@@ -69,6 +69,7 @@ describe('eztest run with ado.publishResults', () => {
       `baseUrl: ${app.url}`,
       'reporters: [console, html, json]',
       'screenshots: on-failure',
+      'video: retain-on-failure',
       'report:',
       '  name: Contoso Shop',
       'ado:',
@@ -127,7 +128,21 @@ describe('eztest run with ado.publishResults', () => {
 
     // the re-rendered report (with its links) is attached to the ADO test run
     const att = ado.state.attachments.get(`${adoRun.id}:`) ?? ado.state.attachments.get(String(adoRun.id)) ?? [...ado.state.attachments.entries()].find(([k]) => k.startsWith(`${adoRun.id}`) && !k.includes('/'))?.[1] ?? [];
-    expect(att.map((a) => a.fileName)).toEqual(expect.arrayContaining(['report.html', 'summary.html', 'report.json']));
+    expect(att.map((a) => a.fileName)).toEqual(expect.arrayContaining(['report.html', 'summary.html', 'report.json', 'report.pdf', 'report.xlsx', 'email.html']));
+    expect(att.find((a) => a.fileName === 'report.pdf')!.size).toBeGreaterThan(5000);
+
+    // the failed result carries the failure's evidence (screenshot and video), its category, next step and failure type
+    const results = ado.state.results.get(adoRun.id)!;
+    const bad = results.find((x) => (x.testCase as { id: string }).id === String(tcBad.id))!;
+    expect(bad.outcome).toBe('Failed');
+    expect(bad.failureType).toBe('New Issue');
+    expect(String(bad.comment)).toMatch(/Product defect: Compare "Expected" and "Found"/);
+    const good = results.find((x) => (x.testCase as { id: string }).id === String(tcOk.id))!;
+    expect(good.failureType).toBeUndefined();
+    const badFiles = (ado.state.attachments.get(`${adoRun.id}:${bad.id}`) ?? []).map((a) => a.fileName);
+    expect(badFiles.some((f) => /\.png$/.test(f))).toBe(true);
+    expect(badFiles.some((f) => /\.webm$/.test(f))).toBe(true);
+    expect((ado.state.attachments.get(`${adoRun.id}:${good.id}`) ?? []).some((a) => /\.webm$/.test(a.fileName))).toBe(false);
 
     // the Teams card links the report's ADO run and the build, and lists the failure
     const card = (posts[0] as { attachments: Array<{ content: Record<string, unknown> }> }).attachments[0].content as { version: string; body: Array<Record<string, unknown>>; actions: Array<{ title: string; url: string }> };

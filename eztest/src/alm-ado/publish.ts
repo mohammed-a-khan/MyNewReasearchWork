@@ -84,7 +84,9 @@ export interface PublishOptions {
   /** Files (report.html, junit.xml, evidence pack...) to attach to the test run. */
   attachments?: Array<{ path: string; comment?: string }>;
   /** Attach each journey's evidence files (from the run dir manifest) to its results; failing-step files go on the step. */
-  resultEvidence?: { runDir: string; kinds?: EvidenceKind[]; maxPerResult?: number };
+  resultEvidence?: { runDir: string; kinds?: EvidenceKind[]; maxPerResult?: number; failureKinds?: EvidenceKind[]; maxPerFailedResult?: number };
+  /** The report's view of a failing journey (failure category, suggested next step, new or known): into the result's comment and failure type. */
+  failureNotes?: (journeyId: string) => { category: string; fix: string; known?: boolean } | undefined;
   maxAttachmentBytes?: number;
   batchSize?: number;
   /** Per-step action results and iterations from the test cases' steps (default true). */
@@ -365,10 +367,12 @@ export async function publishRun(run: RunResult, opts: PublishOptions): Promise<
     const duration = p.js.reduce((n, j) => n + j.durationMs, 0);
     const heals = p.js.map(healComment).filter(Boolean);
     const retried = p.js.filter((j) => j.attempt > 1);
+    const notes = outcome !== 'Passed' ? opts.failureNotes?.(firstBad.journeyId) : undefined;
     const comment = [
       heals.length ? `${heals.join(' | ')} | outcome: ${outcome === 'Passed' ? 'passed with healed step(s) awaiting review in EZTest' : outcome.toLowerCase()}` : undefined,
       retried.length ? `re-run: ${retried.map((j) => `${j.journeyId} ${j.status} on attempt ${j.attempt}`).join(', ')}` : undefined,
       p.js.length > 1 ? `${p.js.length} iterations (Examples rows)` : undefined,
+      notes ? `${notes.category}: ${notes.fix}` : undefined,
     ].filter(Boolean).join(' | ');
     const base = p.js[0];
     // Manual cases executed by a tester are published as manual results, run by that tester; hybrid ones stay automated.
@@ -391,6 +395,7 @@ export async function publishRun(run: RunResult, opts: PublishOptions): Promise<
       completedDate: Number.isFinite(started) ? new Date(started + duration).toISOString() : undefined,
       errorMessage: err ? err.message.slice(0, 4000) : undefined,
       stackTrace: err?.stack?.slice(0, 4000),
+      ...(notes && notes.known !== undefined ? { failureType: notes.known ? 'Known Issue' : 'New Issue' } : {}),
       comment: [manualNote, comment].filter(Boolean).join(' | ').slice(0, 1000) || undefined,
       ...(links.buildId ? { build: { id: String(links.buildId) } } : {}),
       ...(links.owner ? { runBy: { displayName: links.owner }, owner: { displayName: links.owner } } : {}),
@@ -521,18 +526,27 @@ export async function publishRun(run: RunResult, opts: PublishOptions): Promise<
   if (opts.resultEvidence) {
     const runDir = opts.resultEvidence.runDir;
     const manifest = await readEvidenceManifest(runDir);
-    const kinds = opts.resultEvidence.kinds ?? ['screenshot'];
-    const max = opts.resultEvidence.maxPerResult ?? 5;
+    const okKinds = opts.resultEvidence.kinds ?? ['screenshot'];
+    const badKinds = [...new Set([...okKinds, ...(opts.resultEvidence.failureKinds ?? [])])];
     for (const p of toPublish) {
       const resultId = resultIds.get(keyOf(p.pointId, p.testCaseId));
       if (!resultId) continue;
       const maps = stepMaps.get(resultId);
+      // Failing results also carry the failure's video and console log (failureKinds), within a larger budget.
+      const bad = p.js.some((j) => j.status === 'failed' || j.status === 'error');
+      const kinds = bad ? badKinds : okKinds;
+      const max = bad ? (opts.resultEvidence.maxPerFailedResult ?? 8) : (opts.resultEvidence.maxPerResult ?? 5);
       let n = 0;
       for (const [i, j] of p.js.entries()) {
         const stepOf = new Map<string, StepResult>();
         for (const s of allSteps(j.steps)) for (const e of s.evidence) stepOf.set(e, s);
         const ids = new Set([...j.evidence, ...allSteps(j.steps).flatMap((s) => s.evidence)]);
         const evs: EvidenceRef[] = manifest.filter((e) => ids.has(e.id) && kinds.includes(e.kind));
+        if (bad) {
+          // The failing step's files, the video and the console log first, so they fit in the budget.
+          const rank = (e: EvidenceRef) => (stepOf.get(e.id)?.status === 'failed' ? 0 : e.kind === 'video' ? 1 : e.kind === 'console' ? 2 : 3);
+          evs.sort((x, y) => rank(x) - rank(y));
+        }
         for (const ev of evs) {
           if (n >= max) break;
           const abs = resolve(runDir, ev.path);

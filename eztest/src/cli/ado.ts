@@ -29,7 +29,7 @@ import {
   type AdoClient,
   type PublishSummary,
 } from '../alm-ado/index.js';
-import { adoWeb, recordIntegration, rerenderReports } from '../report/index.js';
+import { adoWeb, CATEGORY_LABEL, readReportModel, recordIntegration, rerenderReports } from '../report/index.js';
 import type { LoadedConfig } from '../config/index.js';
 import type { RunResult } from '../core/index.js';
 import { identityVaultFromConfig } from '../identity/index.js';
@@ -113,7 +113,8 @@ export async function publishRunToAdo(loaded: LoadedConfig, o: AdoRunPublishOpti
   const client = o.client ?? (await adoClientFor(loaded, o.cwd, o.env));
   const run = JSON.parse(await readFile(join(dir, 'run.json'), 'utf8')) as RunResult;
   const pack = o.evidencePack ?? join(dir, 'evidence-pack.zip');
-  const reportFiles = ['report.html', 'summary.html'];
+  // The HTML report, its one-page summary, the PDF, the Excel workbook and the e-mail summary: rendered again with the run's links, then attached.
+  const reportFiles = ['report.html', 'summary.html', 'report.pdf', 'report.xlsx', 'email.html'];
   // The report is attached after publishing, rendered again with the run's links.
   const attachments: Array<{ path: string; comment?: string }> = ['report.html', 'junit.xml', 'report.json'].filter((f) => o.report === false || !reportFiles.includes(f)).map((f) => join(dir, f)).filter((p) => existsSync(p)).map((path) => ({ path }));
   if (existsSync(pack)) attachments.push({ path: pack, comment: 'EZTest evidence pack (signed, hash-chained)' });
@@ -143,6 +144,8 @@ export async function publishRunToAdo(loaded: LoadedConfig, o: AdoRunPublishOpti
   }
   const fileFor = (id: string) => fileOfJourney.get(id) ?? [...fileOfJourney.entries()].find(([k]) => id.startsWith(`${k}-`))?.[1];
   const links = pipelineLinksFromEnv(o.env);
+  // The report's failure categories and suggested next steps go into the results' comments.
+  const reportTests = new Map(((await readReportModel(dir).catch(() => undefined))?.tests ?? []).map((t) => [t.id, t]));
   const at = () => new Date().toISOString();
   let summary: PublishSummary;
   try {
@@ -154,7 +157,11 @@ export async function publishRunToAdo(loaded: LoadedConfig, o: AdoRunPublishOpti
       links,
       configurationId,
       attachments,
-      resultEvidence: { runDir: dir, kinds: o.trace ? ['screenshot', 'trace'] : ['screenshot'] },
+      resultEvidence: { runDir: dir, kinds: o.trace ? ['screenshot', 'trace'] : ['screenshot'], failureKinds: ['video', 'console'] },
+      failureNotes: (id) => {
+        const t = reportTests.get(id);
+        return t?.cat ? { category: CATEGORY_LABEL[t.cat.c], fix: t.cat.fix, ...(t.failure ? { known: t.failure.known } : {}) } : undefined;
+      },
       stepResults: o.stepResults !== false,
       flaky: { enabled: !!(o.flaky || ac.markFlaky), scores: flakyScores },
       bugs: {

@@ -51,6 +51,8 @@ export interface AnalyzeOptions {
   cwd?: string;
   /** Environment for the run context (default process.env). */
   env?: Record<string, string | undefined>;
+  /** The effective configuration, shown in the report's Configuration section (secrets masked). */
+  config?: unknown;
 }
 
 /** The project's name for the report: package.json "name", else the folder name, as words ("shop-project" -> "Shop project"). */
@@ -102,11 +104,12 @@ export interface AnalyzeResult {
 }
 
 /** Report options from the project configuration: report.*, ado.* (links) and the Jira publisher's base URL. */
-export function reportOptionsFromConfig(cfg: EzTestConfig, cwd: string, env: Record<string, string | undefined> = process.env): Pick<AnalyzeOptions, 'report' | 'ado' | 'jira' | 'cwd'> {
+export function reportOptionsFromConfig(cfg: EzTestConfig, cwd: string, env: Record<string, string | undefined> = process.env): Pick<AnalyzeOptions, 'report' | 'ado' | 'jira' | 'cwd' | 'config'> {
   const s = adoSettings(cfg, env);
   const jira = (cfg.publishers as Array<{ use?: string; baseUrl?: unknown }>).find((p) => p.use === 'jira' && typeof p.baseUrl === 'string');
   return {
     cwd,
+    config: cfg,
     report: { ...cfg.report, videoPolicy: cfg.video },
     ...(s.collectionUrl && s.project ? { ado: { collectionUrl: s.collectionUrl, project: s.project, ...(cfg.ado.testPlanId ? { testPlanId: cfg.ado.testPlanId } : {}), ...(cfg.ado.testSuiteId ? { testSuiteId: cfg.ado.testSuiteId } : {}) } } : {}),
     ...(jira ? { jira: { baseUrl: String(jira.baseUrl) } } : {}),
@@ -254,6 +257,7 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
     ...(requirementsCatalog ? { requirementsCatalog } : {}),
     ...(ui ? { uiCoverage: { percent: ui.report.totals.percent, tested: ui.report.totals.tested, elements: ui.report.totals.elements, pages: ui.report.totals.pages } } : {}),
     ...(opts.env ? { env: opts.env } : {}),
+    ...(opts.config ? { config: opts.config } : {}),
   });
   return { runDir, triage, flaky, readiness, reports, warnings, quarantine: { ...qStatus, ignoredFailures }, ...(ui ? { uiCoverage: ui.report } : {}), failureTags: tags };
 }

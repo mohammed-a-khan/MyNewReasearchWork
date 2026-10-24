@@ -44,7 +44,7 @@ import { startStudio } from '../studio/index.js';
 import { noDisplayHint } from '../studio/record.js';
 import { importFiles, importFormats, verifyImported, writeImported, writeImportAssets, coverageEquivalence, BUILTIN_IMPORT_KINDS, type ImportKind } from '../importers/index.js';
 import { loadImporterPlugins, parseImporterOptions } from './importer-plugins.js';
-import type { ReportFormat } from '../report/index.js';
+import { REPORT_FORMATS, type ReportFormat } from '../report/index.js';
 import { DEFAULT_PLACEHOLDER, validateExamplesSource, fastRunOptions } from '../runner/index.js';
 import { installRunCancellation } from '../runner/cancel.js';
 import { registerLintCommand } from './lint.js';
@@ -176,7 +176,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--lens <names>', 'lenses after every step: a11y, security, visual (":warn" to not fail)', list)
     .option('--update-baselines', 'write visual baselines instead of comparing')
     .option('--update-snapshots', 'write aria snapshot baselines instead of comparing')
-    .option('--reporter <formats>', 'report formats: html,json,junit,csv,summary (html also writes tests.csv and summary.html)', list)
+    .option('--reporter <formats>', 'report formats: html,json,junit,csv,summary,email,xlsx,pdf (html also writes tests.csv, summary.html, email.html, report.xlsx and report.pdf)', list)
     .option('--policy <file>', 'readiness policy (default readiness.policyPath from config)')
     .option('--no-analyze', 'skip history/flaky/triage/readiness analysis')
     .option('--fast', 'fast mode: screenshots on failure only, no lenses, fingerprints only when missing, logs kept only for failures')
@@ -327,7 +327,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
 
       const locks = o.locks === false ? undefined : runLocksFor(journeys, loaded, io.cwd, client);
       const reporterNames: string[] = o.reporter ?? cfg.reporters;
-      const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit', 'csv', 'summary'].includes(r)) as ReportFormat[];
+      const builtinFormats = reporterNames.filter((r: string) => (REPORT_FORMATS as string[]).includes(r)) as ReportFormat[];
       const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'csv', 'summary', 'console'].includes(r));
       // Parallel journeys run in worker processes (crash and CPU isolation) unless asked otherwise; manual prompts need this terminal.
       const workerMode: 'process' | 'inline' = o.manual === 'prompt' || cfg.email?.provider === 'sink' ? 'inline' : o.workerMode ?? envWorkers(io.env) ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');

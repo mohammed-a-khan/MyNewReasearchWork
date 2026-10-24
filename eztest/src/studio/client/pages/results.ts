@@ -18,6 +18,7 @@ import { createTable } from '../ui/table.js';
 import { createTabs } from '../ui/tabs.js';
 import { toastError } from '../ui/toast.js';
 import { registerFeaturesTab } from './results-features.js';
+import { registerReportTab, reportSummaryView } from './results-report.js';
 
 export interface RunListItem {
   runId: string;
@@ -133,6 +134,7 @@ function registerBuiltInTabs(): void {
       const v = d.verification;
       add(
         el,
+        reportSummaryView(d),
         h('div', { class: 'stats' }, stat(s.total, 'Journeys'), stat(s.passed, 'Passed', 'ok'), stat(s.passedHealed, 'Healed', 'heal'), stat(s.failed, 'Failed', 'bad'), stat(s.skipped, 'Skipped'), stat(s.errors, 'Errors', 'bad'), stat(ms(d.run.durationMs), 'Duration')),
         h('div', { class: 'row wrap' }, v.ok ? badge('ok', `Evidence verified (${v.entries} entries)`) : badge('bad', 'Evidence NOT valid'), ins.readiness ? h('span', null, 'Release readiness: ', badge(ins.readiness.decision), h('span', { class: 'muted', text: ` score ${ins.readiness.score}` })) : null),
         !v.ok ? h('ul', { class: 'bullets warn-text' }, v.problems.slice(0, 10).map((p) => h('li', { text: p }))) : null,
@@ -341,6 +343,7 @@ function registerBuiltInTabs(): void {
 export function registerResultsPage(): void {
   registerBuiltInTabs();
   registerFeaturesTab();
+  registerReportTab();
   registerPage({
     id: 'runs',
     title: 'Results',

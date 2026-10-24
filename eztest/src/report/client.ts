@@ -19,6 +19,7 @@ var LABEL = { passed: 'Passed', healed: 'Healed', flaky: 'Flaky', failed: 'Faile
 var STATE_ICON = { passed: 'check', healed: 'heal', flaky: 'retry', failed: 'x', error: 'alert', skipped: 'minus' };
 var STEP = { P: ['passed', 'Passed'], H: ['healed', 'Passed (healed)'], F: ['failed', 'Failed'], S: ['skipped', 'Skipped'], B: ['error', 'Blocked'] };
 var SEVERITY = { failed: 0, error: 1, flaky: 2, healed: 3, skipped: 4, passed: 5 };
+var CAT = { product: 'Product defect', test: 'Test issue', environment: 'Environment', data: 'Test data', flaky: 'Flaky', unknown: 'Needs review' };
 var byId = {};
 for (var bi = 0; bi < T.length; bi++) byId[T[bi].id] = bi;
 
@@ -139,15 +140,15 @@ if ('IntersectionObserver' in window) {
   var io = new IntersectionObserver(function (entries) {
     entries.forEach(function (en) { if (en.isIntersecting) navLinks.forEach(function (a) { a.setAttribute('aria-current', String(a.getAttribute('href') === '#' + en.target.id)); }); });
   }, { rootMargin: '-120px 0px -70% 0px' });
-  ['summary', 'tests', 'failures', 'comparison', 'integrations', 'context', 'evidence'].forEach(function (id) { var s = document.getElementById(id); if (s) io.observe(s); });
+  ['summary', 'tests', 'failures', 'quality', 'comparison', 'integrations', 'context', 'evidence'].forEach(function (id) { var s = document.getElementById(id); if (s) io.observe(s); });
 }
 
 // ------------------------------------------------------------ explorer state
 var q = document.getElementById('q'), vlist = document.getElementById('vlist'), vinner = document.getElementById('vinner'), countEl = document.getElementById('count');
 var detail = document.getElementById('detail');
 var groupSel = document.getElementById('group'), sortSel = document.getElementById('sort');
-var fTag = document.getElementById('f-tag'), fOwner = document.getElementById('f-owner'), fBrowser = document.getElementById('f-browser');
-var st = { state: 'all', query: '', group: store.get('ez-report-group') || 'suite', sort: 'default', tag: '', owner: '', browser: '', collapsed: {}, active: 0, open: null };
+var fTag = document.getElementById('f-tag'), fOwner = document.getElementById('f-owner'), fBrowser = document.getElementById('f-browser'), fCat = document.getElementById('f-cat');
+var st = { state: 'all', query: '', group: store.get('ez-report-group') || 'suite', sort: 'default', tag: '', owner: '', browser: '', cat: '', collapsed: {}, active: 0, open: null };
 var ROW_H = 44, rows = [], searchIdx = null;
 
 function facet(sel, values) {
@@ -160,11 +161,17 @@ function facet(sel, values) {
 facet(fTag, [].concat.apply([], T.map(function (t) { return t.tags.filter(function (g) { return !/^@?(TestCaseId|TestPlanId|TestSuiteId)\b/i.test(g); }); })));
 facet(fOwner, [].concat.apply([], T.map(function (t) { return t.owners; })));
 facet(fBrowser, T.map(function (t) { return t.browser; }).filter(Boolean));
+if (fCat) {
+  var catCounts = {};
+  T.forEach(function (t) { if (t.cat) catCounts[t.cat.c] = (catCounts[t.cat.c] || 0) + 1; });
+  Object.keys(CAT).forEach(function (c) { if (catCounts[c]) fCat.appendChild(el('option', { value: c, text: CAT[c] + ' (' + catCounts[c] + ')' })); });
+  if (!Object.keys(catCounts).length) fCat.disabled = true;
+}
 if (groupSel) groupSel.value = st.group;
 
 function buildSearchIndex() {
   searchIdx = T.map(function (t) {
-    var parts = [t.name, t.id, t.tags.join(' '), t.owners.join(' '), t.file || '', t.suite.join(' '), t.failedStep || '', t.error ? t.error.message : '', t.requirements.join(' '), t.browser || '', t.state];
+    var parts = [t.name, t.id, t.tags.join(' '), t.owners.join(' '), t.file || '', t.suite.join(' '), t.failedStep || '', t.error ? t.error.message : '', t.requirements.join(' '), t.browser || '', t.state, t.cat ? CAT[t.cat.c] : '', t.row ? Object.keys(t.row).map(function (k) { return k + '=' + t.row[k]; }).join(' ') : ''];
     var n = 0;
     walkSteps(t.steps, function (s) { if (n++ < 60) parts.push(s.n); });
     if (t.ado) t.ado.testCases.forEach(function (c) { parts.push('#' + c.id); });
@@ -178,6 +185,7 @@ function matches(i) {
   if (st.tag && t.tags.indexOf(st.tag) < 0) return false;
   if (st.owner && t.owners.indexOf(st.owner) < 0) return false;
   if (st.browser && t.browser !== st.browser) return false;
+  if (st.cat && (!t.cat || t.cat.c !== st.cat)) return false;
   if (st.query) {
     if (!searchIdx) buildSearchIndex();
     var terms = st.query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -200,6 +208,7 @@ function groupKeys(t) {
   if (st.group === 'tag') { var tags = t.tags.filter(function (g) { return !/^@?(TestCaseId|TestPlanId|TestSuiteId)\b/i.test(g); }); return tags.length ? tags.map(function (g) { return [g]; }) : [['(no tag)']]; }
   if (st.group === 'owner') return t.owners.length ? t.owners.map(function (o) { return [o]; }) : [['(no owner)']];
   if (st.group === 'browser') return [[t.browser || '(single browser)']];
+  if (st.group === 'category') return [[t.cat ? CAT[t.cat.c] : 'Not failing']];
   if (st.group === 'cluster') return [[t.cluster ? t.cluster + ': ' + (D.clusters[t.cluster] || '') : (t.state === 'failed' || t.state === 'error' ? 'Unclustered failures' : 'Not failing')]];
   return [[]];
 }
@@ -256,8 +265,13 @@ function renderRow(r, i) {
   if (t.state === 'failed' || t.state === 'error') sub.push(t.failedStep || (t.error ? t.error.message.split('\n')[0] : ''));
   else if (t.tags.length) sub.push(t.tags.slice(0, 3).join(' '));
   var icon = el('span', { cls: 'sicon si-' + t.state, title: LABEL[t.state] }, [svgIcon(STATE_ICON[t.state])]);
+  var tail = el('span', { cls: 'rtail' }, [
+    t.cat ? el('span', { cls: 'cat c-' + t.cat.c, title: t.cat.why, text: CAT[t.cat.c] }) : null,
+    t.failure && !t.failure.known ? el('span', { cls: 'cat c-new', title: 'First failure with this error signature', text: 'new' }) : null,
+    t.history && t.history.sequence ? spark(t.history.sequence.slice(-12), true) : null,
+    el('span', { cls: 'rdur', text: fmtMs(t.durationMs) })]);
   return el('div', { cls: 'row' + (st.open === t.id ? ' active' : ''), role: 'treeitem', 'aria-level': r.depth + 1, 'aria-selected': String(st.open === t.id), 'data-row': i, 'data-id': t.id, tabindex: i === st.active ? '0' : '-1', style: 'top:' + top + 'px;padding-left:' + (10 + r.depth * 16) + 'px' },
-    [icon, el('div', { cls: 'rmain' }, [el('div', { cls: 'rname' }, [t.name, el('span', { cls: 'sr-only', text: ', ' + LABEL[t.state] })]), el('div', { cls: 'rsub', text: sub.join(' · ') })]), el('span', { cls: 'rdur', text: fmtMs(t.durationMs) })]);
+    [icon, el('div', { cls: 'rmain' }, [el('div', { cls: 'rname' }, [t.name, el('span', { cls: 'sr-only', text: ', ' + LABEL[t.state] + (t.cat ? ', ' + CAT[t.cat.c] : '') })]), el('div', { cls: 'rsub', text: sub.join(' · ') })]), tail]);
 }
 function render(force) {
   var h = vlist.clientHeight || 600, sc = vlist.scrollTop;
@@ -317,7 +331,7 @@ q.addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTime
 q.addEventListener('keydown', function (ev) { if (ev.key === 'ArrowDown') { ev.preventDefault(); focusRow(0); } else if (ev.key === 'Escape') { q.value = ''; st.query = ''; rebuild(); } });
 if (groupSel) groupSel.addEventListener('change', function () { st.group = groupSel.value; store.set('ez-report-group', st.group); st.collapsed = {}; st.active = 0; rebuild(); });
 if (sortSel) sortSel.addEventListener('change', function () { st.sort = sortSel.value; rebuild(); });
-[[fTag, 'tag'], [fOwner, 'owner'], [fBrowser, 'browser']].forEach(function (p) { if (p[0]) p[0].addEventListener('change', function () { st[p[1]] = p[0].value; st.active = 0; rebuild(); }); });
+[[fTag, 'tag'], [fOwner, 'owner'], [fBrowser, 'browser'], [fCat, 'cat']].forEach(function (p) { if (p[0]) p[0].addEventListener('change', function () { st[p[1]] = p[0].value; st.active = 0; rebuild(); }); });
 
 // ------------------------------------------------------------ lightbox
 var lb = document.getElementById('lightbox'), lbImg = document.getElementById('lb-img'), lbCap = document.getElementById('lb-cap'), lbOpen = document.getElementById('lb-open');
@@ -474,6 +488,7 @@ function bugText(t) {
   var n = 0;
   walkSteps(t.steps, function (s, depth) { n++; lines.push(new Array(depth + 1).join('  ') + n + '. [' + STEP[s.s][1] + '] ' + s.n); });
   if (t.error) { lines.push(''); lines.push('Error:'); lines.push(t.error.message); }
+  if (t.cat) { lines.push(''); lines.push('Category: ' + CAT[t.cat.c] + ' (' + t.cat.why + ')'); lines.push('Suggested next step: ' + t.cat.fix); }
   if (t.triage) { lines.push(''); lines.push('Probable cause: ' + t.triage.category + ' (' + Math.round(t.triage.confidence * 100) + '%) - ' + t.triage.reasons.join('; ')); }
   if (t.signature) lines.push('Failure signature: ' + t.signature + (t.failure && t.failure.known ? ' (known since ' + (t.failure.firstSeenRun || '?') + ')' : ' (new in this run)'));
   if (t.ado && t.ado.testCases.length) lines.push('Test case: ' + t.ado.testCases.map(function (c) { return '#' + c.id + (c.url ? ' ' + c.url : ''); }).join(', '));
@@ -645,8 +660,8 @@ function dbView(db) {
   var tb = el('tbody', null, db.rows.map(function (r) { return el('tr', null, r.map(function (c) { return el('td', { cls: 'mono', text: c === null ? 'NULL' : String(c) }); })); }));
   return el('div', null, [el('div', { cls: 'tbl-wrap' }, [el('table', null, [el('caption', { text: 'Query result ' + db.key + ' (' + db.total + ' row' + (db.total === 1 ? '' : 's') + (db.total > db.rows.length ? ', first ' + db.rows.length + ' shown' : '') + ', masked)' }), el('thead', null, [head]), tb])])]);
 }
-function spark(seq) {
-  var s = el('span', { cls: 'spark', role: 'img', 'aria-label': 'History, oldest first: ' + seq.split('').map(function (c) { return c === 'P' ? 'pass' : c === 'H' ? 'healed pass' : 'fail'; }).join(', ') });
+function spark(seq, small) {
+  var s = el('span', { cls: 'spark' + (small ? ' sm' : ''), role: 'img', title: small ? 'Last ' + seq.length + ' runs, oldest first' : null, 'aria-label': 'History, oldest first: ' + seq.split('').map(function (c) { return c === 'P' ? 'pass' : c === 'H' ? 'healed pass' : 'fail'; }).join(', ') });
   seq.split('').forEach(function (c) { s.appendChild(el('i', { cls: c === 'P' || c === 'H' || c === 'F' ? c : 'F' })); });
   return s;
 }
@@ -830,6 +845,7 @@ function renderDetail(t) {
   if (t.state === 'failed' || t.state === 'error' || t.state === 'flaky') {
     var fk = [];
     if (t.error) fk.push(el('div', { cls: 'err', role: 'note' }, [el('strong', { text: (t.error.name || 'Error') + (t.failedStep ? ' in step: ' + t.failedStep : '') }), pre(t.error.message, ' '), t.error.stack ? el('details', null, [el('summary', { cls: 'small', text: 'Stack trace' }), pre(t.error.stack)]) : null]));
+    if (t.cat) fk.push(el('div', { cls: 'catbox c-' + t.cat.c, role: 'note' }, [el('div', null, [el('span', { cls: 'cat c-' + t.cat.c, text: CAT[t.cat.c] }), ' ', el('span', { cls: 'small muted', text: (t.cat.src === 'triage' ? 'decided by ' : 'rule: ') + t.cat.why })]), el('p', null, [el('strong', { text: 'Suggested next step: ' }), t.cat.fix])]));
     if (t.flake) fk.push(el('p', null, [el('strong', { text: 'Flaky: ' }), 'failed first, passed on retry. Cause ' + t.flake.cause + ' (' + Math.round(t.flake.confidence * 100) + '%): ' + t.flake.reason]));
     if (t.failure) fk.push(el('p', { cls: 'small' }, [t.failure.known ? badge('skipped', 'known failure') : badge('failed', 'new failure'), ' ', t.failure.firstSeenRun ? 'First seen in run ' + t.failure.firstSeenRun + (t.failure.firstSeenAt ? ' (' + t.failure.firstSeenAt.slice(0, 10) + ')' : '') : 'First seen in this run', t.failure.tags.length ? ' · ' + t.failure.tags.join(', ') : '', t.failure.streak ? ' · failing ' + t.failure.streak + ' run(s) in a row' : '', t.signature ? ' · signature ' + t.signature : '']));
     if (t.cluster) {
@@ -948,7 +964,9 @@ function route() {
   var m = /^#test\/(.+)$/.exec(h);
   if (m) { var id; try { id = decodeURIComponent(m[1]); } catch (e) { id = m[1]; } openTest(id, false); return; }
   var f = /^#filter\/([a-z]+)$/.exec(h);
-  if (f) { setState(f[1] === 'failed' ? 'failed' : f[1]); document.getElementById('tests').scrollIntoView({ block: 'start' }); }
+  if (f) { setState(f[1] === 'failed' ? 'failed' : f[1]); document.getElementById('tests').scrollIntoView({ block: 'start' }); return; }
+  var c = /^#category\/([a-z]+)$/.exec(h);
+  if (c && fCat && CAT[c[1]]) { st.cat = c[1]; fCat.value = c[1]; st.active = 0; rebuild(); document.getElementById('tests').scrollIntoView({ block: 'start' }); }
 }
 window.addEventListener('hashchange', route);
 document.addEventListener('click', function (ev) {
@@ -963,6 +981,14 @@ document.addEventListener('keydown', function (ev) {
   if (ev.key === '/' && !editing) { ev.preventDefault(); document.getElementById('tests').scrollIntoView({ block: 'start' }); q.focus(); }
   else if (ev.key === 'Escape' && !editing && st.open && !(lb && lb.open)) { closeTest(); }
   else if (ev.key === '?' && !editing) { alert('Keyboard shortcuts\n\n/  search tests\nUp / Down  move in the list\nEnter  open the test or group\nLeft / Right  collapse / expand a group\nEsc  close the test or the screenshot\nPrint button  executive summary as PDF'); }
+});
+
+// ------------------------------------------------------------ configuration filter
+var cfgQ = document.getElementById('cfg-q');
+if (cfgQ) cfgQ.addEventListener('input', function () {
+  var v = cfgQ.value.trim().toLowerCase(), shown = 0, rowsC = document.querySelectorAll('#cfg-table tbody tr');
+  rowsC.forEach(function (tr) { var on = !v || (tr.textContent || '').toLowerCase().indexOf(v) >= 0; tr.hidden = !on; if (on) shown++; });
+  var n = document.getElementById('cfg-count'); if (n) n.textContent = shown + ' of ' + rowsC.length + ' settings';
 });
 
 var evHost = document.getElementById('ev-browser');

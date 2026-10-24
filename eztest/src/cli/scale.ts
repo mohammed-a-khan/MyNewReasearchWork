@@ -354,13 +354,13 @@ export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRu
 /** Publisher outcomes into integrations.json: Slack/Teams notifications, Jira bugs, other publishers. */
 export async function recordPublisherResults(runDir: string, results: Array<{ publisher: string; ok: boolean; message: string; skipped?: boolean; details?: unknown }>): Promise<void> {
   const at = new Date().toISOString();
-  const notifications = results.filter((r) => (r.publisher === 'slack' || r.publisher === 'teams') && !r.skipped).map((r) => ({ channel: r.publisher, ok: r.ok, message: r.message, at }));
+  const notifications = results.filter((r) => (r.publisher === 'slack' || r.publisher === 'teams' || r.publisher === 'email') && !r.skipped).map((r) => ({ channel: r.publisher, ok: r.ok, message: r.message, at }));
   const jira = results.find((r) => r.publisher === 'jira' && !r.skipped);
   const bugs = Array.isArray(jira?.details) ? (jira!.details as Array<{ journeyId?: string; key?: string; action?: string }>).filter((b) => b.journeyId && b.key && b.action !== 'dry-run').map((b) => ({ journeyId: b.journeyId!, key: b.key!, action: b.action ?? 'created' })) : [];
   await recordIntegration(runDir, {
     ...(notifications.length ? { notifications } : {}),
     ...(jira ? { jira: { status: jira.ok ? 'success' : 'failed', ...(jira.ok ? {} : { reason: jira.message }), bugs } } : {}),
-    publishers: results.filter((r) => !['slack', 'teams', 'jira'].includes(r.publisher)).map((r) => ({ name: r.publisher, ok: r.ok, message: r.message, ...(r.skipped ? { skipped: true } : {}) })),
+    publishers: results.filter((r) => !['slack', 'teams', 'email', 'jira'].includes(r.publisher)).map((r) => ({ name: r.publisher, ok: r.ok, message: r.message, ...(r.skipped ? { skipped: true } : {}) })),
   });
 }
 
