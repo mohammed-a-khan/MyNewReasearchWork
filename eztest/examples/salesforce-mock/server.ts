@@ -34,6 +34,8 @@ export interface SalesforceMockOptions {
   release?: Release;
   /** Simulated server latency for UI saves (ms). Default 200. */
   saveDelayMs?: number;
+  /** The list view header (title and New button) renders this long after the page (ms), like a slow Lightning org. Default 0. */
+  listHeaderDelayMs?: number;
   tokenTtlSeconds?: number;
   /** Fixed passwords (default: generated per start). */
   passwords?: { admin?: string; rep?: string };
@@ -506,6 +508,7 @@ export async function startSalesforceMock(opts: SalesforceMockOptions = {}): Pro
     d.fields = uiFields(u, o);
     const vis = visible(u, o);
     d.listView = { name: 'Recently Viewed', columns: o.listColumns.map((n) => vis.find((f) => f.name === n)).filter((f): f is MockField => !!f).map((f) => ({ field: f.name, label: f.label })) };
+    if (opts.listHeaderDelayMs) d.listHeaderDelayMs = opts.listHeaderDelayMs;
     if (modal) {
       d.modal = modal;
       d.record = { id: '', name: '', values: {}, display: {}, links: {} };
