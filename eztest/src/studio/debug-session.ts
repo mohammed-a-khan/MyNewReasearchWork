@@ -32,11 +32,15 @@ export interface DebugStartRequest {
 export interface DebugSession {
   id: string;
   journeyId: string;
-  state: 'running' | 'done' | 'error';
+  /** stopped: Stop ended the run early (the remaining steps were not run; teardown hooks ran). */
+  state: 'running' | 'done' | 'stopped' | 'error';
   startedAt: string;
   controller: DebugController;
   events: StudioEvent[];
   result?: Record<string, unknown>;
+  /** Cancels the run when Stop is pressed. */
+  abort: AbortController;
+  stopRequested?: boolean;
 }
 
 type Listener = (e: StudioEvent) => void;
@@ -125,7 +129,8 @@ export class DebugSessionManager {
       if (s.value !== undefined && !s.value.includes('${') && SENSITIVE_DESC.test(s.target?.description ?? '')) controller.learnSecret(s.value);
     }
     const id = `debug-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')}-${randomBytes(3).toString('hex')}`;
-    const session: DebugSession = { id, journeyId: journey.id, state: 'running', startedAt: new Date().toISOString(), controller, events: [] };
+    const abort = new AbortController();
+    const session: DebugSession = { id, journeyId: journey.id, state: 'running', startedAt: new Date().toISOString(), controller, events: [], abort };
     this.session = session;
     this.masker = loaded.masker;
     this.emit('queued', { sessionId: id, journey: { id: journey.id, name: journey.name, steps: journey.steps.map((s) => ({ id: s.id, intent: s.intent })) } });
@@ -143,6 +148,9 @@ export class DebugSessionManager {
             events,
             runId: id,
             debug: controller,
+            // Stop cancels the run; teardown and cleanup hooks still run.
+            signal: abort.signal,
+            teardownOnCancel: true,
             screenshots: 'on-failure',
             ...(req.timeTravel === false ? {} : { timeTravel: { ...loaded.config.trace.timeTravel, enabled: true, masker: loaded.masker } }),
             ...this.opts.runOptions,
@@ -154,8 +162,8 @@ export class DebugSessionManager {
         } finally {
           await engine.close();
         }
-        session.state = 'done';
-        this.emit('done', { sessionId: id, state: 'done', ...session.result });
+        session.state = session.stopRequested ? 'stopped' : 'done';
+        this.emit('done', { sessionId: id, state: session.state, ...session.result });
       } catch (e) {
         session.state = 'error';
         this.emit('session-error', { message: (e as Error).message });
@@ -168,11 +176,19 @@ export class DebugSessionManager {
     return session;
   }
 
-  /** Let the run finish: no more pauses, current pause released. */
+  /**
+   * Stop the debug run: the paused (or next) step and the rest of the journey are not executed; teardown and
+   * cleanup hooks still run. The session ends as "stopped".
+   */
   async stop(): Promise<void> {
     const s = this.active;
     if (!s) return;
-    s.controller.disarm();
+    s.stopRequested = true;
+    this.emit('stopping', { sessionId: s.id });
+    // Release the pause with "abort" first: cancelling first would release it with "continue" (the run disarms
+    // the debugger on abort) and the paused step would run.
+    s.controller.abort();
+    s.abort.abort();
     await this.done;
   }
 

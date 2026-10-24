@@ -286,8 +286,8 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
       takeAttachments(r);
       if (failedHard(r)) blocked = `not run: step "${s.intent}" ${r!.status}`;
     }
-    // After hooks run even when a step failed (not when the run was cancelled).
-    if (!flow.opts.signal?.aborted) for (const hk of hooksFor(glue, 'after', tags)) await runHook(hk, 'after');
+    // After hooks run even when a step failed (not when the run was cancelled, unless teardownOnCancel).
+    if (!flow.opts.signal?.aborted || flow.opts.teardownOnCancel) for (const hk of hooksFor(glue, 'after', tags)) await runHook(hk, 'after');
   });
 
   const top = h.results;

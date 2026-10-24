@@ -20,7 +20,7 @@ import { collectRunVcs, runVcsEnvironment } from '../git/branch.js';
 import { collectHealProposals } from '../heal/proposals.js';
 import { FingerprintStore } from '../heal/store.js';
 import { EvidenceWriter } from './evidence.js';
-import { blockedByHook, expandExamples, hookJourneys, runAllHook, runWideValues } from './journey-hooks.js';
+import { blockedByHook, expandExamples, hookJourneys, runAllHook, runWideValues, teardownEnv } from './journey-hooks.js';
 import { maskDeep } from './dom.js';
 import { createRunExtensions } from './extensions.js';
 import { resolveExamplesSources } from './examples-source.js';
@@ -42,6 +42,7 @@ import { bddAllJourneys, clearBddAllState } from './bdd-all.js';
 /** Run the Gherkin BeforeAll / AfterAll hook journeys of a run's scenarios (tagged hook, bdd). */
 async function runBddAllHooks(journeys: Journey[], kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv): Promise<JourneyResult[]> {
   const out: JourneyResult[] = [];
+  if (kind === 'afterAll' && env.opts.signal?.aborted && env.opts.teardownOnCancel) env = teardownEnv(env);
   for (const h of await bddAllJourneys(journeys, kind, env.opts.baseDir ?? process.cwd())) {
     if (env.opts.signal?.aborted) break;
     env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });

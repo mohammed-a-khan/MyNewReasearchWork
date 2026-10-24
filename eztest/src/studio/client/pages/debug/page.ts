@@ -594,8 +594,8 @@ function renderStatus(): void {
       tone = d.state?.phase === 'failed' ? 'failed' : 'paused';
       break;
     case 'done':
-      text = `Finished${d.result?.status ? `: ${d.result.status}` : ''}`;
-      tone = d.result?.status?.startsWith('passed') ? 'passed' : 'failed';
+      text = d.stopped ? 'Stopped: the remaining steps were not run' : `Finished${d.result?.status ? `: ${d.result.status}` : ''}`;
+      tone = d.stopped ? 'paused' : d.result?.status?.startsWith('passed') ? 'passed' : 'failed';
       break;
     case 'error':
       text = d.error ? `Error: ${d.error}` : 'The debug session failed';

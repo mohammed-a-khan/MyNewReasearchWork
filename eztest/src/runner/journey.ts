@@ -405,7 +405,10 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
       result.steps.push(...codeStatus.steps);
     }
     const hooksAfter = result.steps.length;
-    if (!opts.signal?.aborted) for (const h of opts.hooks?.afterEach ?? []) result.steps.push(await executeStep(hookStep('after-each', h), scope, flow));
+    // Teardown after a cancel (teardownOnCancel) runs without the signal, so its own steps are not skipped.
+    const cancelled = !!opts.signal?.aborted;
+    const teardownFlow: FlowEnv = cancelled && opts.teardownOnCancel ? { ...flow, opts: { ...opts, signal: undefined } } : flow;
+    if (!cancelled || opts.teardownOnCancel) for (const h of opts.hooks?.afterEach ?? []) result.steps.push(await executeStep(hookStep('after-each', h), scope, teardownFlow));
     result.status = journeyStatusFrom(result.steps);
     const manual = manualSummary(journey, result.steps);
     if (manual) result.manual = manual;

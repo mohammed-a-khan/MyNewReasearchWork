@@ -237,6 +237,12 @@ export interface RunOptions {
   maxLoopIterations?: number;
   /** Cancels the run. Checked between journeys and between steps (also inside blocks and loops); what has not run is recorded as skipped. */
   signal?: AbortSignal;
+  /**
+   * After the signal aborts, still run the teardown and cleanup hooks (afterEach and afterAll hook journeys,
+   * `Teardown:` journeys, Gherkin After / AfterAll hooks) of what ran. Default false: a cancelled run skips them.
+   * The Studio debugger's Stop sets it.
+   */
+  teardownOnCancel?: boolean;
   /** Non-browser surfaces (desktop, terminal, SAP GUI, screen images) that may execute steps first (see runner/surface.ts). */
   stepInterceptors?: import('./surface.js').StepInterceptor[];
   /** Observes every API step's exchange (spec validation, contract recording); may throw to fail the step. Returns evidence ids. */

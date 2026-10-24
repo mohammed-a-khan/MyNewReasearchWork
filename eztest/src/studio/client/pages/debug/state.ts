@@ -126,6 +126,8 @@ export interface DbgView {
   current?: number;
   result?: { status?: string; runId?: string };
   details?: Details;
+  /** The session ended with Stop: the rest of the journey was not run (teardown hooks were). */
+  stopped?: boolean;
   /** Step index whose details are shown (defaults to the current one). */
   detailIndex?: number;
   error?: string;
@@ -150,7 +152,8 @@ export async function refreshState(): Promise<void> {
       id: r.id,
       journeyId: r.journeyId,
       state: r.debug ?? cur.state,
-      phase: r.state === 'running' ? (paused ? 'paused' : cur.phase === 'starting' ? 'running' : cur.phase === 'paused' ? 'running' : cur.phase === 'idle' ? 'running' : cur.phase) : r.state === 'done' ? 'done' : 'error',
+      phase: r.state === 'running' ? (paused ? 'paused' : cur.phase === 'starting' ? 'running' : cur.phase === 'paused' ? 'running' : cur.phase === 'idle' ? 'running' : cur.phase) : r.state === 'done' || r.state === 'stopped' ? 'done' : 'error',
+      stopped: r.state === 'stopped',
       current: r.debug?.stepIndex ?? cur.current,
       result: r.result ?? cur.result,
     });
@@ -213,9 +216,11 @@ function onEvent(e: { type: string; [k: string]: unknown }): void {
       break;
     case 'done': {
       const status = typeof e.status === 'string' ? e.status : undefined;
-      dbg.set({ ...dbg.get(), phase: e.state === 'error' ? 'error' : 'done', result: { status, runId: typeof e.runId === 'string' ? e.runId : undefined } });
-      announce(`Debug run finished${status ? `: ${status}` : ''}`);
-      if (status) toast(`Debug run finished: ${status}`, { kind: status.startsWith('passed') ? 'success' : 'warning', timeout: 4000 });
+      const stopped = e.state === 'stopped';
+      dbg.set({ ...dbg.get(), phase: e.state === 'error' ? 'error' : 'done', stopped, result: { status, runId: typeof e.runId === 'string' ? e.runId : undefined } });
+      announce(stopped ? 'Debug run stopped: the remaining steps were not run' : `Debug run finished${status ? `: ${status}` : ''}`);
+      if (stopped) toast('Debug run stopped: the remaining steps were not run', { kind: 'warning', timeout: 4000 });
+      else if (status) toast(`Debug run finished: ${status}`, { kind: status.startsWith('passed') ? 'success' : 'warning', timeout: 4000 });
       void refreshDetails();
       stopFollow?.();
       stopFollow = undefined;
@@ -278,7 +283,7 @@ export async function resume(): Promise<void> {
   const r = await api.get<S>('/api/debug/session').catch((): S => ({ state: 'idle' }));
   if (!r.id || r.state === 'idle') return;
   if (dbg.get().id === r.id) return;
-  dbg.set({ phase: r.state === 'running' ? 'running' : r.state === 'done' ? 'done' : 'error', steps: {}, id: r.id, journeyId: r.journeyId });
+  dbg.set({ phase: r.state === 'running' ? 'running' : r.state === 'done' || r.state === 'stopped' ? 'done' : 'error', stopped: r.state === 'stopped', steps: {}, id: r.id, journeyId: r.journeyId });
   if (r.state === 'running') attach(r.id);
   else {
     // A finished session: replay its events once for the statuses.

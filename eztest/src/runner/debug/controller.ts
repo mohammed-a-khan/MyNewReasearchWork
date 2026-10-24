@@ -88,7 +88,8 @@ export interface Checkpoint {
   actor?: string;
 }
 
-export type DebugCommand = { kind: 'continue' } | { kind: 'retry' } | { kind: 'skip' };
+/** `abort`: the debugger was stopped; the current step is not run and the journey ends (see DebugController.abort). */
+export type DebugCommand = { kind: 'continue' } | { kind: 'retry' } | { kind: 'skip' } | { kind: 'abort' };
 
 export interface DebugState {
   status: 'idle' | 'running' | 'paused' | 'finished';
@@ -158,6 +159,7 @@ export class DebugController {
   private readonly redactor: Redactor;
   private currentIndex = -1;
   private currentActor?: string;
+  private stopped = false;
 
   constructor(private readonly opts: DebugControllerOptions = {}) {
     this.pauseOnFailure = opts.pauseOnFailure ?? true;
@@ -209,6 +211,26 @@ export class DebugController {
   resume(): void {
     this.mode = 'run';
     this.release({ kind: 'continue' }, 'resume');
+  }
+
+  /**
+   * Stop the debug run: never pause again, and release a pause with "abort" so the paused step is not
+   * run. The host also cancels the run (RunOptions.signal) so the remaining steps are skipped; teardown
+   * hooks still run when it sets RunOptions.teardownOnCancel.
+   */
+  abort(): void {
+    this.stopped = true;
+    this.bps.clear();
+    this.runTo = undefined;
+    this.pauseOnFailure = false;
+    this.pauseRequested = false;
+    this.mode = 'run';
+    this.release({ kind: 'abort' }, 'stop');
+  }
+
+  /** abort() was called. */
+  get aborted(): boolean {
+    return this.stopped;
   }
 
   /** Never pause again: drop breakpoints, run-to targets and pause-on-failure, and resume. */

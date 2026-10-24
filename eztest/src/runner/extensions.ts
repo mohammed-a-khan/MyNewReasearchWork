@@ -18,6 +18,9 @@ import { JourneyTraceRecorder, SENSITIVE_DESC, isSensitiveInput } from './trace/
 import { TraceResourceStore } from './trace/store.js';
 import type { RunOptions, StepContext } from './types.js';
 
+/** Why a step paused when the debugger was stopped did not run. */
+const STOPPED = 'not run: the debug session was stopped';
+
 export interface RunExtensionsInit {
   runId: string;
   runDir: string;
@@ -160,6 +163,7 @@ export class JourneyExtension {
       const cmd = await dbg.checkpoint({ phase: 'before-step', index, step, ...(actor ? { actor } : {}) });
       ({ step, edited } = dbg.stepAt(index, original));
       if (cmd.kind === 'skip') return this.skip(index, step, 'skipped in the debugger');
+      if (cmd.kind === 'abort') return this.skip(index, step, STOPPED);
     }
     for (let execution = 1; ; execution++) {
       this.currentStep = step;
@@ -193,7 +197,7 @@ export class JourneyExtension {
         this.currentIndex = index;
         this.currentStep = step;
         const cmd = await dbg.checkpoint({ phase: 'before-step', index, step });
-        if (cmd.kind === 'skip') {
+        if (cmd.kind === 'skip' || cmd.kind === 'abort') {
           dbg.stepSkipped(index, step);
           return 'skip';
         }

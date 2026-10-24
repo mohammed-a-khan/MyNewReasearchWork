@@ -79,8 +79,10 @@ export function hookJourneys(opts: RunOptions): Journey[] {
 /** Run beforeAll/afterAll hook journeys, each in its own browser context; results are tagged "hook". */
 export async function runAllHook(kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult[]> {
   const out: JourneyResult[] = [];
+  // Cancelled runs skip hook journeys, except teardown (afterAll) with teardownOnCancel, which runs without the signal.
+  if (kind === 'afterAll' && env.opts.signal?.aborted && env.opts.teardownOnCancel) env = teardownEnv(env);
   for (const h of env.opts.hooks?.[kind] ?? []) {
-    if (env.opts.signal?.aborted) break; // cancelled runs skip hook journeys
+    if (env.opts.signal?.aborted) break;
     env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
     const r = await runJourneyAttempt(h, 1, env, seed);
     r.tags = [...new Set([...r.tags, 'hook', kind])];
@@ -111,4 +113,9 @@ export function blockedByHook(j: Journey, hook: JourneyResult, browser: string):
     requirements: j.requirements, risk: j.risk, attempt: 1, browser, ledger: {}, evidence: [],
     error: { message: `beforeAll hook "${hook.name}" ${hook.status}: ${hook.error?.message ?? hook.steps.find((s) => s.status === 'failed')?.error?.message ?? ''}` },
   };
+}
+
+/** The run environment for teardown after a cancel (RunOptions.teardownOnCancel): the same, without the signal. */
+export function teardownEnv(env: JourneyRunEnv): JourneyRunEnv {
+  return { ...env, opts: { ...env.opts, signal: undefined } };
 }
