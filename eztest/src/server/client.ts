@@ -91,6 +91,16 @@ export class ResultsClient {
     return this.req('GET', '/api/me');
   }
 
+  /** Verify the server's audit hash chain (audit.read). */
+  auditVerify(): Promise<{ ok: boolean; entries: number; head: string; problems: string[]; warnings: string[] }> {
+    return this.req('GET', '/api/audit/verify');
+  }
+
+  /** Rotate the server's audit key (admins); older keys stay to verify what they signed. */
+  auditRotateKey(): Promise<{ keyId: string }> {
+    return this.req('POST', '/api/audit/rotate-key');
+  }
+
   /** Publish a run directory: register it, upload every evidence file and the reports, then let the server verify the chain. */
   async publishRun(runDir: string, o: { analysis?: Record<string, unknown>; meta?: Record<string, unknown>; concurrency?: number } = {}): Promise<{ runId: string; uploaded: number; bytes: number; verified: boolean; problems: string[] }> {
     const run = JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')) as RunResult;
@@ -226,6 +236,11 @@ export class ResultsClient {
 
   async poolConsume(namespace: string, pool: string, id: string, owner: string): Promise<boolean> {
     return (await this.req<{ consumed: boolean }>('POST', `${this.sp('pools', namespace, pool)}/consume`, { id, owner })).consumed;
+  }
+
+  /** Re-seal a secret pool item (compare and swap on its sealed value; the server never sees the plain value). */
+  async poolReseal(namespace: string, pool: string, id: string, from: string, to: string): Promise<boolean> {
+    return (await this.req<{ resealed: boolean }>('POST', `${this.sp('pools', namespace, pool)}/reseal`, { id, from, to })).resealed;
   }
 
   async poolRemove(namespace: string, pool: string, id: string): Promise<boolean> {
