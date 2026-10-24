@@ -401,6 +401,7 @@ export class FirefoxPage extends ChromiumPage {
   // ------------------------------------------------------------------ page events
   onUserPrompt(e: any): void {
     const type = String(e.type ?? 'alert');
+    this.openDialogs.set(this, { type, message: String(e.message ?? '') });
     const d = new FirefoxDialog(this, this.bidi, e.context, type, String(e.message ?? ''), String(e.defaultValue ?? ''));
     const listeners = this.listenerCount('dialog') + this.context_.listenerCount('dialog');
     if (!listeners) {
@@ -409,6 +410,10 @@ export class FirefoxPage extends ChromiumPage {
     }
     this.emitEvent('dialog', d);
     this.context_.emitEvent('dialog', d);
+  }
+
+  onUserPromptClosed(e: any): void {
+    this.onDialogClosed(this, { result: e.accepted === true, ...(e.userText !== undefined ? { userInput: String(e.userText) } : {}) });
   }
 
   async onFileDialog(e: any): Promise<void> {

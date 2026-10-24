@@ -392,6 +392,8 @@ describe('dialogs, downloads, popups and frames', () => {
       await page.getByRole('button', { name: 'Delete order' }).click();
       expect(await page.locator('#confirm-result').textContent()).toBe('Kept');
       const seen: string[] = [];
+      const closed: Array<{ type: string; message: string; accepted: boolean; userInput?: string }> = [];
+      page.on('dialogclosed', (c) => closed.push(c));
       page.on('dialog', async (d) => {
         seen.push(`${d.type()}:${d.message()}:${d.defaultValue()}`);
         if (d.type() === 'prompt') await d.accept('Ada');
@@ -402,6 +404,12 @@ describe('dialogs, downloads, popups and frames', () => {
       expect(await page.locator('#confirm-result').textContent()).toBe('Deleted');
       expect(await page.locator('#prompt-result').textContent()).toBe('Hello Ada');
       expect(seen).toEqual(['confirm:Delete the order?:', 'prompt:Your name?:guest']);
+      // How each dialog was answered, whoever answered it (the policy, the test or a person).
+      await expect.poll(() => closed.length).toBe(2);
+      expect(closed).toEqual([
+        { type: 'confirm', message: 'Delete the order?', accepted: true },
+        { type: 'prompt', message: 'Your name?', accepted: true, userInput: 'Ada' },
+      ]);
     });
   });
 

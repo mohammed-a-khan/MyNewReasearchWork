@@ -6,6 +6,16 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Fixed: real websites
 
+- **The recorder records what people do on real sites** ([docs/recording.md](docs/recording.md)). Before, actions in a popup or new tab were dropped with a warning, a recording with an iframe could not be saved as `.ez`, frames of a `<frameset>` were not found, alerts and confirms were dismissed by the recorder before the person could answer them (so a confirm was always "Cancel"), and hover menus, drag and drop, keys other than Enter, typing in rich-text editors and downloads were not recorded at all. Now:
+  - a click that opens a tab or popup becomes `Click … and switch to the new tab` with the address it landed on; later steps run there; `Switch back to the main tab`, `Switch to tab 2` and `Close the tab` follow what the person did;
+  - steps in an iframe or frame go into an `In frame "name" > "inner"` … `End` block, the frame named by its name, title, id or address;
+  - a dialog stays open for the person; their answer is recorded before the click (`Accept the next alert`, `Dismiss the next confirm dialog`, `Answer the next prompt with "Ada"`) with `Expect a confirm dialog saying "…"` after it;
+  - a click inside something only shown on hover records `Hover over …` first; drags record `Drag … to …`; Tab, Escape, arrows in suggestion lists, function keys and shortcuts record `Press …`; typing in a contenteditable editor records `Type … into …`; a download link records `Download … as …`;
+  - an expectation typed in Studio while a popup is in front is checked in that popup.
+- Repeated names are named in words before a CSS path: by their row in product cards and other repeated blocks (not only table rows), with the table when two tables hold the same rows (`… in the row containing "Bach" inside #table1`), by a named landmark (`… inside the "Main" navigation`), or by position (`the 2nd "Edit" button`); an unnamed checkbox is `the 1st checkbox`. Text in shadow DOM and slots is measured the way the runner reads it, so `the "…" text` works inside web components.
+- `In frame "frame-top"` treated any frame name starting with "frame" as a CSS selector and found nothing; `<frame>` elements are also found by title.
+- The browser driver reports how each JavaScript dialog was closed (`page.on('dialogclosed')`: type, message, OK or Cancel, the prompt's text) on Chromium and Firefox.
+
 - Firefox ignored the machine's proxy (`HTTPS_PROXY`) and could not load any site on a network that only allows the proxy; it now follows the proxy variables as Chromium does. On Linux a temporary Firefox profile also trusts the certificates of the shared NSS database (`~/.pki/nssdb`, where a TLS-inspecting proxy CA is installed), so sites load in both browsers.
 
 ### Fixed: record, then run

@@ -51,6 +51,7 @@ const EVENTS = [
   'browsingContext.downloadWillBegin',
   'browsingContext.downloadEnd',
   'browsingContext.userPromptOpened',
+  'browsingContext.userPromptClosed',
   'script.realmCreated',
   'script.realmDestroyed',
   'script.message',
@@ -711,6 +712,7 @@ export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
       if (p) p.onUserPrompt(e);
       else void this.bidi.send('browsingContext.handleUserPrompt', { context: e.context, accept: e.type === 'beforeunload' }).catch(() => undefined);
     });
+    on('browsingContext.userPromptClosed', (e) => page(e)?.onUserPromptClosed(e));
     on('script.realmCreated', (e) => {
       if (e.type === 'window') {
         page(e)?.onRealmCreated(e);

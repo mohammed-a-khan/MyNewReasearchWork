@@ -150,11 +150,22 @@ export class FileChooser {
   }
 }
 
+/** A JavaScript dialog that was closed, by the test (accept/dismiss), the default policy or a person. */
+export interface DialogClosed {
+  type: string;
+  message: string;
+  /** OK (true) or Cancel / Escape (false). */
+  accepted: boolean;
+  /** The text a prompt was answered with (accepted prompts only). */
+  userInput?: string;
+}
+
 export interface PageEvents {
   close: ChromiumPage;
   console: ConsoleMessage;
   crash: ChromiumPage;
   dialog: Dialog;
+  dialogclosed: DialogClosed;
   domcontentloaded: ChromiumPage;
   download: import('./browser.js').Download;
   filechooser: FileChooser;
@@ -225,6 +236,7 @@ export class TargetSession {
     s.on('Page.downloadWillBegin', () => p.onNavigationSettled());
     s.on('Page.lifecycleEvent', (e: any) => p.onLifecycle(e.frameId, e.loaderId, e.name));
     s.on('Page.javascriptDialogOpening', (e: any) => p.onDialog(this, e));
+    s.on('Page.javascriptDialogClosed', (e: any) => p.onDialogClosed(this, e));
     s.on('Page.fileChooserOpened', (e: any) => void p.onFileChooser(this, e));
     s.on('Runtime.executionContextCreated', (e: any) => this.onContextCreated(e.context));
     s.on('Runtime.executionContextDestroyed', (e: any) => this.onContextDestroyed(e.executionContextId));
@@ -758,7 +770,11 @@ export class ChromiumPage extends TypedEmitter<PageEvents> {
   }
 
   // ------------------------------------------------------------------ page events
+  /** The dialog open in each target (its closing event does not repeat the type and message). */
+  protected readonly openDialogs = new WeakMap<object, { type: string; message: string }>();
+
   onDialog(session: TargetSession, e: any): void {
+    this.openDialogs.set(session, { type: String(e.type), message: String(e.message ?? '') });
     const d = new Dialog(this, session.cdp, e.type, e.message, e.defaultPrompt ?? '');
     const listeners = this.listenerCount('dialog') + this.context_.listenerCount('dialog');
     if (!listeners) {
@@ -768,6 +784,18 @@ export class ChromiumPage extends TypedEmitter<PageEvents> {
     }
     this.emitEvent('dialog', d);
     this.context_.emitEvent('dialog', d);
+  }
+
+  onDialogClosed(session: object, e: { result?: boolean; userInput?: string }): void {
+    const open = this.openDialogs.get(session);
+    this.openDialogs.delete(session);
+    const accepted = e.result === true;
+    this.emitEvent('dialogclosed', {
+      type: open?.type ?? 'alert',
+      message: open?.message ?? '',
+      accepted,
+      ...(accepted && open?.type === 'prompt' ? { userInput: String(e.userInput ?? '') } : {}),
+    });
   }
 
   async onFileChooser(session: TargetSession, e: any): Promise<void> {

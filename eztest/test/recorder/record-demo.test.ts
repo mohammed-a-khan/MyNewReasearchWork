@@ -49,7 +49,7 @@ describe('recording the demo app', () => {
       'Type "${password}" into the Password field',
       'Click the "Sign in" button',
       '  Expect URL contains "/dashboard"',
-      'Click css=nav[aria-label="Main"] a[href="/orders/new"]',
+      'Click the "New order" link inside the "Main" navigation',
       '  Expect URL contains "/orders/new"',
       'Select "Gadget (49.50)" from the Product dropdown',
       'Type "3" into the Quantity field',
@@ -63,8 +63,8 @@ describe('recording the demo app', () => {
     expect(result.variables).toEqual(['password']);
   });
 
-  it('warns about the ambiguous link and keeps measured locator candidates', () => {
-    expect(result.warnings.some((w) => /"New order" matches 2 elements/.test(w) && /CSS selector/.test(w))).toBe(true);
+  it('names the repeated link by its navigation, without a CSS warning, and keeps measured locator candidates', () => {
+    expect(result.warnings.some((w) => /CSS selector/.test(w))).toBe(false);
     const submit = result.journey.steps.find((s) => s.intent === 'Click the "Submit order" button')!;
     expect(result.targets[submit.id]?.[0]).toEqual({ strategy: 'role', value: 'button', name: 'Submit order', exact: true });
     expect(submit.target?.fingerprint).toMatchObject({ tag: 'button', id: 'submit-order', role: 'button', name: 'Submit order' });
