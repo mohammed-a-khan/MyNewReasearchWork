@@ -176,6 +176,15 @@ export class SharedDataRegistry {
     return n > 0;
   }
 
+  /** Replace a secret item's sealed value when it is still `from` (re-sealing with a store's own salt); the claim stays. */
+  async reseal(project: string, namespace: string, pool: string, id: string, from: string, to: string, who: Principal): Promise<boolean> {
+    if (!isSealed(from) || !isSealed(to)) throw new ServiceError(400, '"from" and "to" must be sealed values (EZS2:... or EZS1:...)');
+    if (to.length > MAX_VALUE) throw new ServiceError(413, `Value too large (max ${MAX_VALUE / 1024} KB)`);
+    const n = await this.store.run('UPDATE ez_pool_items SET value = ? WHERE project = ? AND namespace = ? AND pool = ? AND item_id = ? AND secret = 1 AND value = ?', [to, project, ns(namespace), checkStoreName('pool', pool), id, from]);
+    if (n) await this.audit.append({ actor: who.id, action: 'pool.reseal', project, target: `${namespace}/${pool}/${id}` });
+    return n > 0;
+  }
+
   async remove(project: string, namespace: string, pool: string, id: string, who: Principal): Promise<boolean> {
     const n = await this.store.run('DELETE FROM ez_pool_items WHERE project = ? AND namespace = ? AND pool = ? AND item_id = ?', [project, ns(namespace), checkStoreName('pool', pool), id]);
     if (n) await this.audit.append({ actor: who.id, action: 'pool.remove', project, target: `${namespace}/${pool}/${id}` });

@@ -396,6 +396,7 @@ export async function startResultsServer(o: ServerOptions): Promise<ServerHandle
     }
     if (op === 'release') return { released: await shared.release(p, n, pool, str(b.id), str(b.owner), c.who) };
     if (op === 'consume') return { consumed: await shared.consume(p, n, pool, str(b.id), str(b.owner), c.who) };
+    if (op === 'reseal') return { resealed: await shared.reseal(p, n, pool, str(b.id), str(b.from), str(b.to), c.who) };
     throw new HttpError(404, 'Unknown pool operation');
   });
   add('DELETE', '/api/projects/:p/pools/:ns/:pool/items/:id', async (c) => {

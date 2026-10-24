@@ -57,6 +57,10 @@ export class ServerStoreBackend implements StoreBackend {
     return this.client.poolRemove(namespace, pool, id);
   }
 
+  poolReseal(namespace: string, pool: string, id: string, from: string, to: string): Promise<boolean> {
+    return this.client.poolReseal(namespace, pool, id, from, to);
+  }
+
   poolItems(namespace: string, pool: string): Promise<PoolItem[]> {
     return this.client.poolItems(namespace, pool);
   }

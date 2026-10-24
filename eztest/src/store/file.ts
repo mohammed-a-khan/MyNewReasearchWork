@@ -289,6 +289,15 @@ export class FileStoreBackend implements StoreBackend {
     });
   }
 
+  async poolReseal(ns: string, pool: string, id: string, from: string, to: string): Promise<boolean> {
+    return this.changePool(ns, pool, (p) => {
+      const it = p.items.find((x) => x.id === id && x.secret && x.sealed === from);
+      if (!it) return { result: false, changed: false };
+      it.sealed = to;
+      return { result: true, changed: true };
+    });
+  }
+
   async poolRemove(ns: string, pool: string, id: string): Promise<boolean> {
     return this.changePool(ns, pool, (p) => {
       const i = p.items.findIndex((x) => x.id === id);

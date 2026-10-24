@@ -80,6 +80,11 @@ export interface StoreBackend {
   poolRemove(namespace: string, pool: string, id: string): Promise<boolean>;
   poolItems(namespace: string, pool: string): Promise<PoolItem[]>;
   pools(namespace?: string): Promise<PoolSummary[]>;
+  /**
+   * Replace a secret item's sealed value when it is still `from` (compare and swap; its claim is kept):
+   * re-sealing older EZS1 items with the store's own salt. False when the item is gone or changed.
+   */
+  poolReseal?(namespace: string, pool: string, id: string, from: string, to: string): Promise<boolean>;
 }
 
 /** The runner's entry point for `store` steps (RunOptions.store). */
