@@ -26,6 +26,7 @@ import {
   ApiClient,
   DbRegistry,
   SqliteDbClient,
+  loadSqlite,
   buildSoapEnvelope,
   parseSoapResponse,
   queryPath,
@@ -254,7 +255,7 @@ async function openForSql(app: StudioApp, loaded: LoadedConfig, name: string, re
   const spec = specs[name];
   if (!spec) throw new HttpError(400, `Unknown connection "${name}". Known: ${Object.keys(specs).join(', ') || 'none'}`);
   if (spec.driver === 'sqlite' && readOnly && spec.file !== ':memory:') {
-    const mod = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
+    const mod = loadSqlite();
     if (!existsSync(spec.file)) throw new HttpError(404, `The SQLite file of "${name}" does not exist`);
     const db = new mod.DatabaseSync(spec.file, { readOnly: true });
     const client = new SqliteDbClient({ database: db, own: true, name });

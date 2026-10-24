@@ -11,6 +11,7 @@ import { EZTEST_VERSION } from '../ops/version.js';
 import { PLUGIN_API_VERSION } from '../plugins/api.js';
 import { effectiveSummary } from './effective.js';
 import { doctorDatabases } from './queries.js';
+import { SQLITE_NODE_REQUIREMENT, sqliteSupported } from '../surfaces/db.js';
 import { serverClientFor } from './scale.js';
 import type { CliIO } from './program.js';
 
@@ -54,6 +55,10 @@ export function registerDoctorCommand(program: Command, io: CliIO, load: Loader)
       const major = Number(process.versions.node.split('.')[0]);
       checks.push({ name: 'node', status: major >= 20 ? 'ok' : 'error', detail: process.versions.node });
       say(`node        ${process.versions.node} ${major >= 20 ? 'ok' : 'needs >= 20'}`);
+      // SQLite (db steps with driver: sqlite, the results server's default store) is optional: it needs a newer Node.js.
+      const sqlite = sqliteSupported();
+      checks.push({ name: 'sqlite', status: sqlite ? 'ok' : 'warn', detail: sqlite ? 'node:sqlite available' : SQLITE_NODE_REQUIREMENT });
+      say(`sqlite      ${sqlite ? 'ok (node:sqlite)' : `not available: ${SQLITE_NODE_REQUIREMENT}`}`);
       if (o.browser !== false) {
         const { chromium, findChromium, findFirefox, browserCacheDir } = await import('../browser/index.js');
         const howTo = [

@@ -10,10 +10,34 @@
  */
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
-/** Load node:sqlite only when SQLite is actually used (it prints an experimental warning on load). */
+/** Why SQLite is not available in this Node.js, for the error that names it. */
+export const SQLITE_NODE_REQUIREMENT = 'SQLite (node:sqlite) needs Node.js 22.13+ or 23.4+ (22.5 to 22.12: start Node with --experimental-sqlite)';
+
+/**
+ * node:sqlite, loaded only when SQLite is actually used (it prints an experimental warning on load). On a Node.js
+ * without it (20.x, or 22.5-22.12 without the flag) this throws a clear error; everything else in EZTest still works.
+ */
+export function loadSqlite(): typeof import('node:sqlite') {
+  const get = (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
+  let mod: typeof import('node:sqlite') | undefined;
+  try {
+    mod = typeof get === 'function' ? (get.call(process, 'node:sqlite') as typeof import('node:sqlite') | undefined) : undefined;
+  } catch {
+    mod = undefined;
+  }
+  if (!mod?.DatabaseSync) throw new Error(`${SQLITE_NODE_REQUIREMENT}; this is Node.js ${process.versions.node}. Upgrade Node.js, or use another database driver (postgres, mssql, oracle).`);
+  return mod;
+}
+
+/** Whether this Node.js has node:sqlite, from its version and flags (without loading it, which prints a warning). */
+export function sqliteSupported(version = process.versions.node, flags: string[] = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)]): boolean {
+  const [major, minor] = version.split('.').map(Number);
+  if (major > 23 || (major === 23 && minor >= 4) || (major === 22 && minor >= 13)) return true;
+  return ((major === 22 && minor >= 5) || major === 23) && flags.includes('--experimental-sqlite');
+}
+
 function openSqlite(file: string): DatabaseSync {
-  const mod = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite') | undefined;
-  if (!mod) throw new Error('node:sqlite is not available in this Node.js version (needs Node 22.5+)');
+  const mod = loadSqlite();
   const db = new mod.DatabaseSync(file);
   // Without a busy timeout, a write while the application under test holds the file's lock fails at
   // once with "database is locked": a race that shows up as flakiness in parallel runs.

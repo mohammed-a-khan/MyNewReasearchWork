@@ -120,7 +120,7 @@ describe('doctor --json', () => {
     await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\n');
     const r = await cli(dir, ['doctor', '--json', '--no-browser']);
     const report = JSON.parse(r.out.join('\n'));
-    expect(report).toMatchObject({ ok: true, configVersion: 1, pluginApiVersion: 1, checks: [{ name: 'node', status: 'ok' }, { name: 'config', status: 'ok' }] });
+    expect(report).toMatchObject({ ok: true, configVersion: 1, pluginApiVersion: 1, checks: [{ name: 'node', status: 'ok' }, { name: 'sqlite', status: 'ok' }, { name: 'config', status: 'ok' }] });
     expect(r.code).toBe(0);
   });
 
