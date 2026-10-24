@@ -129,12 +129,17 @@ export interface LaunchOptions {
   downloadsPath?: string;
   proxy?: { server: string; bypass?: string; username?: string; password?: string };
   devtools?: boolean;
-  /** Accepted for compatibility; signals are always handled. */
+  /**
+   * Close the browser and remove its temporary profile and download folders when the process gets
+   * SIGINT / SIGTERM / SIGHUP (default true each). When nothing else listens for the signal, the
+   * signal is then raised again, so the process ends as it would have without EZTest.
+   */
   handleSIGINT?: boolean;
   handleSIGTERM?: boolean;
   handleSIGHUP?: boolean;
-  /** Write a browser log here. */
+  /** Not supported (rejected): use EZTEST_DEBUG=browser,protocol for the driver log. */
   logger?: unknown;
+  /** Not supported (rejected): pass the path to context.tracing.stop({ path }). */
   tracesDir?: string;
 }
 

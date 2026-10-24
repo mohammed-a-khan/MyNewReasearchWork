@@ -238,6 +238,8 @@ export interface RunResult {
   health?: RunHealth;
   /** Cross-browser runs: the summary of each browser (journey x browser units); `summary` is the combined one. */
   browsers?: Record<string, RunSummary & { version?: string }>;
+  /** The run was cancelled (a signal, --max-failures): why, when, and whether run.json was written before the run wound down (partial). */
+  cancelled?: { reason: string; at: string; partial?: boolean };
 }
 
 export function summarize(journeys: JourneyResult[]): RunSummary {

@@ -15,13 +15,14 @@
  *   for the Firefox it launches (`--remote-allow-system-access`).
  */
 import { randomUUID } from 'node:crypto';
-import { createReadStream, mkdtempSync, type ReadStream } from 'node:fs';
+import { createReadStream, type ReadStream } from 'node:fs';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { debugLog } from '../debug.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError } from '../errors.js';
+import { checkLaunchOptions, signalHandlingOf } from '../launch-options.js';
+import { makeTempDir, untrackTempDir } from '../launcher/temp-dirs.js';
 import { DOWNLOADS_OFF_TEXT, bindingTakenMessage, closedMessage } from '../messages.js';
 import type { BrowserContextOptions, Cookie, Geolocation, HTTPCredentials, LaunchOptions, SetCookie, URLMatch } from '../types.js';
 import { deferred, sleep, withTimeout, type Deferred } from '../util.js';
@@ -621,7 +622,7 @@ export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
     downloadsPath?: string,
   ) {
     super();
-    this.downloadsDir = downloadsPath ?? mkdtempSync(join(tmpdir(), 'eztest-downloads-'));
+    this.downloadsDir = downloadsPath ?? makeTempDir('downloads');
     bidi.on('disconnected', () => this.didDisconnect());
     this.wire();
   }
@@ -936,6 +937,7 @@ export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
           this.bidi.close();
         }
         await rm(this.downloadsDir, { recursive: true, force: true }).catch(() => undefined);
+        untrackTempDir(this.downloadsDir);
         this.didDisconnect();
       })();
     }
@@ -996,6 +998,7 @@ export class FirefoxBrowserType {
   }
 
   private processOptions(options: LaunchOptions & FirefoxLaunchExtras, userDataDir?: string): FirefoxLaunchOptions {
+    checkLaunchOptions(options, userDataDir === undefined ? 'browserType.launch' : 'browserType.launchPersistentContext');
     const args = [...(options.args ?? [])];
     // Emulation that BiDi lacks (color scheme, touch, JavaScript off ...) runs in Firefox's privileged scope.
     if (process.env.EZTEST_FIREFOX_SYSTEM_ACCESS !== '0' && !args.includes('--remote-allow-system-access')) args.push('--remote-allow-system-access');
@@ -1010,6 +1013,7 @@ export class FirefoxBrowserType {
       devtools: options.devtools,
       proxy: options.proxy,
       userPrefs: options.firefoxUserPrefs,
+      handleSignals: signalHandlingOf(options),
       ...(userDataDir ? { userDataDir } : {}),
     };
   }
@@ -1033,9 +1037,9 @@ export class FirefoxBrowserType {
 
   /** Launch with a persistent profile directory and return its default context. */
   async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions & FirefoxLaunchExtras = {}): Promise<FirefoxContext> {
-    const dir = userDataDir || mkdtempSync(join(tmpdir(), 'eztest-firefox-profile-'));
-    await mkdir(dir, { recursive: true });
-    const proc = await launchFirefoxProcess(this.processOptions(options, dir));
+    // An empty path means a temporary profile (removed on close), as for launch().
+    if (userDataDir) await mkdir(userDataDir, { recursive: true });
+    const proc = await launchFirefoxProcess(this.processOptions(options, userDataDir || ''));
     const bidi = new BidiConnection(proc.transport);
     const b = await FirefoxBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath, persistent: true });
     const ctx = b.defaultContext();

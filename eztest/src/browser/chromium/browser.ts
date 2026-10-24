@@ -3,13 +3,14 @@
  * BrowserType (launch / connectOverCDP / launchPersistentContext).
  */
 import { randomUUID } from 'node:crypto';
-import { createReadStream, mkdtempSync, type ReadStream } from 'node:fs';
+import { createReadStream, type ReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { debugLog } from '../debug.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError, isClosedError } from '../errors.js';
+import { checkLaunchOptions, signalHandlingOf } from '../launch-options.js';
+import { makeTempDir, untrackTempDir } from '../launcher/temp-dirs.js';
 import { DOWNLOADS_OFF_TEXT, bindingTakenMessage, closedMessage } from '../messages.js';
 import { routeFromHAR, type RouteFromHAROptions } from '../har.js';
 import { launchChromiumProcess, resolveBrowserWsEndpoint, stderrTailOf, type LaunchedProcess } from '../launcher/launch.js';
@@ -606,7 +607,7 @@ export class ChromiumBrowser extends TypedEmitter<BrowserEvents> {
     downloadsPath?: string,
   ) {
     super();
-    this.downloadsDir = downloadsPath ?? mkdtempSync(join(tmpdir(), 'eztest-downloads-'));
+    this.downloadsDir = downloadsPath ?? makeTempDir('downloads');
     connection.on('disconnected', () => this.didDisconnect());
     const root = connection.root;
     root.on('Target.attachedToTarget', (e: any) => void this.onAttached(e));
@@ -753,6 +754,7 @@ export class ChromiumBrowser extends TypedEmitter<BrowserEvents> {
           this.connection.close();
         }
         await rm(this.downloadsDir, { recursive: true, force: true }).catch(() => undefined);
+        untrackTempDir(this.downloadsDir);
         this.didDisconnect();
       })();
     }
@@ -875,7 +877,9 @@ export class ChromiumBrowserType {
   }
 
   async launch(options: LaunchOptions = {}): Promise<ChromiumBrowser> {
+    checkLaunchOptions(options, 'browserType.launch');
     const proc = await launchChromiumProcess({
+      handleSignals: signalHandlingOf(options),
       executablePath: options.executablePath,
       channel: options.channel,
       headless: options.headless,
@@ -926,7 +930,9 @@ export class ChromiumBrowserType {
 
   /** Launch with a persistent profile and return its default context. */
   async launchPersistentContext(userDataDir: string, options: LaunchOptions & BrowserContextOptions = {}): Promise<ChromiumContext> {
+    checkLaunchOptions(options, 'browserType.launchPersistentContext');
     const proc = await launchChromiumProcess({
+      handleSignals: signalHandlingOf(options),
       executablePath: options.executablePath,
       channel: options.channel,
       headless: options.headless,

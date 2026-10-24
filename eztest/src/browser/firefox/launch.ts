@@ -18,13 +18,13 @@
  * takes every content process down.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { debugLog } from '../debug.js';
 import { browserCacheDir } from '../launcher/find.js';
-import { killTree, removeDir, trackLiveBrowser } from '../launcher/launch.js';
+import { killTree, removeDir, trackLiveBrowser, type SignalHandling } from '../launcher/launch.js';
+import { makeTempDir } from '../launcher/temp-dirs.js';
 import { WebSocketTransport, type Transport } from '../transport/transport.js';
 import { settleWithin } from '../util.js';
 
@@ -345,6 +345,8 @@ export interface FirefoxLaunchOptions extends FirefoxPrefsOptions {
   userDataDir?: string;
   timeout?: number;
   devtools?: boolean;
+  /** Kill Firefox and remove its temporary profile on these signals (each default true). */
+  handleSignals?: SignalHandling;
 }
 
 export interface LaunchedFirefox {
@@ -377,7 +379,7 @@ export function firefoxCommandLine(opts: FirefoxLaunchOptions, profileDir: strin
 export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Promise<LaunchedFirefox> {
   const found = findFirefox({ executablePath: opts.executablePath, channel: opts.channel });
   const temp = !opts.userDataDir;
-  const profileDir = opts.userDataDir ?? mkdtempSync(join(tmpdir(), 'eztest-firefox-profile-'));
+  const profileDir = opts.userDataDir ?? makeTempDir('firefox-profile');
   writeFileSync(join(profileDir, 'user.js'), userJs(firefoxPreferences(opts)));
   const args = firefoxCommandLine(opts, profileDir);
   debugLog('browser', `launch ${found.executablePath} ${args.join(' ')}`);
@@ -394,7 +396,7 @@ export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Pro
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  const untrack = trackLiveBrowser({ pid: child.pid, userDataDir: profileDir, temp });
+  const untrack = trackLiveBrowser({ pid: child.pid, userDataDir: profileDir, temp }, opts.handleSignals);
   const stderrTail: string[] = [];
   let resolveWs!: (u: string) => void;
   const wsUrl = new Promise<string>((r) => {
@@ -426,7 +428,7 @@ export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Pro
   const fail = async (message: string): Promise<never> => {
     killTree(child.pid);
     untrack();
-    if (temp) await rm(profileDir, { recursive: true, force: true }).catch(() => undefined);
+    if (temp) await removeDir(profileDir);
     throw new Error(`${message}${stderrTail.length ? `\nBrowser output:\n${stderrTail.slice(-15).join('\n')}` : ''}`);
   };
   const spawnError = await new Promise<Error | undefined>((resolve) => {

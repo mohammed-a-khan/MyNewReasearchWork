@@ -203,7 +203,7 @@ const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG'
  * Live-database test switches (docs/databases.md), results-server and shard variables, and the
  * browser driver's own variables (docs/browser-driver.md): not config keys.
  */
-const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT)_|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
+const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT|CANCEL)_|^EZTEST_TEMP_SWEEP(?:_HOURS)?$|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
 
 /** Turn EZTEST_* variables into a config object (EZTEST_AI__MODEL -> ai.model). `origin` records key path -> variable name. */
 export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
