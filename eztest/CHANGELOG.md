@@ -6,6 +6,8 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Fixed: real websites
 
+- A control inside `<label for="radio2">` whose `for` names an id nothing has got no label at all (HTML rules), so `Check the Radio2 radio button` failed although the page shows "Radio2" next to it. Such a wrapping label now labels the control for `getByLabel`, the runner and the recorder (rahulshettyacademy.com).
+
 - A link or button with an icon-font glyph (Material Icons, Font Awesome) was not `the "Products" link`: its name started with an invisible Private Use Area character. Names and text now leave those glyphs out (automationexercise.com).
 - `Expect the page contains "Searched Products"` failed on a heading shown in capitals by CSS (`text-transform`); page and element text checks hold for the words as written in the page or as shown, and hidden text still does not count.
 - `testid=x` matched only `data-testid`; it now matches the attributes teams use (`data-testid`, `data-test-id`, `data-test`, `data-qa`, `data-cy`), still strictly one element, and the recorder writes `testid=` for any of them (saucedemo.com uses `data-test`). `selectors.setTestIdAttribute()` still picks a single attribute.

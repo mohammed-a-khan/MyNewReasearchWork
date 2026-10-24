@@ -246,7 +246,20 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           if (lt) out.push(lt);
         }
       }
+      var wrap = brokenLabel(el);
+      if (wrap) { var wt = norm(textOf(wrap, true)); if (wt) out.push(wt); }
       return out;
+    };
+    // A <label for="x"> around a control without that id: HTML gives it no label, the runner's getByLabel reads it.
+    var brokenLabel = function (el) {
+      if (!el.tagName || (el.labels && el.labels.length)) return null;
+      var t = lower(el);
+      if (t !== 'input' && t !== 'select' && t !== 'textarea') return null;
+      var l = el.parentElement && el.parentElement.closest ? el.parentElement.closest('label') : null;
+      if (!l) return null;
+      var f = l.getAttribute('for');
+      if (!f || treeOf(el).getElementById(f)) return null;
+      return l.querySelectorAll('input,select,textarea').length === 1 ? l : null;
     };
     var labelOf = function (el) { var l = labelsList(el); return l.length ? l[0] : ''; };
     var NAME_FROM_CONTENT = { button: 1, link: 1, tab: 1, menuitem: 1, menuitemcheckbox: 1, menuitemradio: 1, option: 1,

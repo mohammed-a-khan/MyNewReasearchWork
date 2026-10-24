@@ -61,6 +61,21 @@ describe('FINDING (saucedemo.com): testid= found only data-testid, while the app
   });
 });
 
+describe('FINDING (rahulshettyacademy.com): "the Radio2 radio button" inside <label for="radio2"> with no such id', () => {
+  it('reads a wrapping label whose for= points nowhere as the label; a working for= still wins', async () => {
+    await page.setContent(`<!doctype html><fieldset>
+      <label for="radio1"><input type="radio" name="r" value="1"> Radio1</label>
+      <label for="radio2"><input type="radio" name="r" value="2"> Radio2</label>
+      <label for="real">Real</label><label for="other"><input id="x" type="checkbox"> Wrapped</label><input id="real" type="checkbox">
+      </fieldset>`);
+    const r = await resolveTarget(page, describeTarget('the Radio2 radio button'), {}, 500);
+    expect(r.locator, r.notes.join('; ')).toBeDefined();
+    expect(await r.locator!.evaluate((e) => (e as HTMLInputElement).value)).toBe('2');
+    expect((await resolveTarget(page, describeTarget('the Real checkbox'), {}, 500)).locator).toBeDefined();
+    expect((await resolveTarget(page, describeTarget('the Wrapped checkbox'), {}, 500)).locator).toBeDefined();
+  });
+});
+
 describe('FINDING (the-internet nested frames): a frame named "frame-top" was taken for a CSS selector', () => {
   it('looks a frame name up as a name; selectors still work', () => {
     expect(frameSelectorCandidates('frame-top')[0]).toBe('iframe[name="frame-top"]');

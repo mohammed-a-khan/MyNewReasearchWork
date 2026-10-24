@@ -190,7 +190,25 @@ export function labelTexts(el: Element): string[] {
   if (refs.length) out.push(refs.map((r) => rawText(r)).join(' '));
   const labels = (el as HTMLInputElement).labels;
   if (labels) for (const l of Array.from(labels)) out.push(rawText(l));
+  const wrap = brokenWrappingLabel(el);
+  if (wrap) out.push(rawText(wrap));
   return out;
+}
+
+/**
+ * A <label> around a control whose `for` names an id nothing has (`<label for="radio2"><input type=radio> Radio2</label>`
+ * with no id on the input). HTML then gives the control no label at all, yet every person reads "Radio2" as its
+ * label, so getByLabel finds it by that text.
+ */
+export function brokenWrappingLabel(el: Element): Element | null {
+  if ((el as HTMLInputElement).labels?.length) return null;
+  const tag = lowerTag(el);
+  if (tag !== 'input' && tag !== 'select' && tag !== 'textarea') return null;
+  const label = el.parentElement?.closest('label');
+  if (!label) return null;
+  const forId = label.getAttribute('for');
+  if (!forId || (el.getRootNode() as Document | ShadowRoot).getElementById?.(forId)) return null;
+  return label.querySelectorAll('input,select,textarea').length === 1 ? label : null;
 }
 
 function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
@@ -199,7 +217,7 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
   for (const el of deepElements(root)) {
     const tag = lowerTag(el);
     if (tag === 'label') continue;
-    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length) continue;
+    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length && !brokenWrappingLabel(el)) continue;
     if (labelTexts(el).some(match)) out.push(el);
   }
   return out;

@@ -138,6 +138,9 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
         note = `placeholder "${info.placeholder}" matches ${c.placeholder} elements`;
       }
     }
+  } else if ((kind === 'checkbox' || kind === 'radio' || kind === 'switch') && !info.name && info.label && c.label === 1) {
+    // Labelled only by a broken <label for> around it: the label still names it for a person and for getByLabel.
+    human = phrase(kind, info.label);
   } else if (kind !== 'generic' && info.name) {
     const d = phrase(kind, info.name);
     if (d && c.roleName === 1) human = d;
