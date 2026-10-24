@@ -401,9 +401,9 @@ export function splitSetupJourneys(journeys: Journey[], configHooks?: RunHooks, 
 }
 
 /** A results-server client from `server:` (token from server.token or EZTEST_SERVER_TOKEN), for the shared store. */
-async function engineServerClient(config: EzTestConfig, vault: IdentityVault, masker: { add(v: string): unknown }): Promise<ResultsClient> {
+async function engineServerClient(config: EzTestConfig, vault: IdentityVault, masker: { add(v: string): unknown }, variables: Record<string, string | undefined> = {}): Promise<ResultsClient> {
   const s = config.server!;
-  const token = await resolveServerToken(s, (ref) => vault.registry.resolve(ref));
+  const token = await resolveServerToken(s, (ref) => vault.registry.resolve(ref), { ...process.env, ...variables });
   if (token) masker.add(token);
   return new ResultsClient({ url: s.url, token, project: s.project ?? config.project ?? 'default', timeoutMs: s.timeoutMs });
 }
@@ -516,7 +516,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
   // Cross-browser matrix and remote endpoints (browser.connect); secret:// values resolved and masked.
   const browserOpts = await browserRunOptions(config, (ref) => vault.registry.resolve(ref), (v) => loaded.masker.add(v));
   // Shared test data: the store and data pools (local files, or the results server when configured).
-  const serverClient = opts.serverClient ?? (config.server?.url ? await engineServerClient(config, vault, loaded.masker) : undefined);
+  const serverClient = opts.serverClient ?? (config.server?.url ? await engineServerClient(config, vault, loaded.masker, loaded.variables) : undefined);
   const store = await storeFromConfig(config, {
     cwd, client: serverClient, resolveSecret: (ref) => vault.registry.resolve(ref), addSecret: (v) => loaded.masker.add(v), env: { ...loaded.variables, ...process.env }, logger,
   });

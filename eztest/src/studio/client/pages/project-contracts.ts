@@ -6,6 +6,7 @@
  */
 import { api } from '../core/api.js';
 import { clear, h } from '../core/dom.js';
+import { plural } from '../core/format.js';
 import { card, emptyState, stat } from '../ui/badge.js';
 import { codeBlock, dataTable, lineChart, pageHeader, runPicker, sevBadge, withStates, type SubPageDef } from './assurance-ui.js';
 
@@ -55,7 +56,7 @@ function coverageCard(r: CoverageReport): HTMLElement {
       caption: 'Operations',
       columns: [
         { title: 'Operation', render: (o) => h('span', null, h('code', { text: `${o.method} ${o.path}` }), ' ', h('span', { class: 'muted', text: o.id })) },
-        { title: 'Covered', render: (o) => sevBadge(o.covered ? 'pass' : 'warning', o.covered ? `${o.calls} call(s)` : 'untested') },
+        { title: 'Covered', render: (o) => sevBadge(o.covered ? 'pass' : 'warning', o.covered ? plural(o.calls, 'call') : 'untested') },
         { title: 'Statuses covered', render: (o) => o.statuses.covered.join(', ') || '-' },
         { title: 'Statuses missing', render: (o) => o.statuses.missing.join(', ') || '-' },
         { title: 'Undocumented', render: (o) => o.statuses.undocumented.join(', ') || '-' },
@@ -94,7 +95,7 @@ export const contractsSection: SubPageDef = {
           { title: 'File', render: (s: ContractsView['specs'][number]) => h('code', { text: s.file }) },
           { title: 'API', render: (s) => (s.error ? sevBadge('error', s.error) : `${s.title ?? ''} ${s.version ?? ''} (OpenAPI ${s.openapi ?? '?'})`) },
           { title: 'Operations', render: (s) => String(s.operations ?? '-') },
-          { title: 'Lint', render: (s) => (s.lint ? h('span', null, sevBadge(s.lint.error ? 'error' : 'pass', `${s.lint.error} error(s)`), ' ', `${s.lint.warning} warning(s)`) : '-') },
+          { title: 'Lint', render: (s) => (s.lint ? h('span', null, sevBadge(s.lint.error ? 'error' : 'pass', plural(s.lint.error, 'error')), ' ', plural(s.lint.warning, 'warning')) : '-') },
         ],
         rows: v.specs,
         empty: 'No api.spec configured.',

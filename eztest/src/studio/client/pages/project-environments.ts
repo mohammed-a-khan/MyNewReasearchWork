@@ -1,6 +1,7 @@
 /** Project › Environments: config environments, the active one, layers, and every effective value with its source (secrets masked). */
 import { api } from '../core/api.js';
 import { clear, h, uid } from '../core/dom.js';
+import { plural } from '../core/format.js';
 import { button, card, emptyState } from '../ui/badge.js';
 import { confirmDialog } from '../ui/modal.js';
 import { toast, toastError } from '../ui/toast.js';
@@ -100,7 +101,7 @@ export const environmentsSection: SubPageDef = {
           h('p', { class: 'row wrap' }, h('span', { text: 'Now: ' }), h('strong', { id: 'env-active', text: v.active ?? 'none (base configuration only)' }), v.overridden ? sevBadge('info', 'switched in the Studio') : sevBadge('neutral', 'from EZTEST_ENV')),
           v.environments.length ? h('div', { class: 'row wrap' }, h('label', { for: sel.id, text: 'Environment' }), sel, apply) : emptyState('Only the base configuration', 'Add config/<name>.yaml (or .env.<name>) to define environments such as staging or prod.'),
           h('p', { class: 'small muted', text: v.masterKey ? 'EZTEST_MASTER_KEY is set: ENC(…) values are decrypted.' : 'EZTEST_MASTER_KEY is not set: ENC(…) values cannot be decrypted.' }))),
-        card('Layers (lowest to highest precedence)', h('ol', { class: 'pill-list' }, v.layers.map((l) => h('li', { class: 'pill', text: `${l.source}${l.count ? ` · ${l.count} key(s)` : ''}` })))),
+        card('Layers (lowest to highest precedence)', h('ol', { class: 'pill-list' }, v.layers.map((l) => h('li', { class: 'pill', text: `${l.source}${l.count ? ` · ${plural(l.count, 'key')}` : ''}` })))),
         v.sections?.length ? card('Configuration sections', h('ul', { class: 'pill-list', id: 'env-sections' }, v.sections.map((s) => h('li', { class: 'pill', title: s.configured ? `set in ${s.sources.join(', ')}` : 'defaults only', dataset: { section: s.key } }, sevBadge(s.configured ? 'ok' : 'neutral', s.key), h('span', { class: 'small muted', text: s.configured ? s.sources.join(', ') : s.present ? 'defaults' : 'not configured' }))))) : h('span'),
         v.warnings.length ? card('Warnings', h('ul', { class: 'bullets warn-text' }, v.warnings.map((w) => h('li', { text: w })))) : h('span'),
         card(`Effective configuration (${v.values.length} keys)`, h('div', { class: 'stack-sm' }, filter, tableHost), { id: 'env-values' }),

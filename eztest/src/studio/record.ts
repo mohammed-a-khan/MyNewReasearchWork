@@ -117,7 +117,7 @@ export class RecordManager {
     } catch (e) {
       throw new HttpError(400, (e as Error).message);
     }
-    this.emit('line', { line: `  Expect ${String(text).replace(/^\s*(?:expect|verify)\s+/i, '')}` });
+    // The recorder reports the attached expectation itself (onStep -> a "line" event); emitting it here too showed it twice.
   }
 
   async stop(): Promise<RecordingSession> {

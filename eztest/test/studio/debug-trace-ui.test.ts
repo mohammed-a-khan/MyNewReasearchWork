@@ -235,6 +235,10 @@ describe('Studio debugger (Chromium)', { timeout: 180_000 }, () => {
     // Variables and call stack while paused.
     await page.getByRole('tab', { name: 'Stack' }).click();
     expect(await page.locator('.call-stack').textContent()).toMatch(/Step 4 \(before step\).*Step 3.*Sign in as bob/);
+    // Each step that ran is listed once (a pause before a step used to add it a second time).
+    const frames = await page.locator('.call-stack .cs-label').allTextContents();
+    expect(frames.slice(0, 4)).toEqual(['Step 4 (before step)', 'Step 3', 'Step 2', 'Step 1']);
+    expect(new Set(frames).size).toBe(frames.length);
     await shot('debugger-paused.png');
 
     // Continue (F8) finishes the run.

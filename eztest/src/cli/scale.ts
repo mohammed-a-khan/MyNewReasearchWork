@@ -57,7 +57,8 @@ export async function serverClientFor(loaded: LoadedConfig, cwd: string, o: { ur
   const s = loaded.config.server;
   const url = o.url ?? s?.url;
   if (!url) return undefined;
-  const token = await resolveServerToken(s, secretResolver(loaded, cwd));
+  // The environment the config was loaded with (and its .env files), not only this process's.
+  const token = await resolveServerToken(s, secretResolver(loaded, cwd), { ...process.env, ...loaded.variables });
   if (token) loaded.masker.add(token);
   return new ResultsClient({ url, token, project: o.project ?? s?.project ?? loaded.config.project ?? 'default', timeoutMs: s?.timeoutMs });
 }
@@ -644,10 +645,18 @@ async function openServerStore(cfg: Awaited<ReturnType<typeof import('../server/
   return Store.open(cfg.database.driver === 'sqlite' ? { driver: 'sqlite', file: cfg.database.file ? resolve(cfg.baseDir, cfg.database.file) : join(cfg.dataDir, 'eztest.db') } : (cfg.database as never));
 }
 
-function pickAnalysis(report: object): Record<string, unknown> {
+/**
+ * The parts of a run's analysis the results server keeps. A saved report.json holds them under `insights`
+ * (an in-process analysis has them at the top level); reading only the top level lost the readiness decision.
+ */
+export function pickAnalysis(report: object): Record<string, unknown> {
   const r = report as Record<string, unknown>;
+  const insights = (r.insights && typeof r.insights === 'object' ? r.insights : {}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  for (const k of ['triage', 'readiness', 'flaky']) if (r[k] !== undefined) out[k] = r[k];
+  for (const k of ['triage', 'readiness', 'flaky']) {
+    const v = r[k] ?? insights[k];
+    if (v !== undefined) out[k] = v;
+  }
   return out;
 }
 

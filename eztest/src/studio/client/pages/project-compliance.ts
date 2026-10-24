@@ -1,7 +1,7 @@
 /** Project › Compliance: signed evidence packs (generic / CSA-Part 11 / SOX), offline verification and the traceability table. */
 import { api } from '../core/api.js';
 import { clear, h, uid } from '../core/dom.js';
-import { dateTime } from '../core/format.js';
+import { dateTime, plural } from '../core/format.js';
 import { button, card, emptyState } from '../ui/badge.js';
 import { confirmDialog } from '../ui/modal.js';
 import { toast, toastError } from '../ui/toast.js';
@@ -151,7 +151,7 @@ export const complianceSection: SubPageDef = {
         const r = await withStates(verOut, () => api.post<{ ok: boolean; signatureValid: boolean; filesChecked: number; problems: string[]; manifest?: ManifestView }>('/api/project/compliance/verify', body), { loading: 'Verifying signature, hashes and the evidence chain…' });
         if (!r) return;
         verOut.append(
-          h('p', { class: 'row wrap' }, sevBadge(r.ok ? 'pass' : 'fail', r.ok ? 'VALID' : 'INVALID'), h('span', { class: 'muted', text: `signature ${r.signatureValid ? 'valid' : 'NOT valid'} · ${r.filesChecked} file(s) checked` })),
+          h('p', { class: 'row wrap' }, sevBadge(r.ok ? 'pass' : 'fail', r.ok ? 'VALID' : 'INVALID'), h('span', { class: 'muted', text: `signature ${r.signatureValid ? 'valid' : 'NOT valid'} · ${plural(r.filesChecked, 'file')} checked` })),
           r.problems.length ? h('ul', { class: 'bullets bad-text' }, r.problems.map((p) => h('li', { text: p }))) : h('span'),
           r.manifest ? manifestSummary(r.manifest) : h('span'),
           r.manifest ? traceTable(r.manifest, 'verify-trace') : h('span'),

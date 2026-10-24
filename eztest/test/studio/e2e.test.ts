@@ -134,6 +134,8 @@ describe('Studio end to end (shop project)', () => {
     const events = await readSse(studio.port, '/api/record/events', studio.token, (e) => e.type === 'stopped');
     expect(events.map((e) => e.type)).toContain('started');
     expect(events.some((e) => e.type === 'line')).toBe(true);
+    // The expectation typed in the Studio is streamed once (it used to come twice: from the Studio and from the recorder).
+    expect(events.filter((e) => e.type === 'line' && /^\s*Expect .*Sign in/.test(String(e.line)))).toHaveLength(1);
     const save = await c.put('/api/file', { path: `journeys/${result.suggestedPath}`, content: result.ez, create: true });
     expect(save.status).toBe(200);
     expect(save.json().validation.ok).toBe(true);

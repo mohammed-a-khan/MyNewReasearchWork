@@ -179,12 +179,21 @@ function scheduleDetails(): void {
   detailsTimer = setTimeout(() => void refreshDetails(), 120);
 }
 
+/**
+ * The execution order after step `idx` starts. A pause before a step that has not run yet already put it at the
+ * end of the order (the pause comes before the "started" event), so it is not added twice; a step that runs
+ * again (a loop iteration) is added once per run.
+ */
+export function orderOnStart(order: number[], idx: number, runsBefore: number): number[] {
+  return runsBefore === 0 && order[order.length - 1] === idx ? order : [...order, idx];
+}
+
 function onEvent(e: { type: string; [k: string]: unknown }): void {
   const cur = dbg.get();
   const idx = typeof e.stepIndex === 'number' ? e.stepIndex : undefined;
   switch (e.type) {
     case 'debug.stepStarted':
-      if (idx !== undefined) dbg.set({ ...cur, phase: cur.phase === 'paused' ? 'running' : cur.phase === 'starting' ? 'running' : cur.phase, current: idx, steps: { ...cur.steps, [idx]: { status: 'running', stepId: String(e.stepId ?? ''), intent: String(e.intent ?? ''), runs: (cur.steps[idx]?.runs ?? 0) + 1, ...(typeof e.actor === 'string' ? { actor: e.actor } : {}) } }, order: [...(cur.order ?? []), idx], detailIndex: undefined });
+      if (idx !== undefined) dbg.set({ ...cur, phase: cur.phase === 'paused' ? 'running' : cur.phase === 'starting' ? 'running' : cur.phase, current: idx, steps: { ...cur.steps, [idx]: { status: 'running', stepId: String(e.stepId ?? ''), intent: String(e.intent ?? ''), runs: (cur.steps[idx]?.runs ?? 0) + 1, ...(typeof e.actor === 'string' ? { actor: e.actor } : {}) } }, order: orderOnStart(cur.order ?? [], idx, cur.steps[idx]?.runs ?? 0), detailIndex: undefined });
       break;
     case 'debug.stepFinished':
       if (idx !== undefined) dbg.set({ ...cur, steps: { ...cur.steps, [idx]: { ...cur.steps[idx], status: String(e.status), durationMs: Number(e.durationMs) } } });

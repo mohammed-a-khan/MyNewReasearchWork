@@ -2,7 +2,7 @@
 import { api } from '../core/api.js';
 import { clear, h, uid } from '../core/dom.js';
 import { follow } from '../core/events.js';
-import { splitList } from '../core/format.js';
+import { plural, splitList } from '../core/format.js';
 import { registerPage } from '../core/registry.js';
 import { link, navigate } from '../core/router.js';
 import { refreshJourneys, session } from '../core/state.js';
@@ -93,7 +93,7 @@ export function registerRecordPage(): void {
       };
       const showResult = (r: RecordResult) => {
         setRecording(false);
-        status.textContent = `Recording stopped: ${r.steps} steps.`;
+        status.textContent = `Recording stopped: ${plural(r.steps, 'step')}.`;
         result.hidden = false;
         ez.value = r.ez || r.yaml;
         pathIn.value = `${session.get()?.journeysDir ?? 'journeys'}/${r.suggestedPath}`;
