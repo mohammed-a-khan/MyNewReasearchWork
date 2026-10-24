@@ -56,7 +56,11 @@ messaging:
 
 **IBM MQ certificates.** For a development queue manager with a self-signed certificate, `insecure: true` accepts that certificate. Prefer `ca:`.
 
-**AMQP queues.** A queue that does not exist yet is declared (durable) the first time a step uses it. Set `assertQueues: false` to turn this off.
+**AMQP queues.** Queues belong to the application: a missing queue is an error (`AMQP_QUEUE_MISSING`), unless the broker sets `declare: true` (then EZTest declares it, durable). A permission refusal is reported as one (`BUS_AUTH`).
+
+**Kafka topics.** A missing topic is an error (`KAFKA_TOPIC_MISSING`); with `createTopics: true` EZTest creates it (and a failure to create is an error). Consumers use one consumer group per run, never commit offsets, and the groups are deleted when the run ends.
+
+**IBM MQ waits** browse the queue (MQ 9.1.5+ REST API) and consume only the message a wait matched, by its message id; other messages are never taken, held or reordered. A REST API without browse fails with `BUS_NO_BROWSE`.
 
 ## Steps
 
@@ -245,7 +249,8 @@ Run batch job "close-day" with date=${businessDate} and wait up to 30 minutes as
 
 - SSH runs **only** commands that match the host's `allowCommands`, either exactly or as a glob where `*` matches anything. Any other command fails without connecting.
 - Local folders must be inside the project or listed in `allowFolders`.
-- Host keys can be pinned with `hostKeySha256`.
+- Host keys are checked strictly against `.eztest/known_hosts` (OpenSSH format, `knownHosts:` to use another file): an unknown host is refused with how to add it, a changed key is refused. `trustOnFirstUse: true` records the first key; `hostKeySha256` pins a fingerprint instead.
+- A batch job's `doneFile: { sftp, dir, pattern }` makes the step wait for a new completion file after the command succeeds.
 
 **HTTP batch jobs** start with one request and poll `statusUrl` until a success or failure status. The job id is read from the start response with `idPath` and is available as `${jobId}`.
 

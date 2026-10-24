@@ -157,7 +157,7 @@ With `server.url` configured (see [server.md](server.md)) the store and the pool
 
 `Save ${token} to the shared store as "api-token" as a secret` (or `store.save(key, value, { secret: true })`, or `Add ... to pool "x" as a secret`):
 
-- The value is **sealed on the machine that saves it**: AES-256-GCM with a fresh IV per value and a key derived (scrypt) from `EZTEST_STORE_KEY`, else `EZTEST_MASTER_KEY` (at least 16 characters), else `store.key`. Store files, the results server's database, the pipeline export and GitHub outputs hold only the sealed form (`EZS1:...`). The results server refuses a secret that is not sealed.
+- The value is **sealed on the machine that saves it**: AES-256-GCM with a fresh IV per value and a key derived (scrypt) from `EZTEST_STORE_KEY`, else `EZTEST_MASTER_KEY` (at least 16 characters), else `store.key`. The key derivation uses the store's own random salt (kept in the store; values carry it: `EZS2:...`; older `EZS1:...` values still open and are re-sealed on load). Store files, the results server's database, the pipeline export and GitHub outputs hold only the sealed form. The results server refuses a secret that is not sealed.
 - Every machine that loads it needs the same key. A missing or wrong key fails with a clear message, never with garbage.
 - The plain value is registered with the run's secret masker when it is saved or loaded: it is `****` in logs, step results, captured values, the stored run (`run.json` ledgers are masked) and reports, and Studio shows only `****`.
 - In Azure Pipelines it is set with `issecret=true`; in GitHub Actions it is masked with `::add-mask::` and passed sealed.

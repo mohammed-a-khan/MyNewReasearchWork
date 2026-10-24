@@ -75,10 +75,12 @@ tracing.ts har.ts request.ts electron.ts devices.ts video/webm.ts zip-writer.ts
 - **Actions.** Each attempt re-resolves the locator (strict: exactly one
   element), asks the engine whether the action can happen, scrolls into view,
   takes the click point from the engine, adds the iframe offsets, and sends
-  real input events. A click waits for a navigation it starts to commit.
-  Timeouts end with `locator.click: Timeout 5000ms exceeded.` and a call log
-  naming what was waited for (for example `div#cover intercepts pointer
-  events`).
+  real input events. A click waits for a navigation it starts to commit,
+  also one the page starts after async work (the context's
+  `navigationWindow`, default 150 ms of quiet, at most 2 s); one that never
+  commits fails the click. Timeouts end with `locator.click: timed out after
+  5000 ms` and what EZTest was doing (for example `div#cover covers the
+  element and would receive the pointer event`).
 
 ### Supported browsers
 

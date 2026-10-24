@@ -188,7 +188,12 @@ mobile:
 JSON over HTTP on the device loopback. Success: `{ "value": ... }` (or the named
 fields below); failure: a 4xx/5xx status with `{ "error": { "code", "message" } }`,
 codes `no such element`, `stale element`, `no such alert`, `invalid argument`,
-`not supported`, `unknown command`, `timeout`, `internal`.
+`not supported`, `unknown command`, `timeout`, `internal`, `unauthorized`.
+
+Every request carries the session token in `X-EZTest-Agent-Token`; an agent
+answers nothing else (401 `unauthorized`). EZTest starts each agent with a fresh
+random token; for an agent started by hand, set `mobile.android.agentToken` /
+`mobile.ios.agentToken` to the token it was started with.
 
 | Route | Body / result |
 |---|---|
