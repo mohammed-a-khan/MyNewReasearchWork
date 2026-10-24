@@ -89,8 +89,9 @@ describe('adaptive waits in a journey (real Chromium)', () => {
   });
   afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
+  // inline: the load readings are replaced in this process (overrideLoadReading), not in a worker.
   const ez = 'Journey: Slow button\nOpen /\nClick the "Go" button\n  Expect the title is "Went"\n';
-  const run = async () => (await runJourneys([parseEzScript(ez)], { baseUrl: base, outputDir: await tempDir('adaptive'), stepTimeoutMs: 5000, locateTimeoutMs: 1000, conditionTimeoutMs: 1000, screenshots: 'off' })).journeys[0];
+  const run = async () => (await runJourneys([parseEzScript(ez)], { baseUrl: base, outputDir: await tempDir('adaptive'), stepTimeoutMs: 5000, locateTimeoutMs: 1000, conditionTimeoutMs: 1000, screenshots: 'off', workers: 'inline' })).journeys[0];
 
   it('under load the locate wait is extended and the step passes, with a reliability note', async () => {
     overrideLoadReading(reading(3));
