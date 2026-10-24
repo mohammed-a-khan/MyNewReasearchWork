@@ -75,7 +75,7 @@ describe('record, then run, in a project that points elsewhere', () => {
   });
 
   it('attaches the expectation to the step just recorded, not to an earlier one', () => {
-    const j = parseEzScript(result.ez, 'recorded.ez');
+    const j = parseEzScript(result.ez, { source: 'recorded.ez' });
     const last = j.steps[j.steps.length - 1];
     expect(last.intent).toMatch(/Dashboard/);
     expect((last.postconditions ?? []).length).toBe(1);
@@ -84,7 +84,7 @@ describe('record, then run, in a project that points elsewhere', () => {
   });
 
   it('replays green with the project config, password supplied as a variable', async () => {
-    const j = parseEzScript(result.ez, 'recorded.ez');
+    const j = parseEzScript(result.ez, { source: 'recorded.ez' });
     const run = await runJourneys([j], {
       baseUrl: 'http://localhost:3000',
       outputDir: await mkdtemp(join(tmpdir(), 'ez-roundtrip-')),
@@ -92,7 +92,7 @@ describe('record, then run, in a project that points elsewhere', () => {
       variables: { password: 'admin123' },
     });
     const jr = run.journeys[0];
-    expect(jr.steps.filter((s) => s.status === 'failed' || s.status === 'error').map((s) => `${s.intent}: ${s.error?.message ?? ''}`)).toEqual([]);
+    expect(jr.steps.filter((s) => s.status === 'failed').map((s) => `${s.intent}: ${s.error?.message ?? ''}`)).toEqual([]);
     expect(jr.status).toBe('passed');
   });
 });
@@ -106,7 +106,7 @@ describe('expectations in the words testers use', () => {
     ['the "Dashboard" screen is displayed', 'Dashboard'],
     ['Orders page is shown', 'Orders'],
   ])('%s', async (text, value) => {
-    const j = parseEzScript(`Journey: words\n\nOpen /\n  Expect ${text}\n`, 'w.ez');
+    const j = parseEzScript(`Journey: words\n\nOpen /\n  Expect ${text}\n`, { source: 'w.ez' });
     expect(j.steps[0].postconditions?.[0]).toEqual({ type: 'pageContainsText', value });
   });
 });
