@@ -94,8 +94,8 @@ describe('element description (in-page computation)', () => {
   it('disambiguates a duplicated name with a unique CSS path, or the test id when there is one', async () => {
     const first = await describeElement(page.getByRole('button', { name: 'Delete' }).first());
     expect(first.ambiguous).toBe(true);
-    expect(first.note).toBe('button "Delete" matches 3 elements');
-    expect(first.descriptions[0]).toMatch(/^css=/);
+    expect(first.note).toBe('button "Delete" matches 3 elements; recorded the 1st');
+    expect(first.descriptions[0]).toBe('the 1st "Delete" button');
     await expectRoundTrip(page.getByRole('button', { name: 'Delete' }).first(), first.descriptions[0]);
 
     const third = await describeElement(page.getByTestId('delete-3'));
@@ -133,7 +133,8 @@ describe('URL expectations leave out one-time path segments', () => {
     ['/orders/58213907/edit', '/orders/'],
     ['/u/3f2a9c1b-1234-4abc-9def-0123456789ab/profile', '/u/'],
     ['/a/ChangeWeakPasswordPage', '/a/ChangeWeakPasswordPage'],
-    ['/pim/viewPersonalDetails/empNumber/7', '/pim/viewPersonalDetails/empNumber/7'],
+    ['/pim/viewPersonalDetails/empNumber/7', '/pim/viewPersonalDetails/empNumber/'],
+    ['/api/v2/items', '/api/v2/items'],
     ['/commit/9fceb02d0ae598e95dc970b74767f19372d61af8', '/commit/'],
   ])('%s', async (path, want) => {
     const { stablePath } = await import('../../src/recorder/compose.js');

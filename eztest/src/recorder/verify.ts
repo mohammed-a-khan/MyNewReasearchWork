@@ -44,7 +44,8 @@ export async function verifyRecording(result: RecordingResult, options: VerifyOp
     );
   }
   const outputDir = options.outputDir ?? (await mkdtemp(join(tmpdir(), 'eztest-record-verify-')));
-  const run = await runJourneys([result.journey], { ...options, outputDir, baseUrl: options.baseUrl ?? result.baseUrl });
+  // An explicit baseUrl points the recording at another copy of the app, over the Base URL it was recorded with.
+  const run = await runJourneys([result.journey], { ...options, outputDir, ...(options.baseUrl ? { baseUrlOverride: options.baseUrl } : { baseUrl: result.baseUrl }) });
   const jr = run.journeys[0];
   const byId = new Map(jr.steps.map((s) => [s.stepId, s]));
   const steps: VerifiedStep[] = result.journey.steps.map((s) => {

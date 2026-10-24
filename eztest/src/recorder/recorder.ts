@@ -276,7 +276,9 @@ export async function startRecording(opts: RecorderOptions): Promise<Recorder> {
   const context = page.context();
   const base = opts.baseUrl ?? new URL(opts.url).origin;
   const startUrl = new URL(opts.url, base).toString();
-  const written = opts.baseUrl ?? (opts.project ? journeyBaseUrl(new URL(startUrl).origin, opts.project.baseUrl) : undefined);
+  // Always say where the journey was recorded, unless the project already points there: without it, a journey of
+  // relative steps cannot run anywhere (`Open /login` needs a base URL).
+  const written = opts.baseUrl ?? journeyBaseUrl(new URL(startUrl).origin, opts.project?.baseUrl);
   const composer = new JourneyComposer({
     startUrl,
     ...(written ? { baseUrl: written } : {}),

@@ -16,6 +16,7 @@ import { buildApiCall, finishApiResponse } from './data-steps.js';
 import { dropFiles } from './inpage.js';
 import { rememberApiRequest } from '../contracts/condition-rules.js';
 import { normalizeModifiers, pressKey } from './input.js';
+import { selectValue, selectedValue } from './custom-select.js';
 
 const MIME_BY_EXT: Record<string, string> = { '.pdf': 'application/pdf', '.csv': 'text/csv', '.json': 'application/json', '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.xml': 'application/xml', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 const mimeOf = (f: string) => MIME_BY_EXT[extname(f).toLowerCase()] ?? 'application/octet-stream';
@@ -118,7 +119,7 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
     case 'dblclick': await need().dblclick({ timeout }); return {};
     case 'fill': await need().fill(requireValue(step, ctx), { timeout }); return {};
     case 'clear': await need().clear({ timeout }); return {};
-    case 'select': await need().selectOption(requireValue(step, ctx), { timeout }); return {};
+    case 'select': await selectValue(need(), requireValue(step, ctx), timeout); return {};
     case 'check': await need().check({ timeout }); return {};
     case 'uncheck': await need().uncheck({ timeout }); return {};
     case 'hover': await need().hover({ timeout }); return {};
@@ -276,10 +277,10 @@ export async function implicitCheck(step: Step, loc: Locator, ctx: StepContext, 
     }
     case 'select': {
       const want = ctx.interpolate(step.value ?? '');
-      const sel = await loc
-        .evaluate((el) => (el instanceof HTMLSelectElement ? Array.from(el.selectedOptions).flatMap((o) => [o.value, o.label]) : []), undefined, { timeout: 2000 })
-        .catch(() => [] as string[]);
-      const ok = sel.includes(want);
+      const sel = await selectedValue(loc);
+      const norm = (v: string) => v.replace(/\s+/g, ' ').trim().toLowerCase();
+      // Native: the selected option. Custom and typeahead: the box shows the chosen text.
+      const ok = sel.includes(want) || sel.some((v) => norm(v) === norm(want) || norm(v).includes(norm(want)));
       return { ok, message: ok ? 'option selected' : `option "${want}" is not selected` };
     }
     case 'check':

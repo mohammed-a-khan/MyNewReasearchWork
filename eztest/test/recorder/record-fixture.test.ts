@@ -75,7 +75,8 @@ describe('recording form controls', () => {
   });
 
   it('records each control as one plain-English step', () => {
-    const body = result.ez.split('\n').filter((l) => l && !l.startsWith('#') && !/^(Journey|Description|Tags):/.test(l));
+    const body = result.ez.split('\n').filter((l) => l && !l.startsWith('#') && !/^(Journey|Description|Tags|Base URL):/.test(l));
+    expect(result.ez).toMatch(/^Base URL: http:\/\/127\.0\.0\.1:\d+$/m);
     expect(body).toEqual([
       'Open /form',
       'Check the Newsletter checkbox',

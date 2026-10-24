@@ -524,7 +524,7 @@ export async function runNativeJourney(journey: Journey, attempt: number, env: N
   const ledger = new Ledger();
   const vars = (): Record<string, unknown> => ({ ...journey.variables, ...(opts.variables ?? {}), ...ledger.view() });
   const prefix = `journeys/${safeName(journey.id)}/attempt-${attempt}`;
-  const baseUrl = journey.baseUrl ?? opts.baseUrl;
+  const baseUrl = opts.baseUrlOverride ?? journey.baseUrl ?? opts.baseUrl;
   const ctxFor = (step: Step, scope?: FlowScope): StepContext => {
     const j = scope?.journey ?? journey;
     const l = scope?.ledger ?? ledger;

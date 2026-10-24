@@ -342,6 +342,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
           events,
           library,
           workers: workerMode,
+          // --base-url points the run at another environment, journeys with their own Base URL included.
+          ...(o.baseUrl ? { baseUrlOverride: o.baseUrl } : {}),
           ...(o.trace ? { trace: true } : {}),
           ...(locks ? { locks } : {}),
           signal: cancel.signal,

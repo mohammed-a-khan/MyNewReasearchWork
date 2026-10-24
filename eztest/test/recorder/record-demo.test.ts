@@ -42,19 +42,20 @@ afterAll(async () => {
 describe('recording the demo app', () => {
   it('produces the expected plain-English lines', () => {
     const lines = result.ez.split('\n').map((l) => l.trimEnd());
-    const body = lines.filter((l) => l && !l.startsWith('#') && !/^(Journey|Description|Tags):/.test(l));
+    const body = lines.filter((l) => l && !l.startsWith('#') && !/^(Journey|Description|Tags|Base URL):/.test(l));
+    expect(result.ez).toMatch(/^Base URL: http:\/\/127\.0\.0\.1:\d+$/m);
     expect(body).toEqual([
       'Open /login',
       'Type "bob" into the Username field',
       'Type "${password}" into the Password field',
       'Click the "Sign in" button',
       '  Expect URL contains "/dashboard"',
-      'Click css=nav[aria-label="Main"] a[href="/orders/new"]',
+      'Click the 1st "New order" link',
       '  Expect URL contains "/orders/new"',
       'Select "Gadget (49.50)" from the Product dropdown',
       'Type "3" into the Quantity field',
       'Click the "Submit order" button',
-      '  Expect URL contains "/orders/1"',
+      '  Expect URL contains "/orders/"',
       '  Expect testid=order-number contains "ORD-1"',
       '  Expect page contains "created"',
     ]);
@@ -64,7 +65,7 @@ describe('recording the demo app', () => {
   });
 
   it('warns about the ambiguous link and keeps measured locator candidates', () => {
-    expect(result.warnings.some((w) => /"New order" matches 2 elements/.test(w) && /CSS selector/.test(w))).toBe(true);
+    expect(result.warnings.some((w) => /"New order" matches 2 elements/.test(w) && /recorded by position/.test(w))).toBe(true);
     const submit = result.journey.steps.find((s) => s.intent === 'Click the "Submit order" button')!;
     expect(result.targets[submit.id]?.[0]).toEqual({ strategy: 'role', value: 'button', name: 'Submit order', exact: true });
     expect(submit.target?.fingerprint).toMatchObject({ tag: 'button', id: 'submit-order', role: 'button', name: 'Submit order' });

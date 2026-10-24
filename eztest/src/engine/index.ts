@@ -616,7 +616,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     ...(config.email?.provider === 'sink' ? {} : {
       workerSetup: {
         module: siblingModule(import.meta.url, 'worker-setup'), export: 'setupEngineWorker',
-        args: { cwd, config, variables: loaded.variables, ...(loaded.env ? { env: loaded.env } : {}), ...(loaded.project ? { project: loaded.project } : {}), ...(opts.pipeline ? { pipeline: opts.pipeline } : {}), ...(opts.worker ?? {}) },
+        args: { cwd, config, variables: loaded.variables, ...(loaded.env ? { env: loaded.env } : {}), ...(loaded.project ? { project: loaded.project } : {}), ...(opts.pipeline ? { pipeline: opts.pipeline } : {}), ...(opts.runOptions?.baseUrlOverride ? { baseUrlOverride: opts.runOptions.baseUrlOverride } : {}), ...(opts.worker ?? {}) },
       },
     }),
     addSecret: (v: string) => void loaded.masker.add(v),

@@ -39,9 +39,14 @@ describe('recorder: repeated names in rows', () => {
 
   it('falls back when the row text is not unique, or there is no row', async () => {
     const bob = await describeElement(page.getByRole('button', { name: 'Edit' }).nth(1));
-    expect(bob.descriptions[0]).toMatch(/^css=/);
+    // No row that picks it out: which one, by position in words, before a CSS path.
+    expect(bob.descriptions[0]).toBe('the 2nd "Edit" button');
+    expect(bob.descriptions.at(-1)).toMatch(/^css=/);
     expect(bob.ambiguous).toBe(true);
     const save = await describeElement(page.getByRole('button', { name: 'Save' }).first());
-    expect(save.descriptions[0]).toMatch(/^css=/);
+    expect(save.descriptions[0]).toBe('the 1st "Save" button');
+    const res = await resolveTarget(page, describeTarget(bob.descriptions[0]), {}, 500);
+    const h = await page.getByRole('button', { name: 'Edit' }).nth(1).elementHandle();
+    expect(await res.locator!.evaluate((el, other) => el === other, h)).toBe(true);
   });
 });

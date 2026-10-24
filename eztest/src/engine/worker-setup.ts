@@ -23,6 +23,8 @@ export interface EngineWorkerArgs {
   updateBaselines?: boolean;
   /** Time-travel trace forced on (eztest run --time-travel). */
   timeTravel?: boolean;
+  /** eztest run --base-url: wins over journeys' own Base URL. */
+  baseUrlOverride?: string;
 }
 
 export async function setupEngineWorker(args: EngineWorkerArgs, ctx: { secrets: string[]; onSecret(v: string): void }): Promise<WorkerSetupResult> {
@@ -40,6 +42,7 @@ export async function setupEngineWorker(args: EngineWorkerArgs, ctx: { secrets: 
     lenses: lensesFromConfig(cfg.lenses, args.cwd, lensOpts),
     lensFactory: (spec: string) => lensesFromConfig([spec], args.cwd, lensOpts)[0],
     ...(args.timeTravel ? { timeTravel: { ...cfg.trace.timeTravel, enabled: true, masker } } : {}),
+    ...(args.baseUrlOverride ? { baseUrlOverride: args.baseUrlOverride } : {}),
   };
   const engine = await createEngine(loaded, { cwd: args.cwd, addons, ...(args.pipeline ? { pipeline: args.pipeline } : {}), runOptions });
   return {

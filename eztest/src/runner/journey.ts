@@ -195,7 +195,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   };
   const ledger = new Ledger();
   for (const [k, v] of Object.entries(seed ?? {})) ledger.set(k, v);
-  const baseUrl = journey.baseUrl ?? opts.baseUrl;
+  const baseUrl = opts.baseUrlOverride ?? journey.baseUrl ?? opts.baseUrl;
   let clockContext: BrowserContext | undefined;
   // today() / now() follow the journey's browser clock once one is installed.
   const vars = (): Record<string, unknown> => ({ ...journey.variables, ...(opts.variables ?? {}), ...ledger.view(), ...clockVars(clockContext) });

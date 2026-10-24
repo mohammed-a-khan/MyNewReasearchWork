@@ -196,13 +196,48 @@ export function labelTexts(el: Element): string[] {
 function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
   const match = textMatcher(m, exact);
   const out: Element[] = [];
+  const loose: Element[] = [];
   for (const el of deepElements(root)) {
     const tag = lowerTag(el);
-    if (tag === 'label') continue;
+    if (tag === 'label') {
+      // A label linked to nothing (no `for`, no control inside), as in many UI kits: its field is the one control of its form group.
+      if (!(el as HTMLLabelElement).control && match(rawText(el))) loose.push(el);
+      continue;
+    }
     if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length) continue;
     if (labelTexts(el).some(match)) out.push(el);
   }
+  if (out.length) return out;
+  for (const l of loose) {
+    const c = groupControl(l);
+    if (c && !out.includes(c)) out.push(c);
+  }
   return out;
+}
+
+const CONTROL_SELECTOR = [
+  'input:not([type=hidden])', 'textarea', 'select', '[contenteditable=""]', '[contenteditable=true]',
+  '[role=combobox]', '[role=textbox]', '[role=searchbox]', '[role=listbox]', '[role=spinbutton]', '[role=slider]', '[role=switch]', '[role=checkbox]', '[role=radiogroup]',
+  // Custom selects: a focusable box that is not a link or a button.
+  '[tabindex]:not([tabindex="-1"]):not(a):not(button):not([role=button]):not([role=link]):not([role=tab]):not([role=option])',
+].join(',');
+
+/**
+ * The control a free-standing label names: walking up from the label, the first ancestor that holds exactly one
+ * control (an input, a custom select, ...) and no other label is the label's form group, and that control is its field.
+ * Several controls, or a second label, in the same box means the label is not a field label (or the layout is a grid): none.
+ */
+export function groupControl(label: Element): Element | undefined {
+  let box = label.parentElement;
+  for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+    if (box.querySelectorAll('label').length > 1) return undefined;
+    let controls = Array.from(box.querySelectorAll(CONTROL_SELECTOR)).filter((c) => !label.contains(c) && !Array.from(box!.querySelectorAll(CONTROL_SELECTOR)).some((o) => o !== c && o.contains(c)));
+    // The list a custom select has open is part of that select, not a second field.
+    if (controls.length > 1) controls = controls.filter((c) => !(c.getAttribute('role') === 'listbox' && controls.some((o) => o !== c && o.getAttribute('role') !== 'listbox')));
+    if (controls.length === 1) return controls[0];
+    if (controls.length > 1) return undefined;
+  }
+  return undefined;
 }
 
 function attrAll(root: Root, attr: string, m: TextMatch, exact?: boolean, strict = false): Element[] {

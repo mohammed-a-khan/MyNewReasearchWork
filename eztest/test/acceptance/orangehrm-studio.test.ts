@@ -33,6 +33,7 @@ let ui: Page;
 /** A person's click: the mouse moves to the element's centre and presses there (real input events, not el.click()). */
 async function click(page: Page, el: Locator): Promise<void> {
   await expect.poll(() => el.isVisible(), { timeout: 30_000 }).toBe(true);
+  await el.scrollIntoViewIfNeeded(); // a person scrolls to what is below the fold first
   const b = (await el.boundingBox())!;
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
 }
@@ -96,7 +97,9 @@ describe.skipIf(!ready)('day one with the real OrangeHRM, through the Studio scr
     expect(text).toMatch(/Expect page contains "Dashboard"/);
 
     await click(ui, ui.getByRole('button', { name: 'Save journey' }));
-    await expect.poll(() => ui.getByRole('status').filter({ hasText: /^Saved / }).count(), { timeout: 20_000 }).toBe(1);
+    const saveStatus = ui.locator('#rec-result [role="status"]');
+    await expect.poll(() => saveStatus.textContent(), { timeout: 20_000 }).toMatch(/^(Saved|Not saved)/);
+    expect(await saveStatus.textContent()).toMatch(/^Saved /);
     saved = (await ui.getByLabel('Save as (path in the project)').inputValue()).trim();
     expect(await readFile(join(dir, saved), 'utf8')).toBe(text);
   }, 240_000);

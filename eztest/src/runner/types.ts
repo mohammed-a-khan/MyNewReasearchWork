@@ -136,7 +136,13 @@ export interface RemoteBrowserConnect {
 }
 
 export interface RunOptions {
+  /** Default origin for relative URLs, for journeys without their own `Base URL:` (usually from the config). */
   baseUrl?: string;
+  /**
+   * Origin for this run that wins over journeys' own `Base URL:` (`eztest run --base-url`, verifying a recording
+   * against another copy of the app): the same journeys, pointed at another environment.
+   */
+  baseUrlOverride?: string;
   browser?: 'chromium' | 'firefox' | 'webkit';
   /**
    * Cross-browser run (docs/browser-driver.md): every journey runs once per browser, as journey x

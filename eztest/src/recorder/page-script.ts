@@ -69,18 +69,26 @@ export interface ElementInfo {
   rowText?: string;
   /** 1-based position among elements with the same text, when the text is not unique. */
   textNth?: number;
+  /** 1-based position among visible elements with the same role and name, when that is not unique. */
+  roleNth?: number;
+  /** A custom (non-native) select box: a focusable element that opens a list of options. */
+  customSelect?: boolean;
 }
 
 /** Events the page sends to Node. */
 export type PageEvent =
-  | { kind: 'click'; el: ElementInfo; button?: 'left' | 'right'; t: number; url: string }
+  | { kind: 'click'; el: ElementInfo; button?: 'left' | 'right'; t: number; url: string; picked?: string }
   | { kind: 'dblclick'; el: ElementInfo; t: number; url: string }
   | { kind: 'fill'; el: ElementInfo; value?: string; secret: boolean; t: number; url: string }
   | { kind: 'select'; el: ElementInfo; labels: string[]; t: number; url: string }
   | { kind: 'check' | 'uncheck'; el: ElementInfo; t: number; url: string }
   | { kind: 'press'; el?: ElementInfo; key: string; t: number; url: string }
   | { kind: 'upload'; el: ElementInfo; files: string[]; t: number; url: string }
-  | { kind: 'assert'; el: ElementInfo; text?: string; value?: string; t: number; url: string };
+  | { kind: 'assert'; el: ElementInfo; text?: string; value?: string; t: number; url: string }
+  /** An option picked from a custom dropdown's list: `el` is the box that opened it. */
+  | { kind: 'choose'; el: ElementInfo; option: string; optionEl: ElementInfo; t: number; url: string }
+  /** The element of a click just sent vanished at once (a loading overlay): the click is taken back. */
+  | { kind: 'retract'; key: string; t: number; url: string };
 
 /**
  * Source of `function (BINDING) { ... }`. Called with the binding name (or
@@ -203,6 +211,51 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       return out;
     };
     var labelOf = function (el) { var l = labelsList(el); return l.length ? l[0] : ''; };
+    // Labels linked to nothing (UI kits put <label> next to the field): the field is the one control of the form group.
+    // The driver's label engine finds fields the same way (src/browser/injected/page/selector.ts groupControl).
+    var CONTROL_SEL = 'input:not([type=hidden]),textarea,select,[contenteditable=""],[contenteditable=true],[role=combobox],[role=textbox],[role=searchbox],' +
+      '[role=listbox],[role=spinbutton],[role=slider],[role=switch],[role=checkbox],[role=radiogroup],' +
+      '[tabindex]:not([tabindex="-1"]):not(a):not(button):not([role=button]):not([role=link]):not([role=tab]):not([role=option])';
+    var groupControlOf = function (label) {
+      var box = label.parentElement;
+      for (var d = 0; box && d < 5; d++, box = box.parentElement) {
+        if (box.querySelectorAll('label').length > 1) return null;
+        var all = box.querySelectorAll(CONTROL_SEL);
+        var outer = [];
+        for (var i = 0; i < all.length; i++) {
+          var c = all[i];
+          if (label.contains(c)) continue;
+          var inner = false;
+          for (var j = 0; j < all.length; j++) if (all[j] !== c && all[j].contains(c)) { inner = true; break; }
+          if (!inner) outer.push(c);
+        }
+        // The list a custom select has open is part of that select, not a second field.
+        if (outer.length > 1) outer = outer.filter(function (c) { return !(c.getAttribute('role') === 'listbox' && outer.some(function (o) { return o !== c && o.getAttribute('role') !== 'listbox'; })); });
+        if (outer.length === 1) return outer[0];
+        if (outer.length > 1) return null;
+      }
+      return null;
+    };
+    var groupLabelOf = function (el) {
+      var box = el.parentElement;
+      for (var d = 0; box && d < 6; d++, box = box.parentElement) {
+        var ls = box.querySelectorAll('label');
+        if (ls.length > 1) return '';
+        if (ls.length === 1) {
+          var l = ls[0];
+          if (l.control) return '';
+          var c = groupControlOf(l);
+          return c && (c === el || c.contains(el) || el.contains(c)) ? norm(textOf(l, true)) : '';
+        }
+      }
+      return '';
+    };
+    var looseLabelCount = function (text) {
+      var n = 0;
+      var ls = document.querySelectorAll('label');
+      for (var i = 0; i < ls.length; i++) if (!ls[i].control && norm(textOf(ls[i], true)) === text && groupControlOf(ls[i])) n++;
+      return n;
+    };
     var NAME_FROM_CONTENT = { button: 1, link: 1, tab: 1, menuitem: 1, menuitemcheckbox: 1, menuitemradio: 1, option: 1,
       heading: 1, cell: 1, columnheader: 1, rowheader: 1, checkbox: 1, radio: 1, switch: 1, treeitem: 1, tooltip: 1, row: 1 };
     var nameOf = function (el, role) {
@@ -258,6 +311,18 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return n;
     };
+    var roleNthOf = function (el, role, name) {
+      var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
+      var n = 0;
+      var all = document.querySelectorAll(q);
+      for (var i = 0; i < all.length; i++) {
+        var e = all[i];
+        if (roleOf(e) !== role || isHidden(e) || nameOf(e, role) !== name) continue;
+        n++;
+        if (e === el) return n;
+      }
+      return 0;
+    };
     var countLabel = function (text) {
       if (!text) return 0;
       var n = 0;
@@ -267,7 +332,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (lower(e) === 'input' && inputType(e) === 'hidden') continue;
         if (labelsList(e).indexOf(text) >= 0) n++;
       }
-      return n;
+      return n || looseLabelCount(text);
     };
     var countAttr = function (attr, value) {
       if (!value) return 0;
@@ -416,10 +481,17 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       var role = roleOf(el);
       var name = nameOf(el, role);
       var label = (tag === 'input' || tag === 'select' || tag === 'textarea' || el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby')) ? labelOf(el) : '';
+      var customSelect = false;
+      // A click on a custom select's wrapper (its padding, its caret icon): the select is the control inside or around it.
+      var ctl = !label && el.matches ? (el.matches(CONTROL_SEL) ? el : el.closest(CONTROL_SEL) || (el.querySelectorAll(CONTROL_SEL).length === 1 ? el.querySelector(CONTROL_SEL) : null)) : null;
+      if (!label && (ctl || (el.closest && el.closest('[aria-haspopup=listbox],[role=combobox]')))) {
+        label = groupLabelOf(ctl || el);
+        customSelect = !!label && !isField(el) && tag !== 'select' && !(role === 'checkbox' || role === 'switch' || role === 'radiogroup' || role === 'slider' || role === 'spinbutton');
+      }
       var placeholder = norm(el.getAttribute('placeholder'));
       var field = isField(el);
       var secret = tag === 'input' && inputType(el) === 'password';
-      var text = (field || tag === 'select') ? '' : norm(el.innerText != null ? el.innerText : el.textContent);
+      var text = (field || tag === 'select' || customSelect) ? '' : norm(el.innerText != null ? el.innerText : el.textContent);
       if (text.length > 200) text = text.slice(0, 200);
       var testId = el.getAttribute('data-testid') || '';
       var r = el.getBoundingClientRect();
@@ -437,7 +509,10 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
       };
       if (tag === 'input') out.type = inputType(el);
-      if (role && name && out.counts.roleName > 1) { var rt = rowTextOf(el, role, name); if (rt) out.rowText = rt; }
+      if (role && name && out.counts.roleName > 1) {
+        var rt = rowTextOf(el, role, name); if (rt) out.rowText = rt;
+        var rn = roleNthOf(el, role, name); if (rn) out.roleNth = rn;
+      }
       if (role) out.role = role;
       if (name) out.name = name;
       if (label) out.label = label;
@@ -445,6 +520,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (text) out.text = text;
       if (text && !role && out.counts.text > 1) { var nth = textNth(el, text); if (nth) out.textNth = nth; }
       if (testId) out.testId = testId;
+      if (customSelect) out.customSelect = true;
       if (el.id) out.id = el.id;
       var title = norm(el.getAttribute('title')); if (title) out.title = title;
       var alt = norm(el.getAttribute('alt')); if (alt) out.alt = alt;
@@ -536,8 +612,34 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         lastEnter = Date.now();
         send({ kind: 'press', key: 'Enter', el: info(el) });
       }, true);
+      // A custom dropdown: the box clicked last, and the option picked from the list it opened. Lists usually close on
+      // mousedown, so the click on the option never arrives: the pick is taken at pointerdown.
+      var lastBox = null;
+      var pickedAt = 0;
+      // What was pressed: when the page re-renders between mousedown and mouseup (a select opening), the browser sends
+      // the click to a common ancestor of both; the pressed element is the one the user meant.
+      var down = null;
+      W.addEventListener('pointerdown', function (e) {
+        if (!e.isTrusted || e.button !== 0 || e.altKey) return;
+        var raw = targetOf(e);
+        var pressed = actionable(raw);
+        down = pressed ? { raw: raw, el: pressed, info: info(pressed), t: Date.now() } : null;
+        // A box that re-renders as it opens gets no click at all (its mousedown node is gone): remember it here.
+        if (down && (down.info.customSelect || down.info.role === 'combobox' || pressed.getAttribute('aria-haspopup') === 'listbox')) lastBox = { info: down.info, t: down.t };
+        var opt = raw && raw.closest ? raw.closest('[role=option]') : null;
+        if (!opt || lower(opt) === 'option') return;
+        var text = norm(opt.innerText != null ? opt.innerText : opt.textContent);
+        if (!text) return;
+        // What was typed into an autocomplete comes first: the field only reports it when it loses focus, after this.
+        flushPending().forEach(function (ev) { send(ev); });
+        pickedAt = Date.now();
+        if (lastBox && Date.now() - lastBox.t < 20000) send({ kind: 'choose', el: lastBox.info, option: text, optionEl: info(opt) });
+        else send({ kind: 'click', el: info(opt), picked: text }); // a suggestion picked after typing: Click the "Ayesha Rahman" option
+        lastBox = null;
+      }, true);
       W.addEventListener('click', function (e) {
         if (!e.isTrusted) return;
+        if (Date.now() - pickedAt < 1500) { var o = targetOf(e); if (o && o.closest && o.closest('[role=option]')) return; }
         var raw = targetOf(e);
         if (e.altKey) {
           e.preventDefault();
@@ -558,6 +660,12 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (e.detail === 0 && Date.now() - lastEnter < 1000) return;
         var el = actionable(raw);
         if (!el) return;
+        var pressedInfo = null;
+        if (down && Date.now() - down.t < 3000 && down.raw !== raw && raw && raw.nodeType === 1 && (raw.contains(down.raw) || !down.raw.isConnected)) {
+          if (down.el.isConnected) el = down.el;
+          else pressedInfo = down.info;
+        }
+        down = null;
         var tag = lower(el);
         if (tag === 'select' || tag === 'option' || tag === 'textarea') return;
         if (tag === 'input' && (isField(el) || NON_FIELD_TYPES[inputType(el)] && !BUTTON_TYPES[inputType(el)])) return;
@@ -570,7 +678,19 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           return;
         }
         if (role === 'radio' && tag !== 'input') { send({ kind: 'check', el: info(el) }); return; }
-        send({ kind: 'click', el: info(el) });
+        var ci = pressedInfo || info(el);
+        lastBox = ci.customSelect || role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox' ? { info: ci, t: Date.now() } : null;
+        send({ kind: 'click', el: ci });
+        // Nothing to name it by, and gone a moment later: a loading overlay or a backdrop that was in the way, not part
+        // of the journey (replaying a click on it fails, it is not there any more).
+        if (!ci.role && !ci.name && !ci.label && !ci.text && !ci.placeholder) {
+          var key = ci.key;
+          setTimeout(function () {
+            var r = el.getBoundingClientRect();
+            var cs = el.isConnected ? getComputedStyle(el) : null;
+            if (!el.isConnected || !cs || cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0 || r.width === 0 || r.height === 0) send({ kind: 'retract', key: key });
+          }, 700);
+        }
       }, true);
       W.addEventListener('contextmenu', function (e) {
         if (!e.isTrusted || e.altKey) return;

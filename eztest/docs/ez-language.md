@@ -88,6 +88,15 @@ Each phrasing accepts natural variants (articles, "I"/"the user", third person, 
 | Shared elements | `Click the @Checkout.placeOrder button` · `Click @Checkout.placeOrder` · `Click the Checkout button` (an element's description or alias; see [elements.md](elements.md)) |
 | Custom | `Run step "seedCart" with items=3` (a handler you register in code) |
 
+**Dropdowns of every kind.** `Select "Admin" from the "User Role" dropdown` works on a native `<select>`, on a custom select (a focusable box that opens a list of options, as Vue, React and Angular UI kits render them) and on a typeahead (an input that suggests as you type: the value is typed, then the matching suggestion is picked). The field is found by its label even when the label is not linked to it (`<label>User Role</label>` next to the box, as many UI kits write it): EZTest takes the one control in the label's form group.
+
+**Recording real apps.** The recorder writes what a person meant, not what the page did on the way:
+- a pick from a custom dropdown is one `Select ... from ... dropdown` step; a suggestion picked after typing is `Click the "Ayesha Rahman" option`, and the app writing that name into its field is not recorded as typing;
+- a click on a loading overlay or backdrop that is gone a moment later is left out (with a warning);
+- a name that repeats (two identical suggestions, two "New order" links) is recorded by position in words, `the 1st "New order" link`, with a warning to add a test id; a unique test id or id is preferred when there is one;
+- URL expectations leave out what changes on every run: record ids (`/empNumber/7`), UUIDs, hashes and one-time tokens (`/resetCode/YeC8...`), so `Expect URL contains "/pim/viewPersonalDetails/empNumber/"`;
+- every recording says where it was recorded (`Base URL:`), unless the project's `baseUrl` already points there; `eztest run --base-url <url>` points the same journeys at another environment.
+
 ### Tabs, windows and popups
 
 | Purpose | Examples |
@@ -617,7 +626,7 @@ A group has a stable id. The same CSS change seen in several screenshots, steps 
 
 ## Components (45 phrasings)
 
-Phrasings for the widgets component libraries render: data grids (virtualized, paged, with pinned or reordered columns), combo boxes and multi-selects with body-level popups, date pickers, trees, tabs, accordions, stacked dialogs, toasts, rich-text editors, sliders, masked inputs, drop zones, canvas charts and infinite lists. They are part of the action count above (category "Components" in the Studio palette). Each names the widget kind ("… grid", "… combobox", "… date picker", "… tree", "… editor", …), so ordinary lines keep their meaning: `Choose Contoso Ltd in the Customer dropdown` is still a native select, and `Expect the Orders table to have 2 rows` is still a post-condition.
+Phrasings for the widgets component libraries render: data grids (virtualized, paged, with pinned or reordered columns), combo boxes and multi-selects with body-level popups, date pickers, trees, tabs, accordions, stacked dialogs, toasts, rich-text editors, sliders, masked inputs, drop zones, canvas charts and infinite lists. They are part of the action count above (category "Components" in the Studio palette). Each names the widget kind ("… grid", "… combobox", "… date picker", "… tree", "… editor", …), so ordinary lines keep their meaning: `Choose Contoso Ltd in the Customer dropdown` is still the plain choose step (which itself handles native, custom and typeahead dropdowns), and `Expect the Orders table to have 2 rows` is still a post-condition.
 
 At run time EZTest finds the widget (the role or region named like the description, its label, its aria-label, or the section a heading of that name introduces), then detects which library renders it (ag-Grid, MUI, Kendo UI, DevExtreme, PrimeNG, PrimeFaces, Angular Material, Oracle JET, SAP UI5, Salesforce Lightning, Dynamics 365, WAI-ARIA, native) and uses that library's adapter. The same sentence works for all of them. Rows are always found by their cell values, never by position; a row condition must match exactly one row unless you say "the first row". `Expect …` component lines are steps of their own (they read the widget), not post-conditions. See [components.md](components.md) for the adapters, the function API and what was tested against which library.
 

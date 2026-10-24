@@ -139,6 +139,8 @@ export class JourneyComposer {
   private current?: URL;
   private lastActionT = 0;
   private navConsumed = false;
+  /** The last option picked from a list, so the app filling its field with it is not recorded as typing. */
+  private lastPick?: { t: number; text: string };
   private navT = 0;
   private navDraft?: Draft;
   private navCondition?: Condition;
@@ -172,7 +174,9 @@ export class JourneyComposer {
       case 'navigate': return this.onNavigate(ev.url, ev.t, ev.byPage ?? true);
       case 'expect': return this.attachCondition(ev.condition);
       case 'assert': return this.onAssert(ev);
-      case 'click': return this.action(ev.button === 'right' ? 'rightclick' : 'click', ev);
+      case 'click':
+        if (ev.picked) this.lastPick = { t: ev.t, text: ev.picked };
+        return this.action(ev.button === 'right' ? 'rightclick' : 'click', ev);
       case 'dblclick': {
         // The browser reports click, click, dblclick: fold the clicks into the double-click.
         for (let i = 0; i < 2; i++) {
@@ -185,6 +189,9 @@ export class JourneyComposer {
       }
       case 'fill': {
         const value = ev.secret ? undefined : ev.value ?? '';
+        // The app writing the picked suggestion into its field ("Ayesha" -> "Ayesha  Rahman") is not typing.
+        const sameText = (a: string, b: string) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+        if (value !== undefined && this.lastPick && ev.t - this.lastPick.t < 3000 && sameText(value, this.lastPick.text)) return;
         const last = this.drafts[this.drafts.length - 1];
         const coalesce = last && (last.step.action === 'fill' || last.step.action === 'clear') && last.elKey === ev.el.key;
         if (coalesce) this.drafts.pop();
@@ -200,6 +207,28 @@ export class JourneyComposer {
           this.warn(`Several options were selected in ${buildTarget(ev.el).label}; only "${ev.labels[0]}" was recorded (multi-select is not expressible as one step).`);
         }
         return this.action('select', ev, literalValue(ev.labels[0]));
+      }
+      case 'choose': {
+        this.lastPick = { t: ev.t, text: ev.option };
+        // The click that opened the list and the pick become one step: Select "Admin" from the "User Role" dropdown.
+        const last = this.drafts[this.drafts.length - 1];
+        const box = buildTarget(ev.el);
+        if (!box.ambiguous && box.kind === 'combobox') {
+          // Its opening click, when the browser reported one, is part of this step.
+          const opened = last && last.step.action === 'click' && last.elKey === ev.el.key && last.postconditions.length === 0;
+          if (opened) this.drafts.pop();
+          return this.action('select', ev, literalValue(ev.option), opened ? last.t : undefined);
+        }
+        return this.action('click', { ...ev, el: ev.optionEl });
+      }
+      case 'retract': {
+        const i = this.drafts.map((d) => d.elKey).lastIndexOf(ev.key);
+        const d = i >= 0 ? this.drafts[i] : undefined;
+        if (d && d.step.action === 'click') {
+          this.drafts.splice(i, 1);
+          this.warn(`A click on ${d.step.target?.description ?? 'an element'} was left out: the element disappeared right after (a loading overlay or backdrop).`);
+        }
+        return;
       }
       case 'check': return this.action('check', ev);
       case 'uncheck': return this.action('uncheck', ev);
@@ -279,6 +308,8 @@ export class JourneyComposer {
         const want = describeTarget(d);
         if (!step.target || stable(step.target) !== stable(want)) continue;
         step.target = { ...step.target, fingerprint: rt.fingerprint, ...(frames?.length ? { frames } : {}) };
+        const positional = /^the \d+(?:st|nd|rd|th) /.test(d);
+        if (positional) this.warn(`"${line}": ${rt.note ?? 'the name repeats'}; recorded by position, which changes if items are added or reordered (a test id or a unique label is steadier).`);
         const selector = /^(?:css=|testid=|#)/.test(d);
         if (selector && (rt.kind !== 'generic' || d.startsWith('css='))) {
           const what = d.startsWith('css=') ? 'a CSS selector' : d.startsWith('#') ? 'an id selector' : 'a test id';
@@ -494,7 +525,7 @@ export class JourneyComposer {
 
 /**
  * A path without its one-time parts: everything before the first segment that is different on every run (UUIDs,
- * long hex or digit ids, random tokens such as a password-reset or session code). `/auth/changeWeakPassword/resetCode/YeC8lO2a...`
+ * hex or digit ids, random tokens such as a password-reset or session code). `/auth/changeWeakPassword/resetCode/YeC8lO2a...`
  * becomes `/auth/changeWeakPassword/resetCode/`, `/orders/58213907/edit` becomes `/orders/`.
  */
 export function stablePath(pathname: string): string {
@@ -508,7 +539,7 @@ export function stablePath(pathname: string): string {
 function volatileSegment(seg: string): boolean {
   if (!seg) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return true; // UUID
-  if (/^\d{6,}$/.test(seg)) return true; // long numeric id
+  if (/^\d+$/.test(seg)) return true; // a record id (`/empNumber/7` of the employee just created differs every run)
   if (/^[0-9a-f]{12,}$/i.test(seg) && /\d/.test(seg) && /[a-f]/i.test(seg)) return true; // hex id / hash
   // A random token: long, no separators a word would have, letters and digits mixed with case changes.
   if (seg.length >= 16 && /^[\w~.+=-]+$/.test(seg) && /\d/.test(seg) && /[a-z]/.test(seg) && /[A-Z]/.test(seg) && !/^[A-Z]?[a-z]+(?:[A-Z][a-z]+)+\d*$/.test(seg)) return true;

@@ -222,7 +222,7 @@ export class MobileDriver implements PlatformDriver {
         await device.launchApp(appId);
         await sleep(this.options.launchSettleMs ?? 500);
       }
-      const baseUrl = journey.baseUrl ?? env.opts.baseUrl;
+      const baseUrl = env.opts.baseUrlOverride ?? journey.baseUrl ?? env.opts.baseUrl;
       const mobileWeb = !app && !!baseUrl;
       if (mobileWeb) {
         if (platform === 'ios') throw new NotSupportedError('mobile web on iOS (Safari Web Inspector is not implemented); run the journey on the web platform with Device: "iPhone 15"');

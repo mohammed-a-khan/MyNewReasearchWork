@@ -43,7 +43,7 @@ const SAFE_ID = /^[A-Za-z][\w-]*$/;
 
 /** The element kind used for the description. */
 export function kindOf(info: ElementInfo): TargetKind {
-  if (info.tag === 'select') return 'combobox';
+  if (info.tag === 'select' || info.customSelect) return 'combobox';
   if (info.field || (info.tag === 'input' && info.type === 'file')) return 'textbox';
   return (info.role && ROLE_KIND[info.role]) || 'generic';
 }
@@ -154,6 +154,17 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
       human = `${d} in the row containing ${q}`;
       ambiguous = false;
       note = undefined;
+    }
+  }
+  // Still repeated (identical suggestions, duplicate records): which one, in words, before a CSS path.
+  const stableId = (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) || (info.id && c.id === 1 && SAFE_ID.test(info.id));
+  if (!human && ambiguous && info.roleNth && kind !== 'generic' && info.name && !stableId) {
+    const d = phrase(kind, info.name);
+    const q = tryQuote(info.name);
+    const word = KIND_WORD[kind];
+    if (d && q && word) {
+      human = `the ${ordinal(info.roleNth)} ${q} ${word}`;
+      note = `${info.role} "${info.name}" matches ${c.roleName} elements; recorded the ${ordinal(info.roleNth)}`;
     }
   }
   if (human) descriptions.push(human);

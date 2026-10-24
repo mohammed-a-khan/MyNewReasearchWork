@@ -12,6 +12,14 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 - A click on a plain container around a heading or link is recorded as that element (`Click the "Dashboard" heading`), and a repeated text as `the 2nd "Dashboard" text`, instead of a CSS path.
 - Studio's left bar is wider (104 px) with larger labels.
 - A recorded login failed with the app's own "Invalid credentials": `${password}` had no value and was typed literally. A `${name}` that nothing sets now stops the step with `MISSING_VARIABLE` and how to supply it, before anything is typed. Supply it on the Studio Run page (new "Variables" fields, masked for secret names; the editor's Run button asks), with `eztest run --var name=value`, with `EZTEST_VAR_<name>`, or with `vars:` in the config. Secret-sounding names are masked in logs and results.
+- Tested on a real HR product (OrangeHRM 5.7 in Docker) through the Studio screens with a visible browser, mouse and keyboard, the way a tester works: record, add an expectation, save, run from the editor (`test/acceptance`, run with `EZTEST_ORANGEHRM_URL`, `EZTEST_ORANGEHRM_PASSWORD` and a display). What that found and fixed:
+  - **Custom dropdowns**: `Select "Admin" from the "User Role" dropdown` now works on custom selects and typeaheads, not only native `<select>`; recording one gives that single step instead of `Click the 1st "-- Select --" text` and a lost pick (the list closes on mousedown, so the option's click never came; and the box re-rendered between mousedown and mouseup, so its click went elsewhere).
+  - **Labels linked to nothing** (`<label>Username</label>` next to the input): fields are found by them, in recording and at run time.
+  - **Autocompletes**: the suggestion picked is recorded after what was typed, and the app writing the picked name into the field is not recorded as typing.
+  - **Loading overlays**: a click that landed on one is left out instead of recorded as `Click css=div.oxd-form-loader`, which could not replay.
+  - **URLs of new records**: `Expect URL contains ".../empNumber/2"` (an id that changes every run) is now `".../empNumber/"`; one-time tokens (`/resetCode/...`) are left out too.
+  - **Repeated names** are recorded by position in words (`the 1st "Ayesha Rahman" option`) instead of a long CSS path.
+  - Recordings always carry `Base URL:` (they had none without a project), and `eztest run --base-url` now wins over a journey's own Base URL.
 - Journeys can be deleted and renamed from the editor toolbar (Rename…, Delete…), the explorer's trash button or the Delete key, each after a confirmation.
 
 ### Documents, SOAP and AMQP 1.0
