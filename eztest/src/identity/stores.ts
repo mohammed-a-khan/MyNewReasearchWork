@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { EzTestError, type SecretStore } from '../core/index.js';
 import { decryptValue, defaultMasker, isEncryptedValue, MASTER_KEY_ENV, type SecretMasker } from '../config/index.js';
 import type { TokenProvider } from '../surfaces/index.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 export class EnvSecretStore implements SecretStore {
   readonly name: string;
@@ -141,7 +142,7 @@ export class AzureKeyVaultSecretStore implements SecretStore {
     let text: string;
     try {
       const token = await this.o.tokenProvider.getToken();
-      res = await (this.o.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, signal: ctrl.signal });
+      res = await (this.o.fetch ?? envProxyFetch)(url, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, signal: ctrl.signal });
       text = await res.text();
     } catch (e) {
       if (e instanceof EzTestError) throw e;

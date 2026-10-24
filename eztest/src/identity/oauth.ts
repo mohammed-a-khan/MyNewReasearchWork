@@ -6,6 +6,7 @@
 import { EzTestError } from '../core/index.js';
 import { defaultMasker, type SecretMasker } from '../config/index.js';
 import type { TokenProvider } from '../surfaces/index.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 import type { SecretHandle } from './handle.js';
 
 export type SecretInput = string | SecretHandle | (() => Promise<string>);
@@ -115,7 +116,8 @@ export class OAuth2TokenProvider implements TokenProvider {
     let text: string;
     this.requests++;
     try {
-      res = await (this.o.fetch ?? fetch)(this.o.tokenUrl, { method: 'POST', headers, body: params.toString(), signal: ctrl.signal });
+      // The environment's proxy (HTTPS_PROXY / NO_PROXY) applies to token requests too.
+      res = await (this.o.fetch ?? envProxyFetch)(this.o.tokenUrl, { method: 'POST', headers, body: params.toString(), signal: ctrl.signal });
       text = await res.text();
     } catch (e) {
       throw new EzTestError(this.masker.mask(`Token request to ${this.o.tokenUrl} failed: ${(e as Error).message}`), 'OAUTH_NETWORK');

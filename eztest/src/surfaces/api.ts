@@ -4,10 +4,13 @@
  * - timeouts via AbortController
  * - auth: bearer, basic, API key (header/query), OAuth2 via an injected token provider
  * - secrets in errors/logs are masked when a masker is supplied
- * Options EZTest does not implement (proxy, disabling TLS verification) throw NotSupportedError.
+ * - proxies: the `proxy` option, else HTTPS_PROXY / HTTP_PROXY / NO_PROXY of the environment
+ *   (see proxy.ts: our own CONNECT tunnelling on Node core); `proxy: false` goes direct
+ * Disabling TLS verification is not offered: `rejectUnauthorized: false` throws NotSupportedError.
  */
 import { EzTestError, NotSupportedError, silentLogger, sleep, type Logger } from '../core/index.js';
-import { selectClientCertificate, tlsFetchFor, type TlsClientCertificate } from './api-tls.js';
+import { createTlsFetch, selectClientCertificate, tlsFetchFor, type TlsClientCertificate } from './api-tls.js';
+import { bypassesProxy, createProxyFetch, envProxyFetch, envProxyFor, type ProxySettings } from './proxy.js';
 
 /** Anything that hands out access tokens (see identity OAuth2TokenProvider). */
 export interface TokenProvider {
@@ -43,8 +46,11 @@ export interface ApiClientOptions {
   auth?: ApiAuth;
   timeoutMs?: number;
   retry?: RetryPolicy | false;
-  /** Not implemented yet: throws NotSupportedError when set. */
-  proxy?: string;
+  /**
+   * HTTP(S) proxy: `http://[user:pass@]host:port`, or `{ url, noProxy }`. Default: HTTPS_PROXY /
+   * HTTP_PROXY / NO_PROXY from the environment. `false`: never use a proxy.
+   */
+  proxy?: string | ProxySettings | false;
   /** TLS verification cannot be disabled through EZTest: `false` throws NotSupportedError. */
   rejectUnauthorized?: boolean;
   fetch?: typeof fetch;
@@ -110,17 +116,27 @@ export class ApiClient {
   private readonly fetchImpl: typeof fetch;
   private readonly logger: Logger;
 
+  private readonly proxy?: ProxySettings | false;
+
   constructor(private readonly opts: ApiClientOptions = {}) {
-    if (opts.proxy !== undefined) {
-      throw new NotSupportedError('ApiClient proxy option (configure HTTPS_PROXY at the process level instead)');
-    }
     if (opts.rejectUnauthorized === false) {
       throw new NotSupportedError('disabling TLS certificate verification');
     }
     if (opts.baseUrl) new URL(opts.baseUrl); // validate early
     this.baseUrl = opts.baseUrl;
-    this.fetchImpl = opts.fetch ?? globalThis.fetch;
+    this.proxy = opts.proxy === undefined || opts.proxy === false ? opts.proxy : typeof opts.proxy === 'string' ? { url: opts.proxy } : opts.proxy;
+    if (this.proxy) new URL(this.proxy.url); // validate early
+    const direct = opts.fetch ?? globalThis.fetch;
+    // An explicit proxy, else the environment's (only for the real network: an injected fetch is used as it is).
+    this.fetchImpl = this.proxy ? createProxyFetch(this.proxy, { direct }) : opts.fetch ?? (this.proxy === false ? globalThis.fetch : envProxyFetch);
     this.logger = opts.logger ?? silentLogger;
+  }
+
+  /** The fetch for a request that presents a client certificate (through the proxy when one applies). */
+  private certFetch(cert: TlsClientCertificate, url: URL): typeof fetch {
+    const p = this.proxy === false ? undefined : this.proxy ?? envProxyFor(url);
+    if (!p || bypassesProxy(url, p.noProxy)) return tlsFetchFor(cert);
+    return createProxyFetch(p, { tls: { ...(cert.pfx ? { pfx: cert.pfx } : {}), ...(cert.cert ? { cert: cert.cert } : {}), ...(cert.key ? { key: cert.key } : {}), ...(cert.passphrase !== undefined ? { passphrase: cert.passphrase } : {}), ...(cert.ca ? { ca: cert.ca } : {}) }, direct: createTlsFetch(cert) });
   }
 
   /** A new client sharing options, with some overridden. */
@@ -199,7 +215,7 @@ export class ApiClient {
       let text: string;
       try {
         const cert = this.opts.fetch ? undefined : selectClientCertificate(this.opts.clientCertificates, finalUrl.toString(), o.clientCertificate);
-        res = await (cert ? tlsFetchFor(cert) : this.fetchImpl)(finalUrl, { method: m, headers, body, signal: ctrl.signal, redirect: 'follow' });
+        res = await (cert ? this.certFetch(cert, finalUrl) : this.fetchImpl)(finalUrl, { method: m, headers, body, signal: ctrl.signal, redirect: 'follow' });
         text = m === 'HEAD' ? '' : await res.text();
       } catch (e) {
         clearTimeout(timer);
