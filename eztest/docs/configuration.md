@@ -97,6 +97,7 @@ db:
     shop: { driver: sqlite, file: ./shop.db }
     erp:  { driver: postgres, connectionString: "${ERP_DB_URL}" }   # needs the `pg` package
     crm:  { driver: mssql, server: sql.test, database: crm, user: qa, password: secret://env/CRM_PW }  # needs `mssql`
+    hr:   { driver: mariadb, host: hr-db.test, database: hr, user: qa, password: secret://env/HR_PW, ssl: { ca: certs/hr-ca.pem } }  # MySQL/MariaDB: built in
     # SQL Server from a connection string, Windows (NTLM) or Entra ID authentication: docs/databases.md
     hr:   { driver: mssql, connectionString: "Server=tcp:hr.corp,1433;Database=hr;User ID=CORP\\qa;Password=secret://env/HR_PW;Integrated Security=true" }
     ledger:                                   # needs `oracledb` (Thin mode: no Oracle Client install)

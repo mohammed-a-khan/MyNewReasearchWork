@@ -66,6 +66,8 @@ export async function urlUp(url: string): Promise<boolean> {
 /** A person's click: the mouse moves to the element's centre and presses there (real input events). */
 export async function humanClick(page: Page, el: Locator): Promise<void> {
   await expect.poll(() => el.isVisible(), { timeout: 30_000 }).toBe(true);
+  // A person scrolls a control below the fold into view before clicking it.
+  await el.scrollIntoViewIfNeeded();
   const b = (await el.boundingBox())!;
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
 }
