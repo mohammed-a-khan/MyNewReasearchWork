@@ -130,6 +130,8 @@ export const RoleSchema = z
     fields: RoleFieldsSchema.optional(),
     successUrl: z.string().optional(),
     verifyUrl: z.string().optional(),
+    /** Buttons that answer an identity provider's pages between sign-in and the app (terms, notices); [] presses none. */
+    interstitials: z.array(z.string().min(1)).optional(),
     api: RoleApiSchema.optional(),
   })
   .superRefine((r, ctx) => {

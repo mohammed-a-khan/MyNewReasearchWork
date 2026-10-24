@@ -1,0 +1,6 @@
+Journey: Contractor accepts the terms of use on the first sign-in
+Tags: @gateway @terms
+Role: contractor
+
+Log in
+Expect the page contains "Signed in as linus@corp.test"

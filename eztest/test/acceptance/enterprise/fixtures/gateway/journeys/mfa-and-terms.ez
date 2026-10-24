@@ -1,0 +1,8 @@
+Journey: Approver signs in with a one-time code at the identity provider
+Tags: @gateway @mfa
+Role: approver
+
+Log in
+Expect the page contains "Signed in as grace@corp.test"
+Open /api/me
+Expect the page contains "grace@corp.test"

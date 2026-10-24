@@ -4,6 +4,22 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Real enterprise apps: sign-in through a corporate SSO gateway
+
+Found by acceptance tests on oauth2-proxy (the gateway) and Keycloak (the identity provider) on two hosts in front of an app (`test/acceptance/enterprise/gateway-sso.test.ts`, `env/sso.sh`), each fixed in EZTest:
+
+- `Log in` failed with "still on the login page after sign-in" whenever the login URL was the app itself (`loginUrl: /` behind a gateway): the check compared only the URL path with the login URL. The login page is now the page the credentials were typed on (origin and path), which may be the identity provider's.
+- A cached session was trusted when the gateway sent the browser to the identity provider (only the path was compared). Opening `verifyUrl` must now stay on the app's origin, and a visible password field also means the session ended.
+- On Keycloak's one-time code page EZTest pressed "Restart login" (a button whose name contains "login") instead of "Sign In", so MFA sign-ins never finished. The submit button is now the one of the form that holds the field just filled, and buttons that leave the flow (restart, forgot password, try another way) are never pressed.
+- Parallel workers each signed in (4 workers: 4 logins at the identity provider). Sign-ins are now serialised per role with a lock file next to the cached session; the others wait and reuse it. 20 journeys on 4 workers: one LOGIN event at Keycloak.
+- A cached session whose gateway session had ended was "renewed" by every journey through single sign-on (20 journeys: 20 logins at the identity provider). The first check of a cached session no longer follows a redirect to another host; one worker, under the role's lock, follows it and caches the renewed session for the others.
+- Terms of use (and similar pages) between the credentials and the app stopped the sign-in. A role's `interstitials` buttons (default Accept, I accept, I agree, Agree, Continue) answer them while the browser is on the identity provider.
+- A wrong password was reported after the whole timeout as "did not reach ...": Keycloak's error text was not recognised. The sign-in now stops at once with the provider's message.
+- A one-time code was typed again within its 30-second window (a second sign-in, a parallel worker, a replay right after recording), which identity providers refuse as reused. Codes are never reused across EZTest processes on a machine; the step waits for the next window.
+- New step `Type the one-time code from ${totpSecret} into the "One-time code" field` for hand-written and recorded journeys; the recorder writes it for one-time code fields (`autocomplete=one-time-code`, `otp`, `otc`) instead of the code typed, and asks for `totpSecret` at run time like a password.
+- The recorder wrote `Open <url>` for the redirect chain of a sign-in (a form post to the identity provider and back to the app), because identity providers send `Referrer-Policy: no-referrer`: on replay the one-time URL of the one-time code page was opened directly. Navigations started by a form post, or right after a click or key press, are now the page's.
+- The recorder wrote `Type ... into #date` for a field whose unquoted description reads as another phrasing inside the line (`the Date field`); the quoted form is now tried before ids and CSS paths.
+
 ### Real enterprise apps: OrangeHRM UI and database together
 
 Found by acceptance tests on a real OrangeHRM 5.7 and its MariaDB (`test/acceptance/enterprise/orangehrm-ui-db.test.ts`), each fixed in EZTest:

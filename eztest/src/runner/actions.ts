@@ -17,6 +17,7 @@ import { dropFiles } from './inpage.js';
 import { rememberApiRequest } from '../contracts/condition-rules.js';
 import { normalizeModifiers, pressKey } from './input.js';
 import { NEAR_FILE_INPUT } from './locate.js';
+import { freshTotp } from '../identity/totp.js';
 
 const MIME_BY_EXT: Record<string, string> = { '.pdf': 'application/pdf', '.csv': 'text/csv', '.json': 'application/json', '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.xml': 'application/xml', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 const mimeOf = (f: string) => MIME_BY_EXT[extname(f).toLowerCase()] ?? 'application/octet-stream';
@@ -136,7 +137,20 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       return {};
     }
     case 'dblclick': await need().dblclick({ timeout }); return {};
-    case 'fill': await need().fill(requireValue(step, ctx), { timeout }); return {};
+    case 'fill': {
+      if (step.args?.totp !== undefined) {
+        // "Type the one-time code from ${totpSecret} into ...": a fresh TOTP code from the (base32) secret.
+        const seedText = String(step.args.totp);
+        const missing = unresolvedNames(seedText, ctx.vars());
+        if (missing.length) throw missingVariables(missing);
+        const seed = ctx.interpolate(seedText).trim();
+        if (!seed || seed === seedText && /\$\{/.test(seedText)) throw new EzTestError(`Step "${step.intent}": no TOTP secret`, 'MISSING_VALUE');
+        await need().fill(await freshTotp(seed), { timeout });
+        return {};
+      }
+      await need().fill(requireValue(step, ctx), { timeout });
+      return {};
+    }
     case 'clear': await need().clear({ timeout }); return {};
     case 'select': await need().selectOption(requireValue(step, ctx), { timeout }); return {};
     case 'check': await need().check({ timeout }); return {};

@@ -62,7 +62,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (373 phrasings)
+## Actions (374 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -71,7 +71,8 @@ Each phrasing accepts natural variants (articles, "I"/"the user", third person, 
 | Purpose | Examples |
 |---|---|
 | Navigate | `Open /login` · `Go to /orders/new` · `Start at /login` · `Reload the page` · `Go back` · `Go forward` |
-| Log in | `Log in as manager` · `Log in` (uses the journey's `Role:`) |
+| Log in | `Log in as manager` · `Log in` (uses the journey's `Role:`; the role signs in once per run and every journey reuses its session, see [configuration.md](configuration.md#roles-and-single-sign-on)) |
+| One-time codes (MFA) | `Type the one-time code from ${totpSecret} into the "One-time code" field` (a fresh TOTP code from a base32 secret, never one already typed in this window; the recorder writes this step for one-time code fields) |
 | Click | `Click the "Sign in" button` · `Press the Save button` · `Follow the Orders link` · `Submit with the "Place order" button` · `Double-click the Order row` · `Right-click the Order row` · `Open the Orders tab` |
 | Type | `Type "bob" into the Username field` · `Fill the Quantity field with 2` · `Fill "2" into the Quantity field` · `Put "2" in the Quantity field` · `Set the Quantity field to 2` · `Clear the Search field` |
 | Choose | `Select "Gadget" from the Product dropdown` · `Set the Product dropdown to "Widget"` · `Check the Remember me checkbox` · `Uncheck the Newsletter checkbox` · `Turn on the Dark mode switch` · `Select the Express radio button` |

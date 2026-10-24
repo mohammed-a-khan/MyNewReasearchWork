@@ -11,7 +11,7 @@ import { EzTestError, silentLogger, sleep, slugify, type Logger } from '../core/
 import type { TokenProvider } from '../surfaces/index.js';
 import { SecretHandle, SecretRegistry, isSecretRef } from './handle.js';
 import { OAuth2TokenProvider } from './oauth.js';
-import { generateTotp, totpSecondsRemaining, type TotpAlgorithm } from './totp.js';
+import { freshTotp, type TotpAlgorithm } from './totp.js';
 
 export interface RoleFields {
   /** Label text or selector. */
@@ -44,6 +44,11 @@ export interface RoleDefinition {
   successUrl?: string;
   /** URL to open when reusing a cached session to confirm it is still valid. */
   verifyUrl?: string;
+  /**
+   * Buttons that answer an identity provider's pages between the credentials and the app (terms of use, notices):
+   * default Accept, I accept, I agree, Agree, Continue. `[]` presses nothing.
+   */
+  interstitials?: string[];
   totpOptions?: { digits?: number; algorithm?: TotpAlgorithm; step?: number };
   /** API access for this role: an OAuth2 client config or any TokenProvider. */
   api?: RoleApi | TokenProvider;
@@ -105,6 +110,14 @@ interface ResolvedRole {
   totp?: SecretHandle;
   def: RoleDefinition & { loginUrl: string };
 }
+
+/** Buttons an identity provider's in-between pages (terms, notices) are answered with by default. */
+export const DEFAULT_INTERSTITIALS = ['Accept', 'I accept', 'I agree', 'Agree', 'Continue'];
+
+/** Buttons near a sign-in form that are never its submit button. */
+const NOT_SUBMIT = /restart|reset|forgot|cancel|back|sign ?up|register|create (an )?account|try another|another way|(show|hide) password/i;
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const SELECTOR_RE = /^(css=|xpath=|text=|role=|id=|data-testid=|internal:|\/\/|#|\.|\[)|^[a-z][a-z0-9-]*[#.[:]/i;
 
@@ -226,7 +239,14 @@ export class IdentityVault {
     return file;
   }
 
-  private async tryReuse(page: Page, role: string, r: ResolvedRole, base: string | undefined): Promise<boolean> {
+  /**
+   * Apply the cached session and check it. Without `renew`, a redirect away from the app (the gateway sending the
+   * browser to the identity provider) is not followed: the session is reported stale and nothing is signed in, so
+   * parallel workers do not each go through the identity provider. With `renew` (one worker, under the role's
+   * lock), the redirect is followed: when the identity provider still knows the user (single sign-on) and the
+   * browser comes back to the app, the renewed session is saved for the others; otherwise the cache is dropped.
+   */
+  private async tryReuse(page: Page, role: string, r: ResolvedRole, base: string | undefined, renew = false): Promise<boolean> {
     if (!(await this.hasFreshSession(role))) return false;
     let state: { cookies?: Parameters<ReturnType<Page['context']>['addCookies']>[0]; origins?: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }> };
     try {
@@ -256,15 +276,130 @@ export class IdentityVault {
     const su = r.def.successUrl;
     const verifyUrl = r.def.verifyUrl ?? (su && su.startsWith('/') && !(su.length > 1 && su.endsWith('/')) ? su : undefined);
     if (verifyUrl) {
-      await page.goto(this.url(verifyUrl, base));
-      if (this.onLoginPage(page.url(), r, base)) {
-        this.logger.info(`Cached session for role ${role} is no longer valid; signing in again`);
+      const target = this.url(verifyUrl, base);
+      const origin = new URL(target).origin;
+      let left: string | undefined;
+      const hops: string[] = [];
+      const onNav = (f: { url(): string; parentFrame(): unknown }) => {
+        if (!f.parentFrame()) hops.push(f.url());
+      };
+      const leaving = (u: URL) => u.origin !== origin;
+      const stop = async (route: { request(): { url(): string; isNavigationRequest(): boolean; frame(): unknown }; abort(): Promise<void>; continue(): Promise<void> }) => {
+        const req = route.request();
+        if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+          left ??= req.url();
+          await route.abort();
+        } else await route.continue();
+      };
+      page.on('framenavigated', onNav as never);
+      if (!renew) await page.route(leaving, stop as never);
+      try {
+        await page.goto(target).catch((e: Error) => {
+          if (!left) throw e;
+        });
+      } finally {
+        page.off('framenavigated', onNav as never);
+        if (!renew) await page.unroute(leaving, stop as never);
+      }
+      if (left) {
+        this.logger.debug(`Cached session for role ${role}: the app sent the browser to ${new URL(left).origin}`);
+        return false;
+      }
+      const why = await this.sessionRejected(page, target, r, base);
+      if (why) {
+        this.logger.info(`Cached session for role ${role} is no longer valid (${why}); signing in again`);
         await this.clearSession(role);
         await ctx.clearCookies();
         return false;
       }
+      if (renew && hops.some((u) => {
+        try {
+          return new URL(u).origin !== origin;
+        } catch {
+          return false;
+        }
+      })) {
+        await this.saveSession(page, role);
+        this.logger.info(`Role ${role}: the gateway session was renewed through single sign-on; session cached`);
+      }
     }
     return true;
+  }
+
+  /**
+   * Why opening `target` with a cached session shows it is no longer valid, or undefined. The app's own login page,
+   * a redirect away from the app's origin (an SSO gateway or identity provider: NetScaler, F5, Keycloak, Entra ID)
+   * and a visible password field all mean the session is gone.
+   */
+  private async sessionRejected(page: Page, target: string, r: ResolvedRole, base: string | undefined): Promise<string | undefined> {
+    const now = page.url();
+    let to: URL;
+    let at: URL;
+    try {
+      to = new URL(target);
+      at = new URL(now);
+    } catch {
+      return undefined;
+    }
+    if (at.origin !== to.origin) return `redirected to ${at.origin}${at.pathname}`;
+    if (this.onLoginPage(now, r, base) && at.pathname !== to.pathname) return 'back on the login page';
+    if (await this.passwordShown(page)) return 'a sign-in form is shown';
+    return undefined;
+  }
+
+  private async passwordShown(page: Page): Promise<boolean> {
+    const password = page.locator('input[type=password]').first();
+    return (await password.count().catch(() => 0)) > 0 && (await password.isVisible().catch(() => false));
+  }
+
+  /**
+   * Pages an identity provider shows between the credentials and the app: terms of use, a notice, "stay signed
+   * in?". While the browser is still on the provider's host, a button named like one of the role's
+   * `interstitials` (default: Accept, I accept, I agree, Agree, Continue) is pressed, a few pages deep. Nothing
+   * else is clicked, and a sign-in form showing again stops it (a failed login is reported by the caller).
+   */
+  private async interstitials(page: Page, role: string, r: ResolvedRole, formUrl: string): Promise<void> {
+    const names = r.def.interstitials ?? DEFAULT_INTERSTITIALS;
+    if (!names.length) return;
+    let form: URL;
+    try {
+      form = new URL(formUrl);
+    } catch {
+      return;
+    }
+    const re = new RegExp(`^\\s*(?:${names.map(escapeRegExp).join('|')})\\s*$`, 'i');
+    const deadline = Date.now() + this.timeoutMs;
+    let clicks = 0;
+    let lastUrl = '';
+    let since = Date.now();
+    while (Date.now() < deadline && clicks < 5) {
+      const url = page.url();
+      if (url !== lastUrl) {
+        lastUrl = url;
+        since = Date.now();
+      }
+      if (r.def.successUrl && successMatches(url, r.def.successUrl)) return;
+      let at: URL;
+      try {
+        at = new URL(url);
+      } catch {
+        return;
+      }
+      if (at.origin !== form.origin) return; // back at the app (or on to the next host): nothing to answer here
+      if (!(await this.passwordShown(page))) {
+        const button = page.getByRole('button', { name: re }).first();
+        if ((await button.count().catch(() => 0)) && (await button.isVisible().catch(() => false))) {
+          const label = ((await button.textContent().catch(() => '')) || (await button.getAttribute('value').catch(() => '')) || '').trim();
+          this.logger.info(`Role ${role}: answered "${label}" on ${at.host}${at.pathname}`);
+          await button.click({ timeout: this.timeoutMs });
+          clicks++;
+          await page.waitForURL((u) => u.toString() !== url, { timeout: this.timeoutMs, waitUntil: 'load' }).catch(() => undefined);
+          continue;
+        }
+      }
+      if (Date.now() - since > 1500) return;
+      await sleep(150);
+    }
   }
 
   // ------------------------------------------------------------- login
@@ -282,42 +417,104 @@ export class IdentityVault {
       this.logger.debug(`Role ${role}: reused cached session`);
       return { role, reused: true, url: page.url(), sessionFile: this.sessionFile(role) };
     }
+    // One sign-in per role at a time, across workers and processes: the others wait and reuse its session, so a
+    // parallel run signs in once (identity providers count logins, MFA prompts and concurrent sessions).
+    const release = await this.lockRole(role);
+    try {
+      if (await this.tryReuse(page, role, r, base, true)) {
+        this.logger.debug(`Role ${role}: reused the session another worker signed in`);
+        return { role, reused: true, url: page.url(), sessionFile: this.sessionFile(role) };
+      }
+      return await this.freshSignIn(page, role, r, base);
+    } finally {
+      await release();
+    }
+  }
+
+  /**
+   * A lock file next to the role's session file (created exclusively). A lock older than the sign-in can take, or
+   * held by a process that is gone, is taken over.
+   */
+  private async lockRole(role: string): Promise<() => Promise<void>> {
+    await mkdir(this.sessionDir, { recursive: true, mode: 0o700 });
+    const file = `${this.sessionFile(role)}.lock`;
+    const staleMs = Math.max(this.timeoutMs * 8, 120_000);
+    const deadline = Date.now() + staleMs;
+    const me = `${process.pid} ${randomUUID()}`;
+    for (;;) {
+      try {
+        await writeFile(file, me, { flag: 'wx', mode: 0o600 });
+        return async () => {
+          try {
+            if ((await readFile(file, 'utf8')) === me) await rm(file, { force: true });
+          } catch {
+            /* already gone */
+          }
+        };
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
+      const holder = await readFile(file, 'utf8').catch(() => '');
+      const pid = Number(holder.split(' ')[0]);
+      const age = await stat(file).then((st) => Date.now() - st.mtimeMs).catch(() => 0);
+      let alive = true;
+      if (pid && pid !== process.pid) {
+        try {
+          process.kill(pid, 0);
+        } catch (err) {
+          alive = (err as NodeJS.ErrnoException).code === 'EPERM';
+        }
+      }
+      if (!alive || age > staleMs) await rm(file, { force: true });
+      else if (Date.now() > deadline) throw new EzTestError(`Role ${role}: another sign-in held the lock ${file} for ${Math.round(age / 1000)} s`, 'LOGIN_LOCKED');
+      else await sleep(200);
+    }
+  }
+
+  private async freshSignIn(page: Page, role: string, r: ResolvedRole, base: string | undefined): Promise<LoginOutcome> {
     if (r.def.login?.type === 'entra') return this.entraSignIn(page, role, r, base, r.def.login);
     await page.goto(this.url(r.def.loginUrl, base));
-    await this.enterCredentials(page, role, r);
+    const formUrl = await this.enterCredentials(page, role, r);
 
     if (r.def.successUrl) {
       const spec = r.def.successUrl;
-      try {
-        await page.waitForURL((u) => successMatches(u.toString(), spec), { timeout: this.timeoutMs });
-      } catch {
+      // Wait for the app, but stop as soon as the sign-in page shows an error (a wrong password is reported at
+      // once, with the identity provider's own words, instead of after the timeout).
+      const deadline = Date.now() + this.timeoutMs;
+      while (!successMatches(page.url(), spec)) {
         await this.failIfError(page, role);
-        throw new EzTestError(`Role ${role}: login did not reach ${spec} (at ${page.url()})`, 'LOGIN_FAILED');
+        if (Date.now() > deadline) throw new EzTestError(`Role ${role}: login did not reach ${spec} (at ${page.url().split('?')[0]})`, 'LOGIN_FAILED');
+        await page.waitForURL((u) => successMatches(u.toString(), spec), { timeout: 300 }).catch(() => undefined);
       }
     }
     await this.failIfError(page, role);
-    if (this.onLoginPage(page.url(), r, base)) throw new EzTestError(`Role ${role}: still on the login page after sign-in`, 'LOGIN_FAILED');
+    // With a successUrl that matched, only a sign-in form still on screen means the login failed (an app may show
+    // its start page at the form's own URL).
+    const stillOnForm = this.onLoginPage(page.url(), r, base, formUrl) && (!r.def.successUrl || (await this.passwordShown(page)));
+    if (stillOnForm) throw new EzTestError(`Role ${role}: still on the login page after sign-in (${page.url().split('?')[0]})`, 'LOGIN_FAILED');
     const sessionFile = await this.saveSession(page, role);
     this.logger.info(`Role ${role}: signed in, session cached`);
     return { role, reused: false, url: page.url(), sessionFile };
   }
 
-  /** Fill the sign-in form on the current page: username (identifier-first too), password, submit, TOTP. */
-  private async enterCredentials(page: Page, role: string, r: ResolvedRole): Promise<void> {
+  /** Fill the sign-in form on the current page: username (identifier-first too), password, submit, TOTP. Returns the form's URL. */
+  private async enterCredentials(page: Page, role: string, r: ResolvedRole): Promise<string> {
     const f = r.def.fields ?? {};
     const user = await this.findField(page, this.usernameCandidates(page, f.username), this.timeoutMs);
     if (!user) throw new EzTestError(`Role ${role}: username field not found on ${page.url()}`, 'LOGIN_FIELD');
+    // Where the form is: the app's login page, or an SSO gateway / identity provider the app redirected to.
+    const formUrl = page.url();
     await user.fill(typeof r.username === 'string' ? r.username : await r.username.resolve());
 
     let pass = await this.findField(page, this.passwordCandidates(page, f.password), 1500);
     if (!pass) {
       // identifier-first flow: submit the username, then expect the password page
-      await this.submit(page, this.submitCandidates(page, f.submit));
+      await this.submit(page, this.submitCandidates(page, f.submit), f.submit ? undefined : user);
       pass = await this.findField(page, this.passwordCandidates(page, f.password), this.timeoutMs);
     }
     if (!pass) throw new EzTestError(`Role ${role}: password field not found on ${page.url()}`, 'LOGIN_FIELD');
     await pass.fill(await r.password.resolve());
-    await this.submit(page, this.submitCandidates(page, f.submit));
+    await this.submit(page, this.submitCandidates(page, f.submit), f.submit ? undefined : pass);
 
     if (r.totp) {
       const otp = await this.findField(page, this.totpCandidates(page, f.totp), this.timeoutMs);
@@ -325,11 +522,11 @@ export class IdentityVault {
         await this.failIfError(page, role);
         throw new EzTestError(`Role ${role}: one-time code field not found on ${page.url()}`, 'LOGIN_FIELD');
       }
-      const opts = { ...r.def.totpOptions };
-      if (totpSecondsRemaining(opts) < 3) await sleep(totpSecondsRemaining(opts) * 1000 + 250);
-      await otp.fill(generateTotp(await r.totp.resolve(), opts));
-      await this.submit(page, this.submitCandidates(page, f.totpSubmit ?? f.submit, true));
+      await otp.fill(await freshTotp(await r.totp.resolve(), { ...r.def.totpOptions }));
+      await this.submit(page, this.submitCandidates(page, f.totpSubmit ?? f.submit, true), f.totpSubmit ?? f.submit ? undefined : otp);
     }
+    await this.interstitials(page, role, r, formUrl);
+    return formUrl;
   }
 
   // ------------------------------------------------------------- OAuth in the browser
@@ -469,9 +666,7 @@ export class IdentityVault {
       } else if (await seen('input[name=otc], #idTxtBx_SAOTCC_OTC')) {
         if (!r.totp) throw new EzTestError(`Role ${role}: Entra asks for a one-time code but the role has no totp seed`, 'LOGIN_FIELD');
         if (did !== 'otc') {
-          const opts = { ...r.def.totpOptions };
-          if (totpSecondsRemaining(opts) < 3) await sleep(totpSecondsRemaining(opts) * 1000 + 250);
-          await page.locator('input[name=otc], #idTxtBx_SAOTCC_OTC').first().fill(generateTotp(await r.totp.resolve(), opts));
+          await page.locator('input[name=otc], #idTxtBx_SAOTCC_OTC').first().fill(await freshTotp(await r.totp.resolve(), { ...r.def.totpOptions }));
           await click('#idSubmit_SAOTCC_Continue, #idSIButton9, input[type=submit], button[type=submit]');
           acted = 'otc';
         }
@@ -563,18 +758,30 @@ export class IdentityVault {
     }
   }
 
-  private onLoginPage(current: string, r: ResolvedRole, base: string | undefined): boolean {
+  /**
+   * True when `current` is the sign-in form: the page the credentials were typed on (`formUrl`, which may be an
+   * identity provider on another host when the app redirected there), else the configured login URL. Origin and
+   * path both count: behind an SSO gateway the login URL is the app itself (`/`), which the browser comes back to.
+   */
+  private onLoginPage(current: string, r: ResolvedRole, base: string | undefined, formUrl?: string): boolean {
     try {
-      return new URL(current).pathname === new URL(this.url(r.def.loginUrl, base)).pathname;
+      const at = new URL(current);
+      const form = new URL(formUrl ?? this.url(r.def.loginUrl, base));
+      return at.origin === form.origin && at.pathname === form.pathname;
     } catch {
       return false;
     }
   }
 
   private async failIfError(page: Page, role: string): Promise<void> {
-    const alert = page.locator('[role=alert], .error, .alert-danger, [aria-invalid=true] ~ .error-message').first();
-    if ((await alert.count()) && (await alert.isVisible())) {
-      const text = ((await alert.textContent()) ?? '').trim().slice(0, 200);
+    // Generic alerts, and the error text of identity providers' forms (Keycloak: #input-error, PatternFly pf-m-error).
+    const alerts = page.locator('[role=alert], .error, .alert-danger, [aria-invalid=true] ~ .error-message, [id^="input-error"], .pf-m-error, .kc-feedback-text');
+    const n = Math.min(await alerts.count().catch(() => 0), 10);
+    for (let i = 0; i < n; i++) {
+      const alert = alerts.nth(i);
+      if (!(await alert.isVisible().catch(() => false))) continue;
+      const text = ((await alert.textContent().catch(() => '')) ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+      if (!text && i < n - 1) continue;
       throw new EzTestError(this.registry.masker.mask(`Role ${role}: login failed: ${text || 'error shown'}`), 'LOGIN_FAILED');
     }
   }
@@ -614,6 +821,30 @@ export class IdentityVault {
     return [page.getByRole('button', { name: names }), page.locator('button[type=submit], input[type=submit]')];
   }
 
+  private async buttonName(b: Locator): Promise<string> {
+    return ((await b.getAttribute('aria-label').catch(() => null)) || (await b.textContent().catch(() => null)) || (await b.getAttribute('value').catch(() => null)) || '').trim();
+  }
+
+  /** Like findField, for buttons: every match of a candidate is looked at, and buttons that leave the flow are skipped. */
+  private async findButton(page: Page, candidates: Locator[], timeoutMs: number): Promise<Locator | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      for (const c of candidates) {
+        try {
+          const n = Math.min(await c.count(), 10);
+          for (let i = 0; i < n; i++) {
+            const b = c.nth(i);
+            if ((await b.isVisible()) && !NOT_SUBMIT.test(await this.buttonName(b))) return b;
+          }
+        } catch {
+          /* navigation in progress; poll again */
+        }
+      }
+      if (Date.now() >= deadline) return undefined;
+      await sleep(100);
+    }
+  }
+
   private async findField(page: Page, candidates: Locator[], timeoutMs: number): Promise<Locator | undefined> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -630,8 +861,22 @@ export class IdentityVault {
     }
   }
 
-  private async submit(page: Page, candidates: Locator[]): Promise<void> {
-    const btn = await this.findField(page, candidates, this.timeoutMs);
+  /**
+   * Press the form's submit button. Without a configured one, the submit button of the form that holds the field
+   * just filled wins; otherwise a button named like sign in / continue / verify, never one that restarts or
+   * leaves the flow (Keycloak's "Restart login" next to the user name, "Forgot password?", "Try another way").
+   */
+  private async submit(page: Page, candidates: Locator[], field?: Locator): Promise<void> {
+    let btn: Locator | undefined;
+    if (field) {
+      const own = field.locator("xpath=ancestor::form[1]//*[self::button[not(@type) or @type='submit'] or self::input[@type='submit' or @type='image']]");
+      const n = await own.count().catch(() => 0);
+      for (let i = 0; i < n && !btn; i++) {
+        const b = own.nth(i);
+        if ((await b.isVisible().catch(() => false)) && !NOT_SUBMIT.test(await this.buttonName(b))) btn = b;
+      }
+    }
+    btn ??= await this.findButton(page, candidates, this.timeoutMs);
     if (!btn) throw new EzTestError(`Submit button not found on ${page.url()}`, 'LOGIN_FIELD');
     const before = page.url();
     await btn.click();

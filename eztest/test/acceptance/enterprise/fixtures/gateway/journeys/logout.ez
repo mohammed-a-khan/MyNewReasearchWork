@@ -1,0 +1,14 @@
+Journey: Signing out ends the gateway session and the identity provider session
+Tags: @gateway @logout
+Role: employee
+
+Log in
+Open /
+Click the "Sign out" link
+Expect the page contains "Do you want to log out?"
+Click the "Logout" button
+Expect the page contains "Sign in to your account"
+Expect the URL contains "gateway.ez.test"
+# The app is out of reach until the next sign-in
+Open /api/me
+Expect the page contains "Sign in to your account"

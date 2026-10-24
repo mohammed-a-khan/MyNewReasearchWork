@@ -156,7 +156,16 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
       note = undefined;
     }
   }
-  if (human) descriptions.push(human);
+  if (human) {
+    descriptions.push(human);
+    // The unquoted form can mean something else inside a whole line ("Type ... into the Date field" reads as a
+    // date widget step): the quoted form of the same name is the next choice, before ids and CSS paths.
+    const name = /^the (.+) (?:field|dropdown|button|link|tab|menu item|heading|option|image|checkbox|radio button|switch|slider)(?: in the row containing .+)?$/.exec(human);
+    if (name && !name[1].startsWith('"')) {
+      const q = tryQuote(name[1]);
+      if (q) descriptions.push(human.replace(`the ${name[1]} `, `the ${q} `));
+    }
+  }
   if (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) descriptions.push(`testid=${info.testId}`);
   if (info.id && c.id === 1 && SAFE_ID.test(info.id)) descriptions.push(`#${info.id}`);
   if (kind === 'generic' && info.text && c.text === 1) {

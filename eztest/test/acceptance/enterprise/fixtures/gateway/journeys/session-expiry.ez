@@ -1,0 +1,12 @@
+Journey: A session that times out mid-journey is renewed and the journey goes on
+Tags: @gateway @expiry
+Role: employee
+
+Log in
+Open /expenses/new
+Expect the page contains "New expense"
+# The gateway's and the identity provider's session cookies time out
+Clear all cookies
+Open /expenses
+Expect the page contains "My expenses"
+Expect the page contains "Signed in as ada@corp.test"

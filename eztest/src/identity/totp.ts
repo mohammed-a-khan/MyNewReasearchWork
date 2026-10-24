@@ -1,5 +1,8 @@
 /** HOTP (RFC 4226) and TOTP (RFC 6238). */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EzTestError } from '../core/index.js';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -92,6 +95,51 @@ export function totpSecondsRemaining(o: TotpOptions = {}): number {
 /** TOTP code. `secret` is base32 text or raw key bytes. */
 export function generateTotp(secret: string | Uint8Array, o: TotpOptions = {}): string {
   return generateHotp(secret, totpCounter(o), o);
+}
+
+/** The last code this process typed per secret (a hash of it, never the secret), with its window. */
+const lastUsed = new Map<string, bigint>();
+/** Markers of TOTP windows already used, shared by every EZTest process on this machine (workers, CLI runs). */
+const WINDOWS_DIR = join(tmpdir(), 'ez-totp-windows');
+
+/** Claim a window for a secret: false when any process already typed that window's code. */
+async function claimWindow(key: string, counter: bigint): Promise<boolean> {
+  await mkdir(WINDOWS_DIR, { recursive: true, mode: 0o700 });
+  const file = join(WINDOWS_DIR, `${key.slice(0, 24)}-${counter}`);
+  try {
+    await writeFile(file, String(process.pid), { flag: 'wx', mode: 0o600 });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    return true; // no shared marker possible (read-only temp): this process's memory still applies
+  }
+  // Markers of windows long past are no longer needed.
+  for (const name of await readdir(WINDOWS_DIR).catch(() => [] as string[])) {
+    const m = /^([0-9a-f]{24})-(\d+)$/.exec(name);
+    if (m && m[1] === key.slice(0, 24) && BigInt(m[2]) < counter - 4n) await unlink(join(WINDOWS_DIR, name)).catch(() => undefined);
+  }
+  return true;
+}
+
+/**
+ * A TOTP code that is safe to type now. Identity providers refuse a code that is about to expire, and most refuse
+ * a code that was already used (Keycloak, Entra ID, Okta: "code reuse"), so this waits for the next window when
+ * fewer than 3 seconds are left, or when an EZTest process on this machine already typed the current window's
+ * code for this secret (two sign-ins, parallel workers, or a recording and its replay, within 30 seconds). The
+ * windows used are marked in the temp folder by a hash of the secret, never the secret.
+ */
+export async function freshTotp(secret: string | Uint8Array, o: TotpOptions = {}): Promise<string> {
+  const key = createHash('sha256').update(typeof secret === 'string' ? secret.replace(/[\s=-]/g, '').toUpperCase() : Buffer.from(secret)).digest('hex');
+  const wait = (s: number) => new Promise((r) => setTimeout(r, Math.ceil(s * 1000) + 250));
+  for (let tries = 0; ; tries++) {
+    if (totpSecondsRemaining(o) < 3) await wait(totpSecondsRemaining(o));
+    const counter = totpCounter(o);
+    // With a fixed `time` (tests) there is no next window to wait for.
+    if (o.time !== undefined || tries >= 3 || (lastUsed.get(key) !== counter && (await claimWindow(key, counter)))) {
+      lastUsed.set(key, counter);
+      return generateTotp(secret, o);
+    }
+    await wait(totpSecondsRemaining(o));
+  }
 }
 
 /** Constant-time check of a code within +/- `window` steps (default 1). */

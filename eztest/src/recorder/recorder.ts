@@ -40,6 +40,8 @@ export interface RecorderOptions {
 
 /** Wait this long before committing events, so page events and navigations can be ordered by time. */
 const SETTLE_MS = 120;
+/** A navigation this soon after a click or key press in the page was started by it (a sign-in's redirect chain). */
+const USER_NAV_WINDOW_MS = 5000;
 
 async function launch(opts: RecorderOptions): Promise<Browser> {
   const kind = opts.browser ?? 'chromium';
@@ -75,13 +77,22 @@ export class Recorder {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped?: RecordingResult;
   private stopping?: Promise<RecordingResult>;
-  /** Main-frame navigation requests: whether each was started by the page (it carries a Referer). */
+  /**
+   * Main-frame navigation requests: whether each was started by the page. A link or script carries a Referer; a
+   * form post carries an Origin (sign-in pages send `Referrer-Policy: no-referrer`, so a Keycloak or Entra ID
+   * sign-in and its redirect chain back to the app has no Referer at all); and a navigation right after the
+   * person clicked or pressed a key in the page is the page's too. Only what is left is a URL typed by the person.
+   */
   private readonly navRequests = new Map<string, boolean>();
+  /** When the person last clicked, pressed a key or submitted in the page. */
+  private lastUserAction = 0;
   private readonly onRequest = (req: Request) => {
     if (!req.isNavigationRequest() || req.frame() !== this.page.mainFrame()) return;
     let first = req;
     for (let r = req.redirectedFrom(); r; r = r.redirectedFrom()) first = r;
-    this.navRequests.set(req.url(), Boolean(first.headers()['referer']));
+    const h = first.headers();
+    const byPage = Boolean(h['referer']) || 'origin' in h || first.method() !== 'GET' || Date.now() - this.lastUserAction < USER_NAV_WINDOW_MS;
+    this.navRequests.set(req.url(), byPage);
     if (this.navRequests.size > 50) this.navRequests.delete(this.navRequests.keys().next().value as string);
   };
   private readonly onNav = (f: Frame) => {
@@ -118,6 +129,7 @@ export class Recorder {
     }
     const ev = payload as PageEvent;
     if (!ev || typeof ev !== 'object' || typeof (ev as { kind?: unknown }).kind !== 'string') return;
+    if (ev.kind !== 'fill') this.lastUserAction = Date.now();
     const p = (async () => {
       const framed: FramedPageEvent = { ...ev };
       if (source.frame !== this.page.mainFrame()) {
