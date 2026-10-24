@@ -165,6 +165,16 @@ Every EZTest module that touches a page imports it.
   `install-browsers` cache (`EZTEST_TEST_BROWSER_DIRS`; headless launches
   then use the headless shell and headed ones full Chrome, as in a real
   install) and sets `EZTEST_FIREFOX_PATH`.
+- `npm run test:acceptance` runs `test/acceptance` against real sites and
+  apps, under `xvfb-run -a` when there is no display (recording needs a
+  visible browser). `test/acceptance/web` covers seven public practice sites
+  (the-internet, demoqa, practicetestautomation, rahulshettyacademy,
+  saucedemo, parabank, automationexercise): each scenario is recorded by
+  driving the visible browser with the mouse and keyboard, written by hand
+  in `.ez` (`test/acceptance/web/journeys/<site>`) and as code journeys, and
+  each must replay green. They run only with `EZTEST_ONLINE=1` (the script
+  sets it); a site that does not answer is skipped with the reason, nothing
+  is retried. `EZTEST_BROWSER=firefox` runs them on Firefox.
 - `test/legal/no-testing-tools.test.ts` fails if a testing tool appears in
   `package.json`, the lockfile, the source, `dist/` or the tarball.
 
