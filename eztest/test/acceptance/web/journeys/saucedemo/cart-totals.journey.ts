@@ -26,7 +26,8 @@ journey('Sauce Demo: the checkout adds up', { tags: ['@saucedemo', '@code'], bas
   }
   await expect.ui.text('testid=shopping-cart-badge').toBe(String(cheapest.length));
 
-  await ui.click('testid=shopping-cart-link', { expect: { url: '/cart.html' } });
+  // The app changes the address before it draws the cart: wait for the cart itself before reading it.
+  await ui.click('testid=shopping-cart-link', { expect: { url: '/cart.html', text: 'Your Cart' } });
   const inCart = await ui.texts('testid=inventory-item-name');
   await expect([...inCart].sort()).toEqual(cheapest.map((p) => p.name).sort());
 
