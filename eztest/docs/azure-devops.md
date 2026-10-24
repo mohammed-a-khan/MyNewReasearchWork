@@ -158,8 +158,9 @@ npx eztest ado publish eztest-results/<run> --trace --create-bugs --flaky --comm
 With `ado.publishResults: true`, `eztest run` publishes every run this way after its analysis.
 Either way the publish result (success, partial or failed, and why), the test run, each
 result, test case, plan and suite, the bugs, and the build and release are recorded in the run's
-`integrations.json`; the HTML report is rendered again with those links and attached (with the
-one-page `summary.html`) to the test run ([docs/reports.md](reports.md#what-the-report-shows)).
+`integrations.json`; the HTML report is rendered again with those links and attached to the test
+run, with the one-page `summary.html`, the PDF report (`report.pdf`), the Excel workbook
+(`report.xlsx`) and the e-mail summary (`email.html`) ([docs/reports.md](reports.md#what-the-report-shows)).
 
 | What | How it appears in Azure Test Plans |
 |---|---|
@@ -167,6 +168,8 @@ one-page `summary.html`) to the test run ([docs/reports.md](reports.md#what-the-
 | Examples rows | Iterations of that result (with the row's parameter values) |
 | Steps | Action results per step (`actionPath` of the test case step), matched by text, then by `@parameter`, then by position |
 | Screenshots, traces | Attached to the result, on the iteration and the step they belong to (`--trace` adds trace bundles) |
+| Failure evidence | A failed result also carries the failure's video and browser console log, the failing step's files first (up to 8 files; 5 for other results) |
+| Failure category | The result comment gives the report's failure category and suggested next step (`Product defect: Compare "Expected" and "Found" ...`); the failure type is `New Issue` for an error signature no earlier run had, else `Known Issue` |
 | Evidence pack | Attached to the run (`<runDir>/evidence-pack.zip` or `--evidence-pack`) |
 | Healed steps | Result and action comments: `healed: <step> <tier> confidence=… verified=… old -> new \| outcome: passed with healed step(s) awaiting review in EZTest` |
 | Build and release | Run linked to the build (`Build.BuildId`), release and environment (`Release.ReleaseUri`, `Release.EnvironmentUri`); owner and runner from `Build.RequestedFor` |

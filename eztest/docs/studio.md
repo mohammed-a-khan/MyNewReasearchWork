@@ -216,8 +216,16 @@ registerRunDetailTab({
 });
 ```
 
-Built-in tabs: Overview (10), Timeline (20), Screenshots (30), Heal
+Built-in tabs: Overview (10), Report (15), Timeline (20), Screenshots (30), Heal
 proposals (40), Quality (45), Triage (50) and Evidence (60).
+
+The Overview starts with the run report's analysis (`detail.reportSummary`, read from the run's
+`report-model.json`): the readiness verdict and the pass-rate trend, the key figures against the
+previous run, what needs attention (new failures, regressions, flaky, fixed, slower), the failure
+categories with each failing test's suggested next step, the quality lens counts and the report's
+files (`detail.exports`: PDF, Excel workbook, e-mail summary, one-page summary, JSON, JUnit, CSV).
+The Report tab shows the run's `report.html` in place (served with `frame-ancestors 'self'` and
+`X-Frame-Options: SAMEORIGIN`, so only Studio can frame it).
 
 Pages can join the "Quality" activity-bar group with `group: 'quality'`, and a
 two-segment route (`route: 'quality/heals'`) is matched before its first

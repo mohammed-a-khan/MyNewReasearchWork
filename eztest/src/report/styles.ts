@@ -310,7 +310,7 @@ a{color:#000;text-decoration:none}
 .catbox{border:1px solid var(--border);border-left-width:4px;border-radius:var(--r-sm);padding:8px 10px;margin:8px 0 0;background:var(--surface-2)}
 .catbox.c-product{border-left-color:var(--st-failed)}.catbox.c-test{border-left-color:var(--st-healed)}.catbox.c-environment{border-left-color:var(--st-error)}.catbox.c-data,.catbox.c-flaky{border-left-color:var(--st-flaky)}.catbox.c-unknown{border-left-color:var(--st-skipped)}
 .catbox p{margin:6px 0 0}
-.attn{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:14px 0}
+.attn{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:14px 0;align-items:start}
 .attn .card{padding:12px 14px}.attn h3{display:flex;align-items:baseline;gap:8px;font-size:13.5px}.attn h3 .cnt{font-size:20px}
 .attn ul{list-style:none;margin:6px 0 0;padding:0;font-size:12.5px}.attn li{padding:3px 0;border-top:1px solid var(--grid);overflow-wrap:anywhere}
 .attn li a{display:inline-block;min-height:24px;line-height:24px}
