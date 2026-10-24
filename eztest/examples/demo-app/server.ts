@@ -14,6 +14,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { createHmac, randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { attachLabWebSocket, handleLab, newLabState } from './lab.js';
 import { handleEntra, newEntraState, type EntraState } from './entra.js';
@@ -394,8 +395,18 @@ ${(notifications.get(`ORD-${order.id}`) ?? []).length ? `<ul aria-label="Notific
   };
 }
 
+/**
+ * The database file the standalone demo app uses (`npm run demo`): DEMO_DB, else examples/demo-app/shop.db.
+ * The example projects (examples/shop-project, examples/bdd-project) default SHOP_DB to the same file, so their
+ * database steps read the data the app writes. (startDemoApp() without dbFile, as the tests use it, is in memory.)
+ */
+export function demoDbFile(env: Record<string, string | undefined> = process.env): string {
+  return env.DEMO_DB || fileURLToPath(new URL('./shop.db', import.meta.url));
+}
+
 // Allow `tsx examples/demo-app/server.ts` to run it standalone.
 if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
   const port = Number(process.env.PORT ?? 4600);
-  startDemoApp({ port }).then((s) => console.log(`EZ Shop running at ${s.url} (variant=${s.options.variant}, bug=${s.options.bug})`));
+  const dbFile = demoDbFile();
+  startDemoApp({ port, dbFile }).then((s) => console.log(`EZ Shop running at ${s.url} (variant=${s.options.variant}, bug=${s.options.bug}, database ${dbFile})`));
 }

@@ -208,6 +208,23 @@ describe('triage', () => {
     expect(v.status).toBe('needs-human');
   });
 
+  it('"no such table" (the database lacks the schema: wrong file or connection, missing seed) is an environment issue, not unknown', async () => {
+    const fx = await makeRunFixture();
+    const art = await loadRunArtifacts(fx.runDir);
+    const messages = ['SqliteError: no such table: orders', 'no such column: o.created_by', 'relation "orders" does not exist', 'ORA-00942: table or view does not exist', "Invalid object name 'dbo.Orders'."];
+    for (const msg of messages) {
+      const run = structuredClone(art.run);
+      const j = run.journeys.find((x) => x.journeyId === 'data-import')!;
+      const failed = j.steps.find((s) => s.status === 'failed' || s.status === 'blocked')!;
+      failed.error = { message: `Query failed on connection "shop": ${msg}`, name: 'Error' };
+      if (j.error) j.error = { message: msg, name: 'Error' };
+      const v = triageRun({ ...art, run }).verdicts.find((x) => x.journeyId === 'data-import')!;
+      expect(v.category, msg).toBe('environment');
+      expect(v.winner!.rule, msg).toBe('db-schema-missing');
+      expect(v.reasons[0], msg).toMatch(/database lacks a table or column/);
+    }
+  });
+
   it('a verdict without valid evidence is never "decided"', async () => {
     const fx = await makeRunFixture();
     const r = triageRun({ run: fx.run, evidence: [] });
@@ -372,7 +389,14 @@ ignore: ["**/*.md"]
     expect(analyzeImpact(files, journeys, mapping).impacted[0].journeyId).toBe('login');
     expect(() => changedFilesFromGit({ cwd: dir, base: '--output=/tmp/x' })).toThrow(/Unsafe/);
     expect(() => changedFilesFromGit({ cwd: dir, base: 'main; rm -rf /' })).toThrow(/Unsafe/);
-    await expect(changedFilesFromGit({ cwd: dir, base: 'nope-branch' })).rejects.toThrow(/git diff exited/);
+    await expect(changedFilesFromGit({ cwd: dir, base: 'nope-branch' })).rejects.toThrow(/compares with "nope-branch", which this clone does not have: check the name, or fetch it first/);
+    // No origin/main (a fresh clone of one branch, a shallow CI checkout): say how to fetch it, not git's text.
+    await expect(changedFilesFromGit({ cwd: dir, base: 'origin/main' })).rejects.toThrow(/"origin\/main", which this clone does not have: fetch it first \(git fetch origin main; in CI check out with full history, e\.g\. fetch-depth: 0\)/);
+    // Outside a git repository (git diff would print its --no-index usage text).
+    const plain = await mkdtemp(join(tmpdir(), 'ez-nogit-'));
+    const outside = changedFilesFromGit({ cwd: plain, base: 'origin/main' });
+    await expect(outside).rejects.toThrow(/needs a git repository, and .* is not inside one/);
+    await expect(outside).rejects.not.toThrow(/usage: git diff/);
     void readFile;
   });
 });

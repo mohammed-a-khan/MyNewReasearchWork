@@ -5,6 +5,11 @@ package itself. It has no runtime UI dependencies and works offline. This page
 is for the people adding features to it: the live debugger, the time-travel
 trace viewer, heal review, triage and so on.
 
+Recording opens a visible browser. On a machine without a display (a
+container, CI, an SSH session: no `DISPLAY` or `WAYLAND_DISPLAY`), start the
+Studio with `eztest studio --record-headless`; without the flag the Studio
+prints a note at start, and a recording that cannot open its window says why.
+
 ## Layout
 
 ```

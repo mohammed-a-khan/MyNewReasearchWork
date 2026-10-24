@@ -4,7 +4,7 @@
  * mapping covers, or whose mapping selects no journey, are reported as
  * uncovered changed areas.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
@@ -136,6 +136,23 @@ export function changedFilesFromGit(opts: { cwd: string; base: string; head?: st
   const head = opts.head ?? 'HEAD';
   for (const ref of [opts.base, head]) {
     if (!ref || ref.startsWith('-') || !SAFE_REF.test(ref)) throw new EzTestError(`Unsafe git ref: ${ref}`, 'INVALID_INPUT');
+  }
+  // Clear messages instead of git's own text (outside a repository `git diff` prints its --no-index usage).
+  const probe = (args: string[]) => spawnSync('git', args, { cwd: opts.cwd, shell: false, encoding: 'utf8', timeout: opts.timeoutMs ?? 30_000 });
+  const inside = probe(['rev-parse', '--is-inside-work-tree']);
+  if (inside.error) return Promise.reject(new EzTestError(`Change impact needs git, which could not be started: ${inside.error.message}`, 'GIT_FAILED'));
+  if (inside.status !== 0 || inside.stdout.trim() !== 'true') {
+    return Promise.reject(new EzTestError(
+      `Change impact (--changed-since ${opts.base}, or a pipeline with impact:) needs a git repository, and ${opts.cwd} is not inside one. Run from a clone, or run without impact (drop --changed-since, or set impact: false on the pipeline).`,
+      'GIT_NOT_A_REPOSITORY',
+    ));
+  }
+  for (const ref of [opts.base, head]) {
+    if (probe(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).status !== 0) {
+      const remote = /^([\w.-]+)\/(.+)$/.exec(ref);
+      const fix = remote ? `fetch it first (git fetch ${remote[1]} ${remote[2]}; in CI check out with full history, e.g. fetch-depth: 0)` : 'check the name, or fetch it first';
+      return Promise.reject(new EzTestError(`Change impact compares with "${ref}", which this clone does not have: ${fix}. Or pass another base with --changed-since <ref>.`, 'GIT_UNKNOWN_REF'));
+    }
   }
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['diff', '--name-only', '--no-renames', `${opts.base}...${head}`, '--'], {

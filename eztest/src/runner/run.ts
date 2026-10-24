@@ -2,7 +2,7 @@
 import { bindJourney } from '../elements/bind.js';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import type { Browser } from '../browser/index.js';
 import {
   EvidenceVault,
@@ -62,6 +62,15 @@ function noBrowser(): Browser {
       throw new Error(`No browser was launched for this run (all journeys target native platforms); tried to use browser.${String(prop)}`);
     },
   });
+}
+
+/**
+ * A path as recorded in run.json (and so in JUnit properties and reports): relative to the project, the folder
+ * that holds the output directory, with forward slashes, so a run never carries a machine's absolute paths.
+ */
+export function projectRelative(path: string, outputDir: string): string {
+  const rel = relative(dirname(resolve(outputDir)), resolve(path));
+  return (rel || '.').split('\\').join('/');
 }
 
 /** Default fingerprint store location for an output directory. */
@@ -495,7 +504,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
         : browser.version(),
       ...(needsBrowser && wanted.some((t) => t.connect) ? { browserEndpoint: wanted.map((t) => `${t.id}: ${describeBrowser(t)}`).join(', ') } : {}),
       ...Object.assign({}, ...[...usedDrivers].map((d) => d.environment?.() ?? {})),
-      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}), fingerprintStore: store.path,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}), fingerprintStore: projectRelative(store.path, options.outputDir),
       ...vcs,
     },
     evidenceHead,
@@ -570,7 +579,7 @@ async function environmentDown(journeys: Journey[], checks: HealthCheckResult[],
   const evidenceHead = await c.evidence.flush();
   const run: RunResult = {
     runId: c.runId, startedAt: c.startedAt, finishedAt: nowIso(), durationMs: Date.now() - c.started, journeys: results, summary: summarize(results),
-    environment: { node: process.version, platform: process.platform, browser: c.options.browser ?? 'chromium', ...(c.options.baseUrl ? { baseUrl: c.options.baseUrl } : {}), fingerprintStore: c.store.path, health: 'down' },
+    environment: { node: process.version, platform: process.platform, browser: c.options.browser ?? 'chromium', ...(c.options.baseUrl ? { baseUrl: c.options.baseUrl } : {}), fingerprintStore: projectRelative(c.store.path, c.options.outputDir), health: 'down' },
     evidenceHead, health: c.health,
   };
   await writeFile(join(c.runDir, 'run.json'), JSON.stringify(run, null, 2));

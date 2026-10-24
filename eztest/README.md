@@ -260,7 +260,7 @@ export SHOP_ALICE_PASSWORD='Wonderland#1' SHOP_ALICE_TOTP=JBSWY3DPEHPK3PXP \
 npx eztest run
 ```
 
-Restart the demo app with `DEMO_BUG=invoice-total` to watch EZTest catch a document defect three ways. Restart it with `DEMO_VARIANT=b` to watch verified healing.
+The demo app keeps its data in `examples/demo-app/shop.db` (`DEMO_DB` moves it); the example projects' database steps read the same file (`SHOP_DB` overrides it). Restart the demo app with `DEMO_BUG=invoice-total` to watch EZTest catch a document defect three ways. Restart it with `DEMO_VARIANT=b` to watch verified healing.
 
 ## Run from a clone (Windows, macOS, Linux)
 

@@ -127,11 +127,15 @@ describe('doctor --json', () => {
   it('keeps warnings out of the JSON: unrelated EZTEST_* variables go to stderr and leave the config check ok', async () => {
     const dir = await tempDir('doctor-env');
     await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\n');
-    const r = await cli(dir, ['doctor', '--json', '--no-browser'], { EZTEST_ADO_ORG_URL: 'https://dev.azure.com/acme', EZTEST_ADO_PROJECT: undefined, EZTEST_ADO_PAT: 'pat' });
+    const r = await cli(dir, ['doctor', '--json', '--no-browser'], { EZTEST_BUILD_LABEL: 'nightly', EZTEST_ADO_ORG_URL: undefined, EZTEST_ADO_PROJECT: undefined, EZTEST_ADO_PAT: 'pat' });
     const report = JSON.parse(r.out.join('\n'));
     expect(report.checks.find((c: { name: string }) => c.name === 'config')).toMatchObject({ status: 'ok' });
-    expect(JSON.stringify(report)).not.toMatch(/warning|EZTEST_ADO/);
-    expect(r.err).toEqual([expect.stringMatching(/^warning: environment variable EZTEST_ADO_ORG_URL is not an EZTest setting .*EZTEST_ADO__ORG_URL/)]);
+    expect(JSON.stringify(report)).not.toMatch(/warning|EZTEST_/);
+    expect(r.err).toEqual([expect.stringMatching(/^warning: environment variable EZTEST_BUILD_LABEL is not an EZTest setting .*EZTEST_ADO__ORGANIZATION_URL for ado\.organizationUrl/)]);
+    // EZTEST_ADO_ORG_URL and EZTEST_ADO_PROJECT are accepted names for ado.organizationUrl and ado.project: no warning.
+    const alias = await cli(dir, ['doctor', '--json', '--no-browser'], { EZTEST_ADO_ORG_URL: 'https://dev.azure.com/acme', EZTEST_ADO_PROJECT: 'Shop', EZTEST_ADO_PAT: 'pat' });
+    expect(alias.err).toEqual([]);
+    expect(JSON.parse(alias.out.join('\n')).checks.find((c: { name: string }) => c.name === 'config')).toMatchObject({ status: 'ok' });
     // A config file's own unknown key still makes the check "warn" (text on stderr, a count in the JSON).
     await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\nmystery: 1\n');
     const w = await cli(dir, ['doctor', '--json', '--no-browser']);

@@ -40,6 +40,7 @@ import { doctorDatabases, registerQueryCommands, validateJourneyQueries } from '
 import { registerElementCommands } from './elements.js';
 import { recordJourney, verifyRecording } from '../recorder/index.js';
 import { startStudio } from '../studio/index.js';
+import { noDisplayHint } from '../studio/record.js';
 import { importFiles, importFormats, verifyImported, writeImported, writeImportAssets, coverageEquivalence, BUILTIN_IMPORT_KINDS, type ImportKind } from '../importers/index.js';
 import { loadImporterPlugins, parseImporterOptions } from './importer-plugins.js';
 import type { ReportFormat } from '../report/index.js';
@@ -526,9 +527,22 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .argument('<runDir>')
     .option('--policy <file>', 'readiness policy YAML')
     .option('--no-history', 'do not record this run into history')
-    .action(async (runDir: string, o: { policy?: string; history: boolean }) => {
-      const hasConfig = ['eztest.config.yaml', 'eztest.config.yml', 'eztest.config.json'].some((f) => existsSync(join(io.cwd, f)));
-      const loaded = hasConfig ? await load({}).catch(() => undefined) : undefined;
+    .option('--no-config', 'analyze without the project configuration (report branding, links)')
+    .action(async (runDir: string, o: { policy?: string; history: boolean; config: boolean }) => {
+      const configFile = ['eztest.config.yaml', 'eztest.config.yml', 'eztest.config.json'].find((f) => existsSync(join(io.cwd, f)));
+      let loaded: LoadedConfig | undefined;
+      if (configFile && o.config !== false) {
+        try {
+          loaded = await load({});
+        } catch (e) {
+          // A broken configuration is reported, never silently dropped (the reports would lose its settings).
+          io.err(`analyze: ${configFile} could not be loaded: ${(e as Error).message}`);
+          io.err('Fix the configuration, or pass --no-config to analyze without it.');
+          process.exitCode = 1;
+          return;
+        }
+        for (const w of loaded.warnings) io.err(`warning: ${w}`);
+      }
       const a = await analyzeRun(resolve(io.cwd, runDir), {
         historyPath: resolve(io.cwd, '.eztest', 'history.json'),
         recordHistory: o.history,
@@ -713,12 +727,15 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--no-open', 'do not open a browser')
     .option('-e, --env <name>', 'start with this environment active')
     .option('--project <name>', 'start with this project active')
-    .action(async (o: { port?: number; open?: boolean; env?: string; project?: string }) => {
+    .option('--record-headless', 'record without a visible browser window (for machines without a display: containers, CI, SSH)')
+    .action(async (o: { port?: number; open?: boolean; env?: string; project?: string; recordHeadless?: boolean }) => {
       const env = { ...io.env, ...(o.env ? { EZTEST_ENV: o.env } : {}), ...(o.project ? { EZTEST_PROJECT: o.project } : {}) };
       // Plugin routes/pages, and shared team state when a results server is configured.
       const extras = await studioExtras(io, env);
-      const s = await startStudio({ cwd: io.cwd, port: o.port, openBrowser: o.open !== false, env, routeDefs: extras.routeDefs });
+      const s = await startStudio({ cwd: io.cwd, port: o.port, openBrowser: o.open !== false, env, routeDefs: extras.routeDefs, ...(o.recordHeadless ? { recordHeadless: true } : {}) });
       io.out(`EZTest Studio: ${s.url}`);
+      const hint = o.recordHeadless ? undefined : noDisplayHint(io.env);
+      if (hint) io.err(`Note: ${hint}`);
       io.out('Local only (127.0.0.1); the link contains a one-time session token. Ctrl+C to stop.');
       for (const line of extras.lines) io.out(line);
       await new Promise<void>((done) => {

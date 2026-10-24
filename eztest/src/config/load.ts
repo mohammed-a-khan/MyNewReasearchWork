@@ -205,12 +205,24 @@ const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG'
  */
 const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT)_|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
 
+/**
+ * Names accepted for settings besides their canonical EZTEST_<SECTION>__<KEY> form (docs/configuration.md,
+ * "Environment variables"). The canonical variable wins when both are set.
+ */
+export const ENV_ALIASES: Readonly<Record<string, string>> = {
+  EZTEST_ADO_ORG_URL: 'EZTEST_ADO__ORGANIZATION_URL',
+  EZTEST_ADO__ORG_URL: 'EZTEST_ADO__ORGANIZATION_URL',
+  EZTEST_ADO_PROJECT: 'EZTEST_ADO__PROJECT',
+};
+
 /** Turn EZTEST_* variables into a config object (EZTEST_HEALING__MAX_TIER -> healing.maxTier). `origin` records key path -> variable name. */
 export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
   let out: Obj = {};
   for (const [name, value] of Object.entries(vars)) {
     if (!name.startsWith('EZTEST_') || value === undefined || RESERVED_ENV.has(name) || RESERVED_ENV_PREFIX.test(name)) continue;
-    const parts = name.slice('EZTEST_'.length).split('__').filter(Boolean).map(snakeToCamel);
+    const canonical = ENV_ALIASES[name];
+    if (canonical && vars[canonical] !== undefined) continue;
+    const parts = (canonical ?? name).slice('EZTEST_'.length).split('__').filter(Boolean).map(snakeToCamel);
     if (parts.length === 0) continue;
     const { schema, keys } = schemaAt(EzTestConfigSchema, parts);
     let node: unknown = coerceEnv(value, schema, name);
@@ -472,7 +484,7 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
   for (const w of all) {
     const m = /^Unknown configuration key "([^"]+)" \(ignored\)$/.exec(w);
     const name = m ? envOrigin.get(m[1]) ?? [...envOrigin].find(([p]) => p.startsWith(`${m[1]}.`))?.[1] : undefined;
-    if (name) envWarnings.push(`environment variable ${name} is not an EZTest setting (ignored; nested settings use "__", e.g. EZTEST_ADO__ORG_URL for ado.orgUrl)`);
+    if (name) envWarnings.push(`environment variable ${name} is not an EZTest setting (ignored; nested settings use "__", e.g. EZTEST_TIMEOUTS__STEP for timeouts.step, EZTEST_ADO__ORGANIZATION_URL for ado.organizationUrl)`);
     else warnings.push(w);
   }
   return { config, warnings, envWarnings, sources, env, project, masker, variables };

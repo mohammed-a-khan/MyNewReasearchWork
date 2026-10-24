@@ -28,7 +28,11 @@ ado:
 ```
 
 In Azure Pipelines, `organizationUrl` and `project` default to
-`System.CollectionUri` and `System.TeamProject`.
+`System.CollectionUri` and `System.TeamProject`. From the environment they are
+`EZTEST_ADO__ORGANIZATION_URL` and `EZTEST_ADO__PROJECT` (settings use `__`
+between levels); `EZTEST_ADO_ORG_URL` and `EZTEST_ADO_PROJECT` are accepted
+too. The PAT is the flat `EZTEST_ADO_PAT`, like the other credentials
+([configuration.md](configuration.md#environment-variables)).
 
 ### Credentials
 

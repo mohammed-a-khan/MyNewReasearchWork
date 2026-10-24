@@ -173,10 +173,12 @@ describe('loadConfig layering', () => {
 
   it('keeps EZTEST_* variables that are no setting apart from the config warnings', async () => {
     writeFileSync(join(dir, 'eztest.config.yaml'), 'baseUrl: http://x.test\n');
-    const r = await loadConfig({ cwd: dir, environment: { EZTEST_ADO_ORG_URL: 'https://dev.azure.com/acme', EZTEST_ADO__PROJECT: 'p', EZTEST_ADO_PAT: 'x', EZTEST_ADO_PLAN: '7' } });
+    const r = await loadConfig({ cwd: dir, environment: { EZTEST_BUILD_LABEL: 'nightly', EZTEST_ADO_ORG_URL: 'https://dev.azure.com/acme', EZTEST_ADO__PROJECT: 'p', EZTEST_ADO_PAT: 'x', EZTEST_ADO_PLAN: '7' } });
     expect(r.warnings).toEqual([]);
-    expect(r.envWarnings).toEqual([expect.stringMatching(/^environment variable EZTEST_ADO_ORG_URL is not an EZTest setting/)]);
+    // EZTEST_ADO_ORG_URL is an accepted name for ado.organizationUrl (no warning); EZTEST_BUILD_LABEL names nothing.
+    expect(r.envWarnings).toEqual([expect.stringMatching(/^environment variable EZTEST_BUILD_LABEL is not an EZTest setting/)]);
     expect(r.config.ado.project).toBe('p');
+    expect(r.config.ado.organizationUrl).toBe('https://dev.azure.com/acme');
   });
 
   it('errors on a missing explicit config file', async () => {

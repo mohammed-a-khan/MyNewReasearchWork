@@ -42,6 +42,7 @@ db:
   connections:
     shop:
       driver: sqlite
-      file: ${SHOP_DB:-./shop.db}
+      # The database `npm run demo` writes (examples/demo-app/shop.db); SHOP_DB points elsewhere.
+      file: ${SHOP_DB:-../demo-app/shop.db}
   queries:
     dir: queries

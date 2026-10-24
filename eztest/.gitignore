@@ -11,3 +11,5 @@ eztest-results/
 !.env.example
 coverage/
 *.tgz
+# the standalone demo app's database (npm run demo), shared with the example projects
+examples/demo-app/shop.db*

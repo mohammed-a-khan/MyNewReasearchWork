@@ -9,6 +9,16 @@ import type { EventHub, StudioEvent } from './events.js';
 
 type Listener = (e: StudioEvent) => void;
 
+/**
+ * Why a visible (headed) browser cannot open here, or undefined: Linux and other X11/Wayland systems without
+ * DISPLAY or WAYLAND_DISPLAY (a container, CI, an SSH session). Recording then needs `--record-headless`.
+ */
+export function noDisplayHint(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string | undefined {
+  if (platform === 'win32' || platform === 'darwin') return undefined;
+  if (env.DISPLAY || env.WAYLAND_DISPLAY) return undefined;
+  return 'No display found (DISPLAY and WAYLAND_DISPLAY are not set), so the recorder cannot open a visible browser here. Start the Studio with "eztest studio --record-headless" to record without a window, or run it where a display is available.';
+}
+
 export interface RecordStartRequest {
   url: string;
   name?: string;
@@ -32,7 +42,7 @@ export class RecordManager {
   private counter = 0;
 
   constructor(
-    private readonly defaults: { headless?: boolean; project?: () => Promise<{ baseUrl?: string }> } = {},
+    private readonly defaults: { headless?: boolean; project?: () => Promise<{ baseUrl?: string }>; env?: Record<string, string | undefined> } = {},
     private readonly hub?: EventHub,
   ) {}
 
@@ -74,11 +84,13 @@ export class RecordManager {
     const tags = Array.isArray(req.tags) ? req.tags.map((t) => String(t).replace(/^@/, '')).filter(Boolean) : undefined;
     const session: RecordingSession = { id: `rec-${++this.counter}`, url: u.toString(), state: 'recording', events: [], listeners: new Set() };
     const previous = this.session;
+    const headless = req.headless ?? this.defaults.headless ?? false;
+    const hint = headless ? undefined : noDisplayHint(this.defaults.env);
     this.session = session;
     try {
       this.recorder = await startRecording({
         url: u.toString(),
-        headless: req.headless ?? this.defaults.headless ?? false,
+        headless,
         project: await this.defaults.project?.().catch(() => ({})),
         browser: req.browser,
         name: req.name ? String(req.name) : undefined,
@@ -87,7 +99,7 @@ export class RecordManager {
       });
     } catch (e) {
       this.session = previous;
-      throw new HttpError(500, `Could not start recording: ${(e as Error).message.split('\n')[0]}`);
+      throw new HttpError(500, `Could not start recording: ${(e as Error).message.split('\n')[0]}${hint ? `. ${hint}` : ''}`);
     }
     // The user closing the browser window finishes the recording.
     this.recorder.page.once('close', () => {

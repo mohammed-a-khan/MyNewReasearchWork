@@ -2,7 +2,7 @@
  * The executor: runs Journeys in real browsers with strict locators,
  * declarative post-conditions, verified healing and a hash-chained evidence pack.
  */
-export { runJourneys, defaultFingerprintStorePath, launchOptions } from './run.js';
+export { runJourneys, defaultFingerprintStorePath, launchOptions, projectRelative } from './run.js';
 export { createFetchApiHandler, resolveUrl, type FetchApiOptions } from './api.js';
 export { resolveTarget, toLocator, rootFor, describeCandidate, interpolateCandidate, type LocatorRoot, type Resolution } from './locate.js';
 export { evaluateConditions, evaluateConditionOnce, type ConditionEnv } from './conditions.js';
