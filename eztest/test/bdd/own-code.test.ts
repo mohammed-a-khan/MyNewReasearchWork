@@ -33,7 +33,7 @@ describe('native BDD is EZTest\'s own code', () => {
       const text = readFileSync(f, 'utf8');
       for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*)(['"])([^'"]+)\1/g)) {
         const spec = m[2];
-        if (!spec.startsWith('.') && !spec.startsWith('node:') && !/^eztest(?:\/|$)/.test(spec)) bad.push(`${f}: ${spec}`);
+        if (!spec.startsWith('.') && !spec.startsWith('node:') && !/^(?:@mohammed-a-khan\/)?eztest(?:\/|$)/.test(spec)) bad.push(`${f}: ${spec}`);
       }
       if (BDD_PACKAGE.test(text)) bad.push(`${f}: names a BDD package`);
     }

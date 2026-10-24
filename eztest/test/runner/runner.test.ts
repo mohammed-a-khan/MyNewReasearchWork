@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { EventBus, verifyEvidence, type EzEvent, type RunResult } from '../../src/core/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
 import { runJourneys } from '../../src/runner/index.js';
@@ -57,7 +57,9 @@ describe('runJourneys (real Chromium, demo app)', () => {
     const saved = JSON.parse(await readFile(join(dir, 'run.json'), 'utf8')) as RunResult;
     expect(saved.runId).toBe(run.runId);
     // Fingerprints and last-good locators were stored for healing next time.
-    const store = JSON.parse(await readFile(run.environment.fingerprintStore, 'utf8')) as { steps: Record<string, { fingerprint?: { id?: string }; lastGood?: unknown }> };
+    // (run.json records the store relative to the project: the folder that holds the output directory)
+    expect(run.environment.fingerprintStore).toBe('.eztest/fingerprints.json');
+    const store = JSON.parse(await readFile(resolve(dirname(out), run.environment.fingerprintStore!), 'utf8')) as { steps: Record<string, { fingerprint?: { id?: string }; lastGood?: unknown }> };
     expect(store.steps['bob-order/click-the-sign-in-button'].fingerprint?.id).toBe('login-btn');
     expect(store.steps['bob-order/click-the-sign-in-button'].lastGood).toMatchObject({ strategy: 'role', value: 'button', name: 'Sign in' });
     // Events
