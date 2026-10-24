@@ -656,19 +656,49 @@ export class ChromiumPage extends TypedEmitter<PageEvents> {
     this.onNavigationSettled();
   }
 
+  /** Requests in flight (start time), and when the last one ended: async work an action may have started. */
+  private readonly inflight = new Map<Request, number>();
+  private lastRequestEnd = 0;
+
+  /** The post-action navigation window of this page's context (BrowserContextOptions.navigationWindow). */
+  navigationWindow(): { quietMs: number; maxMs: number } {
+    const o = this.context_.options.navigationWindow;
+    const quietMs = typeof o === 'number' ? o : (o?.quiet ?? 150);
+    const maxMs = typeof o === 'number' ? Math.max(o, 2000) : (o?.max ?? 2000);
+    return { quietMs: Math.max(0, quietMs), maxMs: Math.max(0, maxMs) };
+  }
+
   /**
-   * After an input action: if it started a navigation within a short grace
-   * period, wait until that navigation commits or stops (like a user would).
+   * After an input action (click, tap, dblclick): did it start a navigation, now or after some
+   * async work (a fetch, then `window.location = ...`)? The page is watched for a navigation
+   * request until it has been quiet for the navigation window (default 150 ms) - a request the
+   * action started keeps the watch open until it ends - and never longer than the window's cap
+   * (default 2 s). A navigation that starts is waited for until it commits (or stops, fails or
+   * turns into a download), up to `timeout`; one that does not commit in time fails the action.
    */
-  async waitForInitiatedNavigation(before: { starts: number; ends: number }, timeout: number): Promise<void> {
-    const grace = new Deadline(15);
-    try {
-      await this.waitForCondition(() => this.navStarts > before.starts, grace, () => 'no navigation');
-    } catch {
-      return;
+  async waitForInitiatedNavigation(before: { starts: number; ends: number; at?: number }, timeout: number, api = 'click'): Promise<void> {
+    const { quietMs, maxMs } = this.navigationWindow();
+    const started = Date.now();
+    const cap = started + Math.min(maxMs, timeout);
+    // Requests sent since the input was dispatched (the input command can return after they started).
+    const since = before.at ?? started;
+    const busy = () => [...this.inflight.values()].some((t) => t >= since);
+    for (;;) {
+      if (this.closed) return;
+      if (this.navEnds > before.ends) return; // committed, same-document, stopped or cancelled already
+      if (this.navStarts > before.starts) break;
+      const now = Date.now();
+      const quietSince = Math.max(started, this.lastRequestEnd);
+      if (now >= cap || (!busy() && now - quietSince >= quietMs)) return;
+      await sleep(10);
     }
-    // Any commit / same-document navigation / stop after the action ends the wait.
-    await this.waitForCondition(() => this.navEnds > before.ends, new Deadline(Math.min(timeout, 10_000)), () => 'navigation did not commit').catch(() => undefined);
+    const remaining = Math.max(1, timeout - (Date.now() - started));
+    await this.waitForCondition(() => this.navEnds > before.ends, new Deadline(remaining), () =>
+      `${api}: the action started a navigation that did not finish loading within ${timeout} ms (the page is at ${this.mainFrame().url()}); pass { noWaitAfter: true } if the page is meant to keep loading`,
+    ).catch((e: Error) => {
+      if (this.closed || e instanceof TargetClosedError) return;
+      throw e;
+    });
   }
 
   onStoppedLoading(frameId: string): void {
@@ -847,6 +877,12 @@ export class ChromiumPage extends TypedEmitter<PageEvents> {
   emitRequestEvent(name: 'request' | 'requestfinished' | 'requestfailed', r: Request): void;
   emitRequestEvent(name: 'response', r: Response): void;
   emitRequestEvent(name: 'request' | 'requestfinished' | 'requestfailed' | 'response', r: Request | Response): void {
+    if (name === 'request') {
+      // Long-lived requests (streams, long polls) are forgotten after a minute.
+      if (this.inflight.size > 200) for (const [k, t] of this.inflight) if (Date.now() - t > 60_000) this.inflight.delete(k);
+      this.inflight.set(r as Request, Date.now());
+    }
+    else if (name !== 'response' && this.inflight.delete(r as Request)) this.lastRequestEnd = Date.now();
     this.emitEvent(name as 'request', r as Request);
     this.context_.emitEvent(name as 'request', r as Request);
     this.context_.onNetworkEvent(name, r);

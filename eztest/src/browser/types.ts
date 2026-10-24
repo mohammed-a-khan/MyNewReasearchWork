@@ -113,6 +113,13 @@ export interface BrowserContextOptions {
    * taking the first of several.
    */
   strictSelectors?: boolean;
+  /**
+   * After a click / tap, how long the page is watched for a navigation it starts (a link, a form,
+   * or `window.location` set after async work): until it was quiet this long (default 150 ms; a
+   * request the click started keeps the watch open), at most `max` (default 2000 ms). A number
+   * sets the quiet time. A navigation that starts is waited for until it commits.
+   */
+  navigationWindow?: number | { quiet?: number; max?: number };
   timezoneId?: string;
   userAgent?: string;
   /** null disables the viewport override (the window size is used). Default 1280x720. */

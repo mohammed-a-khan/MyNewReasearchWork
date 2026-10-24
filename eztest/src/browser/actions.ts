@@ -154,7 +154,7 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
     log.push(`${action} at (${Math.round(x)}, ${Math.round(y)})`);
     const page = target.page;
     const release = await holdModifiers(page, o.modifiers);
-    const navBefore = { starts: page.navStarts, ends: page.navEnds };
+    const navBefore = { starts: page.navStarts, ends: page.navEnds, at: Date.now() };
     const pressesBefore = page.mouse.pressesSent + page.touchscreen.touchesSent;
     try {
       if (action === 'hover') await page.mouse.move(x, y);
@@ -182,7 +182,7 @@ export async function pointerAction(api: string, target: ElementTarget, action: 
       });
     }
     if (page.isClosed()) return { done: undefined };
-    if (!o.noWaitAfter && action !== 'hover') await page.waitForInitiatedNavigation(navBefore, timeoutFor(target, o));
+    if (!o.noWaitAfter && action !== 'hover') await page.waitForInitiatedNavigation(navBefore, timeoutFor(target, o), api);
     return { done: undefined };
   });
 }
