@@ -29,11 +29,15 @@ Formats: `reporters: [console, html, json, junit]` in the config, or `eztest run
 
 **Each test.**
 
-- Step timeline: every step with its status and duration, drawn where it ran within the test, nested blocks and sub-journeys indented. Select a step for its post-conditions, locator, error and stack, diagnosis (expected / found, "did you mean", console errors and failed requests), API exchange (request and response, pretty-printed, masked), database query result (table, masked), heal and evidence.
-- Screenshots: a gallery with a lightbox (Previous / Next, keyboard), and before / after the failing step side by side.
-- Video with step chapters (chapters are embedded, so they also work from `file://`), the trace file and a link that opens the trace in Studio (`report.studioUrl`).
-- Network and console around the failing step.
-- Healing: the old and the new locator, the tier, the confidence and whether the heal was verified, with its evidence.
+- Step timeline: every step with its status and duration, drawn where it ran within the test, nested blocks and sub-journeys indented. Each step row has a screenshot button (opens it in the lightbox) and, with a video, a play button that seeks the video to the step. Select a step for its post-conditions, locator, error and stack, diagnosis (expected / found, "did you mean", console errors and failed requests), API exchange (request and response, pretty-printed, masked), database query result (table, masked), heal, visual comparison, its screenshots, its DOM snapshot and its evidence.
+- Screenshots: before / after the failing step in a compare slider (or side by side), a gallery, and a lightbox (Previous / Next, keyboard, fit to screen or actual size, so full-page screenshots scroll). A failed visual check shows the baseline and the actual image in the same slider, with the diff image as an overlay whose opacity you set.
+- Video: the failing step's screenshot (else the last one) as the poster, step chapters that seek (embedded, so they work from `file://`), a marker for each step on a strip under the player with the failing step in red, "Jump to the failure", playback speed (0.25x to 2x), and a video picker when the test has several (one per attempt, actor or page). Without a video the panel says why: `video: off`, or `retain-on-failure` and the test passed.
+- Trace: an "Open trace" button. It links to the time-travel trace in Studio (`report.studioUrl`; Studio must be running: `npx eztest studio`), gives the `eztest trace steps` command and the trace folder, and downloads the trace zip (`--trace`).
+- DOM snapshots (`--time-travel`): inside the step, the page before and after the step as EZTest recorded it, in a sandboxed frame (scripts removed, no network access, the target outlined). Failing tests get every step; passing tests the after-snapshots while the size budget lasts (8 MB per report, snapshots over 900 KB are left out).
+- Network (failed, errored and flaky tests): every request of the test as a waterfall: step, method, URL, status, type, size, time and a bar where it ran; expand a row for the timing phases and the request and response headers. Authorization, cookies, API keys and tokens in headers and URLs are masked. "Failed only" and a text filter.
+- Console: every message with its time, level, step and source location; filter by level.
+- Evidence vault: every evidence file of the test with a thumbnail (images), a name (step number and intent, and the kind: screenshot, DOM snapshot, aria snapshot, API exchange, network log, HAR, time-travel snapshot, trace, video, chapters, download, document, console log, accessibility findings, visual comparison, DB result, data), size, time, SHA-256, its position in the hash chain (`eztest evidence verify`), and Open / Download links. Filter by kind and step, search by name, id, file or hash. The links are relative to the run folder, so they work from the folder, from `file://` and after the folder is zipped and unzipped. The Evidence section has the same browser for the whole run.
+- Healing: the old and the new locator, the tier, the confidence and whether the heal was verified, with its evidence. When healing tried and did not heal, the failing step lists what each tier found and why. T1 (fingerprint) can heal a step only after the step has passed once in the project, since it compares the element with the fingerprint learned then; in a project's first run, only T2 (semantic) can try, and it heals only above its threshold.
 - Retries: each attempt's outcome and duration, and the steps whose outcome differs between attempts.
 - Flakiness: the state from history and the recent outcomes as a sparkline; the flake cause when it passed only on retry.
 - Triage: the probable cause with its confidence, the reasons and the cited evidence; second opinion; "needs human review".
@@ -59,13 +63,16 @@ Each publisher writes what it did into `integrations.json`, and the reports are 
 
 ```yaml
 report:
-  name: Contoso Shop                 # header (default EZTest)
-  title: Shop web - regression       # report title
+  name: Contoso Shop                 # header (default: package.json name, else the folder name)
+  title: Shop web - regression       # report title (default: "<name> test report")
   logo: branding/logo.svg            # .svg/.png/.jpg/.gif/.webp under 512 KiB, embedded
+  brandColor: "#0b5cad"              # header mark and accents (#rrggbb; the text on it stays readable)
   trendRuns: 20                      # runs in the trends
   baseline: previous                 # previous | none | <run directory>
   studioUrl: http://localhost:4400   # "open trace in Studio"
 ```
+
+`eztest init` writes this section, commented, into a new project's `eztest.config.yaml`. The branch in the header is the CI branch when the run is in CI, else the checked-out branch (in a git worktree, the worktree's branch).
 
 Azure DevOps links need `ado.organizationUrl` and `ado.project` (in Azure Pipelines they default to the pipeline's collection and project); Jira links use the `baseUrl` of the `jira` publisher.
 

@@ -5,7 +5,12 @@ import { summarize, type JourneyResult, type RunResult } from '../../src/core/in
 import {
   applyIntegrationLinks, assignLanes, buildReportModel, buildSlackMessage, buildTeamsCard, cardLinks, columnChart, compareRunResults, csvCell, dataRowOf, donutChart,
   durationBins, fmtMs, heatmap, hbarChart, kpisOf, lineChart, niceTicks, renderTestsCsv, testState, trendFromHistory, buildJsonReport, REPORT_JSON_SCHEMA, buildRunContext, adoWeb, safeHttpUrl,
+  brandCss, maskHeaders, maskUrl,
 } from '../../src/report/index.js';
+import { projectName } from '../../src/engine/analyze.js';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { makeRichFixture, type RichFixture } from './rich-fixture.js';
 
 let rich: RichFixture;
@@ -145,6 +150,49 @@ describe('the report model of a realistic run', () => {
     expect(c.slower).toEqual([{ id: 'c', name: 'c', beforeMs: 1000, afterMs: 4000, ratio: 4 }]);
     expect(c.added.map((x) => x.id)).toEqual(['new']);
     expect(c.removed.map((x) => x.id)).toEqual(['gone']);
+  });
+});
+
+describe('evidence, video and branding', () => {
+  it('describes every evidence file: kind, link, size, time, SHA-256, chain position, test and step', () => {
+    const m = buildReportModel(rich.run, rich.insights);
+    const entries = Object.entries(m.evidence);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [, v] of entries) expect(v).toHaveLength(9);
+    const ref = rich.insights.evidence!.find((r) => r.journeyId && r.stepId)!;
+    const v = m.evidence[ref.id];
+    expect(v[5]).toBe(ref.sha256 ?? '');
+    expect(m.tests[v[7]].id).toBe(ref.journeyId);
+    expect(v[8]).toBeGreaterThan(0);
+  });
+
+  it('explains a missing video from the video policy', () => {
+    const run = runOf([j('a', 'passed'), j('b', 'failed')]);
+    expect(buildReportModel(run, { videoPolicy: 'off' }).tests[0].videoNote).toContain('video: off');
+    expect(buildReportModel(run, { videoPolicy: 'retain-on-failure' }).tests[0].videoNote).toContain('retain-on-failure');
+  });
+
+  it('masks credentials in request headers and URLs', () => {
+    expect(maskHeaders({ Authorization: 'Bearer x', cookie: 'sid=1', accept: 'json' })).toEqual({ Authorization: '****', cookie: '****', accept: 'json' });
+    expect(maskUrl('https://h/p?a=1&access_token=abc&api_key=k')).toBe('https://h/p?a=1&access_token=****&api_key=****');
+  });
+
+  it('brand colour: the mark gets readable text, bad values are ignored', () => {
+    expect(brandCss('#0f766e')).toContain('color:#ffffff');
+    expect(brandCss('#ffe066')).toContain('color:#141413');
+    expect(brandCss('red')).toBe('');
+    expect(brandCss(undefined)).toBe('');
+  });
+
+  it('the default title and name come from package.json, else the folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'eztest-brand-'));
+    const a = join(root, 'my_shop-tests');
+    await mkdir(a);
+    expect(projectName(a)).toBe('My shop tests');
+    const b = join(root, 'b');
+    await mkdir(b);
+    await writeFile(join(b, 'package.json'), JSON.stringify({ name: '@acme/contoso-web' }));
+    expect(projectName(b)).toBe('Contoso web');
   });
 });
 

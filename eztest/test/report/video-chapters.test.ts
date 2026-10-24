@@ -103,6 +103,13 @@ Click the "Save" button
       expect(await chapters.nth(1).textContent()).toContain('Type "Ada" into the "Name" field');
       await chapters.nth(2).click();
       await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
+      // A poster (the last screenshot), a speed control, and a play button on each step that seeks the video.
+      expect(await video.getAttribute('poster')).toMatch(/\.png$/);
+      await page.locator('#detail select[aria-label="Playback speed"]').selectOption('2');
+      expect(await video.evaluate((v) => (v as HTMLVideoElement).playbackRate)).toBe(2);
+      await video.evaluate((v) => { (v as HTMLVideoElement).pause(); (v as HTMLVideoElement).currentTime = 0; });
+      await page.locator('#detail .step-acts button[aria-label^="Play step 2"]').click();
+      await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
     } finally {
       await browser.close();
     }

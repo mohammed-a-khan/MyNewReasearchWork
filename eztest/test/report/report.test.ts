@@ -175,7 +175,9 @@ describe('HTML report in a real browser', () => {
     expect(detail).toContain('Test case #1201');
     expect(detail).toContain('Bug 5521 (created)');
     expect(detail).toContain('Shares a root cause with 1 other test(s)');
-    // before/after screenshots and the lightbox
+    // before/after screenshots: a compare slider, side by side, and the lightbox
+    expect(await page.locator('#detail .cmp-stage img').count()).toBe(2);
+    await page.locator('#detail .cmp-bar button', { hasText: 'Side by side' }).click();
     const thumb = page.locator('#detail .ba button').last();
     await thumb.click();
     expect(await page.locator('#lightbox').evaluate((d) => (d as HTMLDialogElement).open)).toBe(true);
@@ -183,8 +185,22 @@ describe('HTML report in a real browser', () => {
     const cap = await page.locator('#lb-cap').textContent();
     await page.locator('#lb-next').click();
     expect(await page.locator('#lb-cap').textContent()).not.toBe(cap);
+    await page.locator('#lb-zoom').click();
+    expect(await page.locator('#lb-img').getAttribute('class')).toContain('actual');
     await page.keyboard.press('Escape');
     await expect.poll(() => page.locator('#lightbox').evaluate((d) => (d as HTMLDialogElement).open)).toBe(false);
+    // the test's evidence vault: names, SHA-256, chain position, filter by kind
+    const vault = page.locator('#detail section.panel', { has: page.locator('h3', { hasText: 'Evidence vault' }) });
+    const vrows = await vault.locator('tbody tr').count();
+    expect(vrows).toBeGreaterThan(0);
+    expect(await vault.locator('tbody tr').first().textContent()).toMatch(/#\d+/);
+    const kinds = vault.locator('select[aria-label="Filter evidence by kind"] option');
+    if ((await kinds.count()) > 2) {
+      await vault.locator('select[aria-label="Filter evidence by kind"]').selectOption({ index: 1 });
+      expect(await vault.locator('tbody tr').count()).toBeLessThan(vrows);
+    }
+    // the run-wide evidence browser in the Evidence section
+    expect(await page.locator('#ev-browser tbody tr').count()).toBeGreaterThan(0);
     // steps expand; API exchange and DB rows render as code and tables
     await page.goto(pathToFileURL(out.html!).href + '#test/api-orders');
     await expect.poll(() => page.locator('#d-title').textContent()).toBe('Orders API: create and read');

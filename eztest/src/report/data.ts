@@ -72,8 +72,34 @@ export interface StepModel {
   im?: { suggested: string; reason: string };
   /** Manual step verdict. */
   m?: { verdict: string; tester?: string; actual?: string; notes?: string };
+  /** Time-travel DOM snapshots of the step: keys into ReportModel.snapshots (before / after). */
+  sn?: { b?: string; a?: string };
+  /** What the healer tried when the step was not healed (tier by tier). */
+  hn?: string[];
+  /** Visual comparison: baseline, actual and diff images (data: URIs), with the result. */
+  vd?: Array<{ key: string; message: string; ratio?: number; baseline?: string; actual?: string; diff?: string }>;
   ch?: StepModel[];
 }
+
+/** A request of the waterfall: method, URL, status, start (ms after the test started), duration, size, type, step number, failure, headers (masked). */
+export interface NetRow {
+  m: string;
+  u: string;
+  s?: number;
+  st: number;
+  d?: number;
+  sz?: number;
+  ty?: string;
+  mime?: string;
+  step?: number;
+  f?: string;
+  rq?: Record<string, string>;
+  rs?: Record<string, string>;
+  w?: { dnsMs?: number; connectMs?: number; waitMs?: number; receiveMs?: number };
+}
+
+/** An evidence entry: [kind index, relative URL or null, description, size bytes or null, ms after the run started or null, SHA-256, chain position, test index or -1, step number or 0]. */
+export type EvidenceEntry = [number, string | null, string, number | null, number | null, string, number, number, number];
 
 export interface AttemptModel {
   attempt: number;
@@ -117,11 +143,21 @@ export interface TestModel {
   actors: string[];
   /** The video, its WebVTT chapters file and the chapters themselves (seconds), embedded so they work from file://. */
   video?: { src: string; chapters?: string; cues?: Array<[number, number, string]> };
-  trace?: { file?: string; studio?: string };
+  /** Every video of the test (one per attempt, actor or browser page). */
+  videos?: Array<{ src: string; label: string; chapters?: string; cues?: Array<[number, number, string]> }>;
+  /** Poster frame for the video: the failing step's screenshot, else the last one. */
+  poster?: string;
+  /** Why there is no video (the video policy). */
+  videoNote?: string;
+  /** Trace: the trace file (zip), Studio's time-travel link, the trace directory and a terminal command. */
+  trace?: { file?: string; studio?: string; dir?: string; cmd?: string };
+  /** Requests of the test (from the time-travel trace, else the browser network log): the waterfall. */
+  waterfall?: NetRow[];
   attempts?: AttemptModel[];
   /** Network entries of the failing step (or the last ones before the failure). */
   network?: Array<{ method: string; url: string; status: number; ms?: number; failure?: string }>;
-  console?: string[];
+  /** Browser console: level, text, ms after the test started, step number, source location. */
+  console?: Array<{ l: string; t: string; at?: number; step?: number; loc?: string }>;
   manual?: { type: string; testers: string[]; pending: number };
   steps: StepModel[];
 }
@@ -224,7 +260,7 @@ export interface ReportModel {
   version: typeof REPORT_MODEL_VERSION;
   generatedAt: string;
   title: string;
-  brand: { name: string; logo?: string };
+  brand: { name: string; logo?: string; color?: string };
   runId: string;
   startedAt: string;
   finishedAt: string;
@@ -244,8 +280,12 @@ export interface ReportModel {
   browsers?: { names: string[]; perBrowser: Record<string, { total: number; passed: number; failed: number; skipped: number; version?: string; decision?: string; score?: number }>; grid: Array<{ unit: string; cells: Array<{ browser: string; id?: string; state?: TestState }>; only: string[] }> };
   /** Evidence kinds referenced by the evidence map (index = the number in each entry). */
   evidenceKinds: string[];
-  /** Evidence id -> [kind index, relative URL or null, description]. */
-  evidence: Record<string, [number, string | null, string?]>;
+  /** Evidence id -> EvidenceEntry. */
+  evidence: Record<string, EvidenceEntry>;
+  /** Time-travel DOM snapshots (sanitised, self-contained HTML; scripts and network access removed) by key. */
+  snapshots?: Record<string, string>;
+  /** The run's video policy (config `video`): off, on or retain-on-failure. */
+  videoPolicy?: string;
   evidenceHead?: string;
   health?: { preflight?: { ok: boolean; failed: string[] }; circuit?: { afterJourney: string; reason: string; notRun: number } };
   tests: TestModel[];
@@ -263,6 +303,8 @@ export interface ReportBranding {
   name?: string;
   /** data: URI of the logo (svg/png/jpeg), already loaded. */
   logo?: string;
+  /** Brand colour, #rrggbb. */
+  color?: string;
 }
 
 export interface StepArtifacts {
@@ -270,10 +312,20 @@ export interface StepArtifacts {
   api: Map<string, NetworkEntry[]>;
   /** journeyId -> network entries of the journey's browser log. */
   network: Map<string, NetworkEntry[]>;
-  /** journeyId -> console lines (warnings and errors). */
-  console: Map<string, string[]>;
+  /** journeyId -> browser console entries (level, text, time, step). */
+  console: Map<string, Array<{ l: string; t: string; at?: number; stepId?: string; loc?: string }>>;
   /** journeyId -> video chapters [start s, end s, text]. */
   chapters?: Map<string, Array<[number, number, string]>>;
+  /** Evidence id -> file size and chain position (from the manifest). */
+  evidenceMeta?: Map<string, { size?: number; seq?: number }>;
+  /** journeyId -> the time-travel trace: per-step heal notes and snapshot keys, the requests and console of the attempt. */
+  traces?: Map<string, { steps: Map<string, { notes?: string[]; sn?: { b?: string; a?: string } }>; network: Array<NetRow & { stepId?: string }>; console: Array<{ l: string; t: string; at?: number; stepId?: string; loc?: string }>; dir: string }>;
+  /** Snapshot key -> sanitised HTML. */
+  snapshots?: Map<string, string>;
+  /** `${journeyId}\u0000${stepId}` -> visual comparisons. */
+  visual?: Map<string, NonNullable<StepModel['vd']>>;
+  /** journeyId -> trace zip files (traces/*.zip), relative to the run directory. */
+  traceZips?: Map<string, string[]>;
 }
 
 export interface ReportModelInput {
@@ -304,6 +356,8 @@ export interface ReportModelInput {
   extraHtml?: string[];
   /** Statuses of the journeys that only passed on retry or were mixed in burn-in. */
   flakyIds?: Iterable<string>;
+  /** The video policy (config `video`), to explain a missing video. */
+  videoPolicy?: string;
 }
 
 const PASS = (s: string) => s === 'passed' || s === 'passed-healed';
@@ -425,6 +479,11 @@ function stepModel(s: StepResult, testStart: number, art: StepArtifacts | undefi
   }
   if (s.improvement) m.im = { suggested: formatLocator(s.improvement.suggested), reason: s.improvement.reason };
   if (s.manual) m.m = { verdict: s.manual.verdict, ...(s.manual.tester ? { tester: s.manual.tester } : {}), ...(s.manual.actual ? { actual: s.manual.actual } : {}), ...(s.manual.notes ? { notes: s.manual.notes } : {}) };
+  const tr = art?.traces?.get(journeyId)?.steps.get(s.stepId);
+  if (tr?.sn) m.sn = tr.sn;
+  if (tr?.notes?.length && !s.heal && (s.status === 'failed' || s.status === 'blocked')) m.hn = tr.notes;
+  const vd = art?.visual?.get(`${journeyId}\u0000${s.stepId}`);
+  if (vd?.length) m.vd = vd;
   if (s.children?.length) m.ch = s.children.map((c) => stepModel(c, testStart, art, journeyId));
   return m;
 }
@@ -514,11 +573,11 @@ export function compareRunResults(base: RunResult, cur: RunResult): ComparisonMo
   return out;
 }
 
-function evidenceMap(evidence: EvidenceRef[] | undefined): { kinds: string[]; map: Record<string, [number, string | null, string?]> } {
+function evidenceMap(evidence: EvidenceRef[] | undefined, o: { t0: number; meta?: StepArtifacts['evidenceMeta']; where: (r: EvidenceRef) => [number, number] }): { kinds: string[]; map: Record<string, EvidenceEntry> } {
   const kinds: string[] = [];
   const kindIdx = new Map<string, number>();
-  const map: Record<string, [number, string | null, string?]> = {};
-  for (const r of evidence ?? []) {
+  const map: Record<string, EvidenceEntry> = {};
+  for (const [i, r] of (evidence ?? []).entries()) {
     let k = kindIdx.get(r.kind);
     if (k === undefined) {
       k = kinds.length;
@@ -526,9 +585,27 @@ function evidenceMap(evidence: EvidenceRef[] | undefined): { kinds: string[]; ma
       kindIdx.set(r.kind, k);
     }
     const url = safeRelativeUrl(r.path) ?? null;
-    map[r.id] = r.description ? [k, url, r.description] : [k, url];
+    const meta = o.meta?.get(r.id);
+    const at = Date.parse(r.createdAt);
+    const [test, step] = o.where(r);
+    map[r.id] = [k, url, r.description ?? '', meta?.size ?? null, Number.isFinite(at) && Number.isFinite(o.t0) ? at - o.t0 : null, r.sha256 ?? '', meta?.seq ?? i + 1, test, step];
   }
   return { kinds, map };
+}
+
+/** Step numbers in pre-order (the order the report lists steps): stepId -> first number. */
+function stepNumbers(steps: StepResult[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let n = 0;
+  const walk = (list: StepResult[]) => {
+    for (const s of list) {
+      n++;
+      if (!out.has(s.stepId)) out.set(s.stepId, n);
+      walk(s.children ?? []);
+    }
+  };
+  walk(steps);
+  return out;
 }
 
 function suiteOf(j: JourneyResult, file: string | undefined, root: string[], perFile?: Map<string, number>): string[] {
@@ -557,8 +634,21 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
   const flakyMap = new Map((input.flaky ?? []).map((f) => [f.journeyId, f]));
   const triageMap = new Map((input.triage?.verdicts ?? []).map((v) => [v.journeyId, v]));
   const tagMap = new Map((input.failureTags ?? []).map((t) => [t.journeyId, t]));
-  const ev = evidenceMap(input.evidence);
+  const testIdx = new Map(results.map((j, i) => [j.journeyId, i]));
+  const stepNos = new Map(results.map((j) => [j.journeyId, stepNumbers(j.steps)]));
+  const ev = evidenceMap(input.evidence, {
+    t0, meta: input.artifacts?.evidenceMeta,
+    where: (r) => {
+      const ti = r.journeyId !== undefined ? testIdx.get(r.journeyId) : undefined;
+      if (ti === undefined) return [-1, 0];
+      return [ti, (r.stepId && stepNos.get(r.journeyId!)?.get(r.stepId)) || 0];
+    },
+  });
   const evRefs = new Map((input.evidence ?? []).map((r) => [r.id, r]));
+  // The policy comes from the config at analysis time; videos in the run show recording was on (EZTEST_VIDEO).
+  const runHasVideo = (input.evidence ?? []).some((r) => r.kind === 'video');
+  const evByJourney = new Map<string, EvidenceRef[]>();
+  for (const r of input.evidence ?? []) if (r.journeyId) evByJourney.set(r.journeyId, [...(evByJourney.get(r.journeyId) ?? []), r]);
   // failure signatures, first seen in history
   const history = [...(input.history ?? [])].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const firstSeen = new Map<string, { runId: string; startedAt: string }>();
@@ -598,18 +688,52 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       failing.push({ id: j.journeyId, message: err.message, stack: err.stack, name: err.name });
     }
     const evOf = (kind: string) => j.evidence.map((id) => evRefs.get(id)).find((r): r is EvidenceRef => !!r && r.kind === kind);
-    const video = evOf('video');
-    const chapters = evOf('video-chapters');
-    const traceRef = evOf('trace');
+    const mine = evByJourney.get(j.journeyId) ?? [];
+    const video = evOf('video') ?? mine.find((r) => r.kind === 'video');
+    const chapters = evOf('video-chapters') ?? mine.find((r) => r.kind === 'video-chapters');
+    const traceRef = evOf('trace') && /\.zip$/i.test(evOf('trace')!.path) ? evOf('trace') : mine.find((r) => r.kind === 'trace' && /\.zip$/i.test(r.path));
     const vsrc = video ? safeRelativeUrl(video.path) : undefined;
+    // Every video of the journey: one per attempt (and per actor or page), with its chapters.
+    const videos = mine.filter((r) => r.kind === 'video').map((r) => {
+      const dir = r.path.split('/').slice(0, -1).join('/');
+      const ch = mine.find((c) => c.kind === 'video-chapters' && c.path.startsWith(`${dir}/`));
+      const att = /attempt-?(\d+)/i.exec(r.path)?.[1];
+      const cues = ch ? input.artifacts?.chapters?.get(`${j.journeyId}\u0000${ch.id}`) ?? (ch === chapters ? input.artifacts?.chapters?.get(j.journeyId) : undefined) : undefined;
+      return { src: safeRelativeUrl(r.path)!, label: `${att ? `Attempt ${att}` : 'Video'}${r.description && !/^video of the journey attempt$/i.test(r.description) ? ` - ${r.description}` : ''}`, ...(ch && safeRelativeUrl(ch.path) ? { chapters: safeRelativeUrl(ch.path)! } : {}), ...(cues?.length ? { cues } : {}) };
+    }).filter((v) => v.src);
+    // Poster: the failing step's screenshot, else the last screenshot of the test.
+    const shotOf = (st: StepResult | undefined) => st?.evidence.map((id) => evRefs.get(id)).find((r) => r?.kind === 'screenshot');
+    const lastShot = [...allSteps(j.steps)].reverse().map(shotOf).find(Boolean);
+    const posterRef = shotOf(f) ?? lastShot;
+    const poster = posterRef ? safeRelativeUrl(posterRef.path) : undefined;
+    const tr = input.artifacts?.traces?.get(j.journeyId);
+    const nums = stepNos.get(j.journeyId)!;
     const net = input.artifacts?.network.get(j.journeyId);
     let network: TestModel['network'];
+    let waterfall: NetRow[] | undefined;
+    const interesting = state === 'failed' || state === 'error' || state === 'flaky';
+    if (interesting && tr?.network.length) {
+      waterfall = tr.network.slice(0, 300).map(({ stepId, ...x }) => ({ ...x, ...(stepId && nums.get(stepId) ? { step: nums.get(stepId) } : {}) }));
+    } else if (interesting && net?.length) {
+      waterfall = net.slice(0, 300).map((x) => {
+        const raw = x as NetworkEntry & { startedAt?: number | string; durationMs?: number; resourceType?: string };
+        const at = typeof raw.startedAt === 'number' ? raw.startedAt : typeof raw.startedAt === 'string' ? Date.parse(raw.startedAt) : NaN;
+        const dur = raw.durationMs ?? (typeof x.timing === 'number' ? x.timing : x.timing?.duration);
+        return { m: x.method, u: x.url, ...(x.status ? { s: x.status } : {}), st: Number.isFinite(at) && Number.isFinite(start) ? Math.max(0, at - start) : 0, ...(dur !== undefined ? { d: dur } : {}), ...(raw.resourceType ? { ty: raw.resourceType } : {}), ...(x.failure ? { f: x.failure } : {}), ...(x.stepId && nums.get(x.stepId) ? { step: nums.get(x.stepId) } : {}), ...(x.requestHeaders ? { rq: x.requestHeaders } : {}), ...(x.responseHeaders ? { rs: x.responseHeaders } : {}) };
+      });
+    }
     if (net?.length && (state === 'failed' || state === 'error')) {
-      const mine = f ? net.filter((x) => x.stepId === f.stepId) : [];
-      const pick = (mine.length ? mine : net.slice(-15)).slice(-15);
+      const mineNet = f ? net.filter((x) => x.stepId === f.stepId) : [];
+      const pick = (mineNet.length ? mineNet : net.slice(-15)).slice(-15);
       network = pick.map((x) => ({ method: x.method, url: x.url, status: x.status, ...(typeof x.timing === 'number' ? { ms: x.timing } : x.timing?.duration !== undefined ? { ms: x.timing.duration } : {}), ...(x.failure ? { failure: x.failure } : {}) }));
     }
-    const con = state === 'failed' || state === 'error' ? input.artifacts?.console.get(j.journeyId) : undefined;
+    const rawCon = interesting ? (tr?.console.length ? tr.console : input.artifacts?.console.get(j.journeyId)) : undefined;
+    const con = rawCon?.slice(-200).map(({ stepId, ...c }) => ({ ...c, ...(stepId && nums.get(stepId) ? { step: nums.get(stepId) } : {}) }));
+    const zips = input.artifacts?.traceZips?.get(j.journeyId) ?? [];
+    const traceFile = traceRef && safeRelativeUrl(traceRef.path) ? safeRelativeUrl(traceRef.path)! : zips[0] ? safeRelativeUrl(zips[0]) : undefined;
+    const studioLink = studio && (traceRef || hasTraceDir || zips.length || tr) ? `${studio}/#/runs/${encodeURIComponent(run.runId)}/${encodeURIComponent(j.journeyId)}${f ? `/${encodeURIComponent(f.stepId)}` : ''}/trace` : undefined;
+    const traceInfo = traceFile || studioLink || tr ? { ...(traceFile ? { file: traceFile } : {}), ...(studioLink ? { studio: studioLink } : {}), ...(tr ? { dir: tr.dir, cmd: `eztest trace steps <runDir> ${j.journeyId}` } : {}) } : undefined;
+    const videoNote = vsrc ? undefined : runHasVideo && input.videoPolicy !== 'retain-on-failure' ? 'No video was recorded for this test (it did not open a browser page, or it ran outside the recorded attempt).' : input.videoPolicy === 'off' || !input.videoPolicy ? 'No video: recording is off (video: off in eztest.config.yaml; set video: on or retain-on-failure, or EZTEST_VIDEO=on).' : input.videoPolicy === 'retain-on-failure' ? (state === 'failed' || state === 'error' ? 'No video was kept for this test.' : 'No video: with video: retain-on-failure, videos are kept only for attempts that did not pass.') : 'No video was recorded for this test (it did not open a browser page).';
     const steps = j.steps.map((s) => stepModel(s, start, input.artifacts, j.journeyId));
     const actors = [...new Set(allSteps(j.steps).map((s) => s.actor).filter((a): a is string => !!a))];
     const row = dataRowOf(j.name);
@@ -642,10 +766,14 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       ...(row ? { row } : {}),
       actors,
       ...(vsrc ? { video: { src: vsrc, ...(chapters && safeRelativeUrl(chapters.path) ? { chapters: safeRelativeUrl(chapters.path)! } : {}), ...(input.artifacts?.chapters?.get(j.journeyId)?.length ? { cues: input.artifacts.chapters.get(j.journeyId)! } : {}) } } : {}),
-      ...(traceRef || studio ? { trace: { ...(traceRef && safeRelativeUrl(traceRef.path) ? { file: safeRelativeUrl(traceRef.path)! } : {}), ...(studio && (traceRef || hasTraceDir) ? { studio: `${studio}/#/runs/${encodeURIComponent(run.runId)}/${encodeURIComponent(j.journeyId)}${f ? `/${encodeURIComponent(f.stepId)}` : ''}/trace` } : {}) } } : {}),
+      ...(videos.length > 1 ? { videos } : {}),
+      ...(poster && vsrc ? { poster } : {}),
+      ...(videoNote ? { videoNote } : {}),
+      ...(traceInfo ? { trace: traceInfo } : {}),
+      ...(waterfall?.length ? { waterfall } : {}),
       ...(attempts?.length ? { attempts: attempts.map((a) => ({ attempt: a.attempt, status: a.status, durationMs: a.durationMs, ...(a.failedStepId ? { failedStep: a.failedStepId } : {}), ...(a.error ? { error: trunc(a.error, 600) } : {}), steps: a.steps.map((s) => [s.intent ?? s.stepId, STEP_CODE[s.status] ?? 'S', s.durationMs] as [string, StepCode, number]) })) } : {}),
       ...(network?.length ? { network } : {}),
-      ...(con?.length ? { console: con.slice(-30) } : {}),
+      ...(con?.length ? { console: con } : {}),
       ...(j.manual ? { manual: { type: j.manual.type, testers: j.manual.testers, pending: j.manual.pending } } : {}),
       steps,
     });
@@ -753,7 +881,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     version: REPORT_MODEL_VERSION,
     generatedAt: new Date().toISOString(),
     title: input.title ?? `${brandName} test report`,
-    brand: { name: brandName, ...(input.brand?.logo && /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(input.brand.logo) ? { logo: input.brand.logo } : {}) },
+    brand: { name: brandName, ...(input.brand?.color && /^#[0-9a-f]{6}$/i.test(input.brand.color) ? { color: input.brand.color } : {}), ...(input.brand?.logo && /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(input.brand.logo) ? { logo: input.brand.logo } : {}) },
     runId: run.runId,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
@@ -778,6 +906,8 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     tests,
     ...(input.extraHtml?.length ? { extraHtml: input.extraHtml } : {}),
     linkConfig: { ...(input.ado ? { ado: input.ado } : {}), ...(input.jira ? { jira: input.jira } : {}) },
+    ...(input.artifacts?.snapshots?.size ? { snapshots: Object.fromEntries(input.artifacts.snapshots) } : {}),
+    ...(input.videoPolicy ? { videoPolicy: input.videoPolicy } : {}),
     warnings: [],
   };
   return applyIntegrationLinks(model, input);

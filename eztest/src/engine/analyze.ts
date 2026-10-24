@@ -2,7 +2,7 @@
  * After-run analysis pipeline: history -> flaky scores -> triage -> readiness
  * -> reports. Used by `eztest run` and `eztest analyze <runDir>`.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadRunArtifacts, HistoryStore, scoreHistory, failureSignature, triageRun, loadReadinessPolicy, evaluateReadiness, loadQuarantine, quarantineStatus, readinessByBrowser } from '../insights/index.js';
 import type { FlakyScore, TriageReport, ReadinessResult, QuarantineStatus } from '../insights/index.js';
@@ -19,7 +19,7 @@ import { failureTags, type JourneyFailureTags, type UiCoverageGateInput } from '
 import { recordUiCoverage, a11yIssuesOfRun, a11yTrend, type UiCoverageOptions, type UiCoverageReport, type A11yScope } from '../analytics/index.js';
 import type { Journey } from '../core/index.js';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 export interface AnalyzeOptions {
   /** History file shared across runs (default <outputDir>/../.eztest/history.json). */
@@ -41,7 +41,7 @@ export interface AnalyzeOptions {
   /** Accessibility scopes (config accessibility.scopes) for the new-issue comparison. */
   a11yScopes?: A11yScope[];
   /** Report branding and options (config report.*). */
-  report?: { title?: string; name?: string; logo?: string; trendRuns?: number; baseline?: string; studioUrl?: string };
+  report?: { title?: string; name?: string; logo?: string; trendRuns?: number; baseline?: string; studioUrl?: string; brandColor?: string; videoPolicy?: string };
   /** Azure DevOps settings for test case / work item links (config ado.*). */
   ado?: ReportModelInput['ado'];
   /** Jira base URL for issue links. */
@@ -50,6 +50,19 @@ export interface AnalyzeOptions {
   cwd?: string;
   /** Environment for the run context (default process.env). */
   env?: Record<string, string | undefined>;
+}
+
+/** The project's name for the report: package.json "name", else the folder name, as words ("shop-project" -> "Shop project"). */
+export function projectName(cwd: string): string {
+  let raw = basename(resolve(cwd));
+  try {
+    const pkg = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as { name?: string };
+    if (pkg.name) raw = pkg.name.replace(/^@[^/]+\//, '');
+  } catch {
+    // no package.json
+  }
+  const words = raw.replace(/[-_.]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'EZTest';
 }
 
 /** The run in the same output directory that started last before `run` (the comparison baseline). */
@@ -92,7 +105,7 @@ export function reportOptionsFromConfig(cfg: EzTestConfig, cwd: string, env: Rec
   const jira = (cfg.publishers as Array<{ use?: string; baseUrl?: unknown }>).find((p) => p.use === 'jira' && typeof p.baseUrl === 'string');
   return {
     cwd,
-    report: { ...cfg.report },
+    report: { ...cfg.report, videoPolicy: cfg.video },
     ...(s.collectionUrl && s.project ? { ado: { collectionUrl: s.collectionUrl, project: s.project, ...(cfg.ado.testPlanId ? { testPlanId: cfg.ado.testPlanId } : {}), ...(cfg.ado.testSuiteId ? { testSuiteId: cfg.ado.testSuiteId } : {}) } } : {}),
     ...(jira ? { jira: { baseUrl: String(jira.baseUrl) } } : {}),
   };
@@ -218,7 +231,7 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
   }
   const reports = await writeReports(runDir, run, {
     formats: opts.formats ?? ['html', 'json', 'junit'],
-    title: opts.title ?? rep.title,
+    title: opts.title ?? rep.title ?? `${rep.name ?? projectName(cwd)} test report`,
     triage,
     flaky,
     readiness,
@@ -227,7 +240,8 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
     history: scoped.runs,
     failureTags: tags,
     ...(baseline ? { baseline } : {}),
-    ...(rep.name || logo ? { brand: { ...(rep.name ? { name: rep.name } : {}), ...(logo ? { logo } : {}) } } : {}),
+    brand: { name: rep.name ?? projectName(cwd), ...(logo ? { logo } : {}), ...(rep.brandColor ? { color: rep.brandColor } : {}) },
+    ...(rep.videoPolicy ? { videoPolicy: rep.videoPolicy } : {}),
     ...(rep.trendRuns ? { trendRuns: rep.trendRuns } : {}),
     ...(rep.studioUrl ? { studioUrl: rep.studioUrl } : {}),
     ...(fo ? { files: fo.files, owners: fo.owners } : {}),

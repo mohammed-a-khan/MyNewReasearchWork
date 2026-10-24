@@ -192,7 +192,10 @@ export function columnChart(cols: Column[], o: { title: string; yLabel: string; 
   const iw = W - m.l - m.r;
   const ih = H - m.t - m.b;
   const fmt = o.yFormat ?? ((v: number) => compact(v));
-  const ticks = niceTicks(Math.max(...cols.map((c) => c.value), 0) || 1);
+  const peak = Math.max(...cols.map((c) => c.value), 0) || 1;
+  // Counts get whole-number ticks only (no 0, 0, 1, 1, 1 axis for small numbers).
+  const counts = cols.every((c) => Number.isInteger(c.value));
+  const ticks = counts && peak <= 4 ? Array.from({ length: Math.ceil(peak) + 1 }, (_, i) => i) : niceTicks(peak);
   const top = ticks[ticks.length - 1] || 1;
   const band = iw / Math.max(1, cols.length);
   const bw = Math.min(24, Math.max(2, band - 2));

@@ -116,7 +116,7 @@ export function buildRunContext(run: RunResult, env: Record<string, string | und
     ...(build ? { build } : {}),
     ...(release ? { release } : {}),
     ...(web.url || web.provider ? { repository: { provider: web.provider, url: web.url, name: web.name } } : {}),
-    ...((e.gitBranch ?? ci.branch) ? { branch: e.gitBranch ?? ci.branch } : {}),
+    ...((ci.branch ?? e.gitBranch) ? { branch: ci.branch ?? e.gitBranch } : {}),
     ...(ci.targetBranch ? { targetBranch: ci.targetBranch } : {}),
     ...(sha ? { commit: { sha, ...(web.commit ? { url: web.commit(sha) } : {}), ...(e.gitAuthor ? { author: e.gitAuthor } : {}) } } : {}),
     ...(ci.pr ? { pullRequest: { number: ci.pr, ...(web.pr ? { url: web.pr(ci.pr) } : {}) } } : {}),

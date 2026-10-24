@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { readTrace, renderSnapshot, runDirSource, traceDirName, TRACE_ROOT } from '../runner/trace/index.js';
+import { safeName } from '../runner/evidence.js';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { EvidenceRef, RunResult } from '../core/index.js';
 import { EzTestError, NotSupportedError } from '../core/index.js';
@@ -54,13 +56,64 @@ function inside(runDir: string, p: string): string | undefined {
   return rel.startsWith('..') || isAbsolute(rel) ? undefined : abs;
 }
 
+const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
+const SECRET_PARAM = /([?&](?:access_token|token|api[_-]?key|key|secret|password|pass|sig|signature|code)=)[^&#]*/gi;
+
+/** Headers and URLs for the report: credentials masked even when the recorder did not. */
+export function maskHeaders(h: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!h) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h)) out[k] = SECRET_HEADER.test(k) ? '****' : String(v).slice(0, 500);
+  return out;
+}
+export const maskUrl = (u: string) => u.replace(SECRET_PARAM, '$1****');
+
+/** Evidence file sizes and chain positions (seq) from the manifest. */
+async function evidenceMeta(runDir: string, evidence: EvidenceRef[]): Promise<Map<string, { size?: number; seq?: number }>> {
+  const out = new Map<string, { size?: number; seq?: number }>();
+  const p = join(runDir, 'evidence-manifest.jsonl');
+  const seqs = new Map<string, number>();
+  if (existsSync(p)) {
+    for (const line of (await readFile(p, 'utf8')).split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const e = JSON.parse(line) as { id?: string; seq?: number };
+        if (e.id && typeof e.seq === 'number') seqs.set(e.id, e.seq);
+      } catch {
+        // the verifier reports a broken manifest
+      }
+    }
+  }
+  const many = evidence.length > 20_000;
+  for (const ev of evidence) {
+    let size: number | undefined;
+    if (!many) {
+      const abs = inside(runDir, ev.path);
+      if (abs) size = await stat(abs).then((x) => x.size).catch(() => undefined);
+    }
+    out.set(ev.id, { ...(size !== undefined ? { size } : {}), ...(seqs.has(ev.id) ? { seq: seqs.get(ev.id) } : {}) });
+  }
+  return out;
+}
+
+const dataUri = async (path: string | undefined, max = 1_500_000): Promise<string | undefined> => {
+  if (!path || !existsSync(path)) return undefined;
+  const b = await readFile(path);
+  if (b.length > max) return undefined;
+  const type = /\.jpe?g$/i.test(path) ? 'image/jpeg' : 'image/png';
+  return `data:${type};base64,${b.toString('base64')}`;
+};
+
 /**
- * API exchanges per step (api/... network evidence), and the browser network log and console of
- * failing journeys, for the test details. Bounded: at most `maxFiles` files are read.
+ * What the test details show from the run directory, bounded in size: API exchanges per step,
+ * the browser network log and console (all levels), video chapters, evidence sizes and chain
+ * positions, the time-travel trace (per-step heal notes, requests, console and sanitised DOM
+ * snapshots), visual comparisons (baseline, actual, diff) and the trace zips.
  */
-export async function collectStepArtifacts(runDir: string, run: RunResult, evidence: EvidenceRef[], o: { maxFiles?: number } = {}): Promise<StepArtifacts> {
-  const out: StepArtifacts = { api: new Map(), network: new Map(), console: new Map(), chapters: new Map() };
+export async function collectStepArtifacts(runDir: string, run: RunResult, evidence: EvidenceRef[], o: { maxFiles?: number; snapshotBudget?: number } = {}): Promise<StepArtifacts> {
+  const out: StepArtifacts = { api: new Map(), network: new Map(), console: new Map(), chapters: new Map(), traces: new Map(), snapshots: new Map(), visual: new Map(), traceZips: new Map() };
   const failing = new Set(run.journeys.filter((j) => j.status === 'failed' || j.status === 'error' || j.attempt > 1).map((j) => j.journeyId));
+  out.evidenceMeta = await evidenceMeta(runDir, evidence);
   let budget = o.maxFiles ?? 4000;
   for (const ev of evidence) {
     if (budget <= 0) break;
@@ -68,27 +121,104 @@ export async function collectStepArtifacts(runDir: string, run: RunResult, evide
     const isNet = ev.kind === 'network' && /(^|\/)network\.json$/.test(ev.path) && ev.journeyId && failing.has(ev.journeyId);
     const isCon = ev.kind === 'console' && ev.journeyId && failing.has(ev.journeyId);
     const isVtt = ev.kind === 'video-chapters' && ev.journeyId;
-    if (!isApi && !isNet && !isCon && !isVtt) continue;
+    const isVisual = ev.kind === 'data' && /(^|\/)lens-visual-[^/]*\.json$/.test(ev.path) && ev.journeyId && ev.stepId;
+    if (!isApi && !isNet && !isCon && !isVtt && !isVisual) continue;
     const abs = inside(runDir, ev.path);
     if (!abs || !existsSync(abs)) continue;
     budget--;
     try {
       if (isVtt) {
-        out.chapters!.set(ev.journeyId!, parseVttCues(await readFile(abs, 'utf8')));
+        const cues = parseVttCues(await readFile(abs, 'utf8'));
+        if (!out.chapters!.has(ev.journeyId!)) out.chapters!.set(ev.journeyId!, cues);
+        out.chapters!.set(`${ev.journeyId}\u0000${ev.id}`, cues);
         continue;
       }
       const raw = JSON.parse(await readFile(abs, 'utf8')) as unknown;
       if (isCon) {
-        const list = Array.isArray(raw) ? (raw as Array<{ type?: string; text?: string }>) : [];
-        const lines = list.filter((c) => c && (c.type === 'error' || c.type === 'warning' || c.type === 'warn')).map((c) => `[${c.type}] ${String(c.text ?? '').slice(0, 500)}`);
-        if (lines.length) out.console.set(ev.journeyId!, [...(out.console.get(ev.journeyId!) ?? []), ...lines]);
+        const t0 = Date.parse(run.journeys.find((j) => j.journeyId === ev.journeyId)?.startedAt ?? '');
+        const list = Array.isArray(raw) ? (raw as Array<{ type?: string; text?: string; at?: string; stepId?: string; location?: string }>) : [];
+        const entries = list.filter((c) => c && typeof c.text === 'string').map((c) => {
+          const at = Date.parse(c.at ?? '');
+          return { l: String(c.type ?? 'log'), t: String(c.text).slice(0, 1000), ...(Number.isFinite(at) && Number.isFinite(t0) ? { at: Math.max(0, at - t0) } : {}), ...(c.stepId ? { stepId: c.stepId } : {}), ...(c.location ? { loc: c.location } : {}) };
+        });
+        if (entries.length) out.console.set(ev.journeyId!, [...(out.console.get(ev.journeyId!) ?? []), ...entries]);
         continue;
       }
-      const entries: NetworkEntry[] = normalizeNetworkLog(raw);
+      if (isVisual) {
+        const findings = (Array.isArray(raw) ? raw : []) as Array<{ message?: string; details?: { key?: string; passed?: boolean; diffRatio?: number; baselinePath?: string; actualPath?: string; diffPath?: string } }>;
+        const vd = [];
+        for (const f of findings.filter((x) => x.details && x.details.passed === false).slice(0, 3)) {
+          const d = f.details!;
+          vd.push({ key: String(d.key ?? 'visual'), message: String(f.message ?? '').slice(0, 400), ...(typeof d.diffRatio === 'number' ? { ratio: d.diffRatio } : {}), ...((await dataUri(d.baselinePath)) ? { baseline: await dataUri(d.baselinePath) } : {}), ...((await dataUri(d.actualPath)) ? { actual: await dataUri(d.actualPath) } : {}), ...((await dataUri(d.diffPath)) ? { diff: await dataUri(d.diffPath) } : {}) });
+        }
+        if (vd.length) out.visual!.set(`${ev.journeyId}\u0000${ev.stepId}`, vd);
+        continue;
+      }
+      const entries: NetworkEntry[] = normalizeNetworkLog(raw).map((x) => ({ ...x, url: maskUrl(x.url), ...(x.requestHeaders ? { requestHeaders: maskHeaders(x.requestHeaders) } : {}), ...(x.responseHeaders ? { responseHeaders: maskHeaders(x.responseHeaders) } : {}) }));
       if (isApi) out.api.set(`${ev.journeyId}\u0000${ev.stepId}`, entries);
       else out.network.set(ev.journeyId!, [...(out.network.get(ev.journeyId!) ?? []), ...entries]);
     } catch {
       // unreadable evidence is reported by the evidence verifier, not here
+    }
+  }
+  // Trace zips (`--trace`): traces/<journey>-attempt<n>.zip
+  const zipDir = join(runDir, 'traces');
+  if (existsSync(zipDir)) {
+    const names = await readdir(zipDir).catch(() => [] as string[]);
+    for (const j of run.journeys) {
+      const base = safeName(j.journeyId);
+      const z = names.filter((n) => n.endsWith('.zip') && (n.startsWith(`${base}-attempt`) || n.startsWith(`${base}.`))).sort();
+      if (z.length) out.traceZips!.set(j.journeyId, z.map((n) => `traces/${n}`));
+    }
+  }
+  // Time-travel traces: heal notes, requests, console and DOM snapshots per step.
+  if (existsSync(join(runDir, TRACE_ROOT)) && run.journeys.length <= 2000) {
+    const source = runDirSource(runDir);
+    let snapBudget = o.snapshotBudget ?? 8_000_000;
+    const order = [...run.journeys].sort((a, b) => Number(failing.has(b.journeyId)) - Number(failing.has(a.journeyId)));
+    for (const j of order) {
+      let t: Awaited<ReturnType<typeof readTrace>>;
+      try {
+        t = await readTrace(runDir, j.journeyId, j.attempt);
+      } catch {
+        continue;
+      }
+      const t0 = Date.parse(j.startedAt);
+      const rel = (iso: string) => {
+        const at = Date.parse(iso);
+        return Number.isFinite(at) && Number.isFinite(t0) ? Math.max(0, at - t0) : 0;
+      };
+      const stepIdOf = new Map(t.steps.map((s) => [s.index, s.stepId]));
+      const steps = new Map<string, { notes?: string[]; sn?: { b?: string; a?: string } }>();
+      const failed = failing.has(j.journeyId);
+      for (const s of t.steps) {
+        const entry = steps.get(s.stepId) ?? {};
+        if (s.heal?.notes?.length) entry.notes = s.heal.notes.slice(0, 8);
+        for (const phase of ['before', 'after'] as const) {
+          const ref = s.snapshots?.[phase];
+          if (!ref || snapBudget <= 0) continue;
+          // Failing tests get every step; passing ones only the after-snapshots while the budget lasts.
+          if (!failed && phase === 'before') continue;
+          try {
+            const html = await renderSnapshot(source, t, ref, { highlight: true });
+            if (html.length > 900_000) continue;
+            const key = `${out.snapshots!.size + 1}`;
+            out.snapshots!.set(key, html);
+            snapBudget -= html.length;
+            entry.sn = { ...entry.sn, [phase === 'before' ? 'b' : 'a']: key };
+          } catch {
+            // a missing snapshot file: the step shows no snapshot
+          }
+        }
+        steps.set(s.stepId, entry);
+      }
+      const network = t.steps.flatMap((s) => s.network.map((n) => ({
+        m: n.method, u: maskUrl(n.url), ...(n.status !== undefined ? { s: n.status } : {}), st: rel(n.startedAt), ...(n.durationMs !== undefined ? { d: n.durationMs } : {}),
+        ...(n.sizes ? { sz: n.sizes.responseBody } : {}), ...(n.resourceType ? { ty: n.resourceType } : {}), ...(n.mimeType ? { mime: n.mimeType } : {}), ...(n.failure ? { f: n.failure } : {}),
+        ...(stepIdOf.get(n.stepIndex) ? { stepId: stepIdOf.get(n.stepIndex) } : {}), ...(n.requestHeaders ? { rq: maskHeaders(n.requestHeaders) } : {}), ...(n.responseHeaders ? { rs: maskHeaders(n.responseHeaders) } : {}), ...(n.timing ? { w: n.timing } : {}),
+      }))).sort((a, b) => a.st - b.st);
+      const consoleEntries = t.steps.flatMap((s) => s.console.map((c) => ({ l: c.type, t: c.text.slice(0, 1000), at: rel(c.at), ...(stepIdOf.get(c.stepIndex) ? { stepId: stepIdOf.get(c.stepIndex) } : {}), ...(c.location ? { loc: c.location } : {}) })));
+      out.traces!.set(j.journeyId, { steps, network, console: consoleEntries, dir: `${TRACE_ROOT}/${traceDirName(j.journeyId, j.attempt)}` });
     }
   }
   return out;

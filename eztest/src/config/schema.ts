@@ -873,6 +873,8 @@ export const EzTestConfigSchema = z.object({
       baseline: z.string().min(1).default('previous'),
       /** EZTest Studio URL for "open trace in Studio" links. */
       studioUrl: z.string().url().optional(),
+      /** Brand colour (#rrggbb) for the report header mark and accents. */
+      brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').optional(),
     })
     .prefault({}),
   /** Results server for publishing runs, shared team state and cross-machine locks. */
