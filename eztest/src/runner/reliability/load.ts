@@ -206,12 +206,18 @@ let lastRtt: { at: number; ms: number } | undefined;
 async function probe(target: Probeable | undefined): Promise<number | undefined> {
   if (!target) return undefined;
   const t0 = performance.now();
+  let answered = false;
+  let call: Promise<void>;
   try {
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([target.evaluate(() => 1), new Promise((r) => (timer = setTimeout(r, 3000)))]).finally(() => clearTimeout(timer));
+    call = target.evaluate(() => 1).then(() => void (answered = true), () => undefined);
   } catch {
-    return undefined; // a page that is navigating says nothing about load
+    return undefined; // a stand-in page (native platforms) has no evaluate
   }
+  let timer: NodeJS.Timeout | undefined;
+  // At most 1 s: a page between documents (it waits for the new one), or one that failed, says nothing about load.
+  await Promise.race([call, new Promise((r) => (timer = setTimeout(r, 1000)))]);
+  clearTimeout(timer);
+  if (!answered) return undefined;
   const ms = performance.now() - t0;
   lastRtt = { at: performance.now(), ms };
   return ms;
