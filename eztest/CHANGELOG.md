@@ -6,6 +6,9 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Fixed: real websites
 
+- Fields of forms laid out as tables without `<label>` (`First Name:` in one cell, the field in the next; parabank.parasoft.com and many older business apps) were not `the First Name field`. A field with no label of its own is now found by the words a person reads before it (the cell before it, or the text right before it; a trailing `:` or `*` left out), and the recorder names it that way.
+- `Set the slider to 70` looked for a slider named "slider"; a widget named only by its kind (`the slider`, `the editor`, `the grid`) is now the one widget of that kind on the page (demoqa.com).
+
 - A control inside `<label for="radio2">` whose `for` names an id nothing has got no label at all (HTML rules), so `Check the Radio2 radio button` failed although the page shows "Radio2" next to it. Such a wrapping label now labels the control for `getByLabel`, the runner and the recorder (rahulshettyacademy.com).
 
 - A link or button with an icon-font glyph (Material Icons, Font Awesome) was not `the "Products" link`: its name started with an invisible Private Use Area character. Names and text now leave those glyphs out (automationexercise.com).

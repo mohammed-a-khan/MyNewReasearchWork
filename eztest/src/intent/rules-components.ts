@@ -71,6 +71,13 @@ const ROLE_OF: Partial<Record<ComponentWidget, string[]>> = {
   list: ['list', 'feed', 'listbox', 'region'],
 };
 
+/** Native elements of an unnamed widget ("the slider"), besides its ARIA role. */
+const UNNAMED_CSS: Partial<Record<ComponentWidget, string>> = {
+  slider: 'input[type=range]',
+  richtext: '[contenteditable="true"]',
+  grid: 'table',
+};
+
 const LABELLED = new Set<ComponentWidget>(['combobox', 'datepicker', 'richtext', 'slider', 'masked', 'dropzone']);
 
 /**
@@ -136,6 +143,12 @@ export function widgetTarget(description: string, kind: ComponentWidget): Target
   const pass = describeTarget(d);
   const looksSelector = pass.locators.length === 1 && ['css', 'xpath', 'testId'].includes(pass.locators[0].strategy) && !/\s/.test(d.replace(/^(css|xpath|testid)\s*=\s*/i, ''));
   if (looksSelector || /^(?:css|xpath|testid|test-id|data-testid|role|text)\s*=/i.test(d) || /\s(?:at|located\s+by)\s+(?:css|xpath|testid|role|text)\s*=/i.test(d)) return pass;
+  // "the slider", "the date picker": the only one of its kind on the page (strict: exactly one must match).
+  if (kind !== 'dialog' && kind !== 'toast' && new RegExp(String.raw`^(?:the\s+|a\s+|an\s+)?${NOUNS[kind]}$`, 'i').test(d)) {
+    const locators: LocatorCandidate[] = [{ strategy: 'role', value: (ROLE_OF[kind] ?? ['region'])[0] }];
+    if (UNNAMED_CSS[kind]) locators.push({ strategy: 'css', value: UNNAMED_CSS[kind]! });
+    return { description: d, locators };
+  }
   const names = widgetNames(d, kind);
   if (!names.length) throw new Error(`Name the ${kind} (e.g. "the Orders ${kind === 'grid' ? 'grid' : kind}") or give a selector`);
   return { description: d, locators: names.flatMap((n) => nameCandidates(n, kind)) };

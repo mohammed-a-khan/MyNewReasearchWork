@@ -248,6 +248,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       var wrap = brokenLabel(el);
       if (wrap) { var wt = norm(textOf(wrap, true)); if (wt) out.push(wt); }
+      if (!out.length) { var seen = visualLabel(el); if (seen) out.push(seen); }
       return out;
     };
     // A <label for="x"> around a control without that id: HTML gives it no label, the runner's getByLabel reads it.
@@ -260,6 +261,42 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       var f = l.getAttribute('for');
       if (!f || treeOf(el).getElementById(f)) return null;
       return l.querySelectorAll('input,select,textarea').length === 1 ? l : null;
+    };
+    // The words a person reads as a field's label when there is no <label> (the runner's getByLabel reads them too):
+    // the table cell before the field's cell ("First Name:"), or the text right before the field.
+    var LABELLABLE = { input: 1, select: 1, textarea: 1 };
+    var controlsText = function (el) {
+      var s = '';
+      for (var c = el.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) s += c.data;
+        else if (c.nodeType === 1 && !LABELLABLE[lower(c)] && lower(c) !== 'button' && lower(c) !== 'script' && lower(c) !== 'style') s += controlsText(c);
+      }
+      return s;
+    };
+    var visualLabel = function (el) {
+      var t = lower(el);
+      if (!LABELLABLE[t]) return '';
+      if (t === 'input' && /^(hidden|submit|button|reset|image)$/.test(inputType(el))) return '';
+      if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el.labels && el.labels.length)) return '';
+      var clean = function (s) { return norm(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, ''); };
+      var cell = el.parentElement && el.parentElement.closest ? el.parentElement.closest('td,th') : null;
+      if (cell && !clean(controlsText(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
+        for (var prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+          if (prev.querySelector('input,select,textarea')) return '';
+          var pt = clean(controlsText(prev));
+          if (pt) return pt.length <= 60 ? pt : '';
+        }
+        return '';
+      }
+      for (var n = el.previousSibling; n; n = n.previousSibling) {
+        if (n.nodeType === 1) {
+          if (LABELLABLE[lower(n)] || n.querySelector('input,select,textarea')) return '';
+          if (lower(n) === 'br') continue;
+        }
+        var nt = clean(n.nodeType === 3 ? n.data : n.nodeType === 1 ? controlsText(n) : '');
+        if (nt) return nt.length <= 60 ? nt : '';
+      }
+      return '';
     };
     var labelOf = function (el) { var l = labelsList(el); return l.length ? l[0] : ''; };
     var NAME_FROM_CONTENT = { button: 1, link: 1, tab: 1, menuitem: 1, menuitemcheckbox: 1, menuitemradio: 1, option: 1,

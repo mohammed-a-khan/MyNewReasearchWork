@@ -9,6 +9,7 @@ import { Step } from '../../src/core/index.js';
 import { evaluateConditionOnce, resolveTarget } from '../../src/runner/index.js';
 import { frameSelectorCandidates } from '../../src/runner/pages.js';
 import { Ledger } from '../../src/runner/ledger.js';
+import { describeElement } from '../../src/recorder/index.js';
 
 let browser: Browser;
 let page: Page;
@@ -73,6 +74,24 @@ describe('FINDING (rahulshettyacademy.com): "the Radio2 radio button" inside <la
     expect(await r.locator!.evaluate((e) => (e as HTMLInputElement).value)).toBe('2');
     expect((await resolveTarget(page, describeTarget('the Real checkbox'), {}, 500)).locator).toBeDefined();
     expect((await resolveTarget(page, describeTarget('the Wrapped checkbox'), {}, 500)).locator).toBeDefined();
+  });
+});
+
+describe('FINDING (parabank.parasoft.com): "the First Name field" in a form laid out as a table without <label>s', () => {
+  it('finds a field by the words before it, in the table cell before it or right before it, and the recorder writes them', async () => {
+    await page.setContent(`<!doctype html><form><table>
+      <tr><td><b>First Name:</b></td><td><input id="customer.firstName"></td><td></td></tr>
+      <tr><td>* Phone #:</td><td><input id="phone"></td></tr>
+      <tr><td>Notes</td><td><textarea id="notes"></textarea></td></tr>
+      </table><p>Amount: <input id="amount"> <input type="submit" value="Transfer"></p>
+      <p><label for="ok">Labelled</label><input id="ok"></p></form>`);
+    for (const [d, id] of [['the First Name field', 'customer.firstName'], ['the Phone # field', 'phone'], ['the Notes field', 'notes'], ['the Amount field', 'amount'], ['the Labelled field', 'ok']]) {
+      const r = await resolveTarget(page, describeTarget(d), {}, 500);
+      expect(r.locator, `${d}: ${r.notes.join('; ')}`).toBeDefined();
+      expect(await r.locator!.evaluate((e) => e.id)).toBe(id);
+    }
+    expect((await describeElement(page.locator('[id="customer.firstName"]'))).descriptions[0]).toBe('the First Name field');
+    expect((await describeElement(page.locator('#amount'))).descriptions[0]).toBe('the Amount field');
   });
 });
 

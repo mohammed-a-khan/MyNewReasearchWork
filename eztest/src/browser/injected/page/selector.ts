@@ -192,7 +192,55 @@ export function labelTexts(el: Element): string[] {
   if (labels) for (const l of Array.from(labels)) out.push(rawText(l));
   const wrap = brokenWrappingLabel(el);
   if (wrap) out.push(rawText(wrap));
+  if (!out.length) {
+    const seen = visualLabel(el);
+    if (seen) out.push(seen);
+  }
   return out;
+}
+
+const VISUAL_LABEL_TAGS = new Set(['input', 'select', 'textarea']);
+const NO_LABEL_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image']);
+
+/** Text of an element without the form controls in it. */
+function textWithoutControls(el: Element): string {
+  let s = '';
+  for (let c = el.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 3) s += (c as Text).data;
+    else if (isElement(c) && !VISUAL_LABEL_TAGS.has(lowerTag(c)) && !['button', 'script', 'style'].includes(lowerTag(c))) s += textWithoutControls(c);
+  }
+  return s;
+}
+
+/**
+ * The words a person reads as a field's label when the page has no <label>: the cell before it in a form laid
+ * out as a table ("First Name:" | [field]), or the text right before it. Only for fields with no label of their
+ * own; a trailing ":" or "*" is left out.
+ */
+export function visualLabel(el: Element): string {
+  const tag = lowerTag(el);
+  if (!VISUAL_LABEL_TAGS.has(tag)) return '';
+  if (tag === 'input' && NO_LABEL_TYPES.has(((el as HTMLInputElement).type || 'text').toLowerCase())) return '';
+  if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || (el as HTMLInputElement).labels?.length) return '';
+  const clean = (s: string) => normalizeWhitespace(s).replace(/^[*\s]+/, '').replace(/[\s:*]+$/, '');
+  const cell = el.parentElement?.closest('td,th');
+  if (cell && !clean(textWithoutControls(cell)) && cell.querySelectorAll('input,select,textarea').length === 1) {
+    for (let prev = cell.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      if (prev.querySelector('input,select,textarea')) return '';
+      const t = clean(textWithoutControls(prev));
+      if (t) return t.length <= 60 ? t : '';
+    }
+    return '';
+  }
+  for (let n: Node | null = el.previousSibling; n; n = n.previousSibling) {
+    if (isElement(n)) {
+      if (VISUAL_LABEL_TAGS.has(lowerTag(n)) || n.querySelector('input,select,textarea')) return '';
+      if (lowerTag(n) === 'br') continue;
+    }
+    const t = clean(n.nodeType === 3 ? (n as Text).data : isElement(n) ? textWithoutControls(n) : '');
+    if (t) return t.length <= 60 ? t : '';
+  }
+  return '';
 }
 
 /**
@@ -217,7 +265,7 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
   for (const el of deepElements(root)) {
     const tag = lowerTag(el);
     if (tag === 'label') continue;
-    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length && !brokenWrappingLabel(el)) continue;
+    if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length && !brokenWrappingLabel(el) && !visualLabel(el)) continue;
     if (labelTexts(el).some(match)) out.push(el);
   }
   return out;
