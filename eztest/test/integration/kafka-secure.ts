@@ -83,12 +83,21 @@ async function makeMaterial(dir: string): Promise<void> {
     'sasl.oauthbearer.expected.audience=eztest-kafka',
     '',
   ].join('\n'));
-  // The container user (appuser) must read everything.
-  for (const f of ['ca.pem', 'broker-keystore.pem', 'jwks.json', 'server.properties']) await chmod(join(dir, f), 0o644);
+  // The container users (Kafka's appuser, mosquitto, rabbitmq) must read the broker material (test-only keys).
+  for (const f of ['ca.pem', 'broker-keystore.pem', 'broker.pem', 'broker-key.pem', 'jwks.json', 'server.properties']) await chmod(join(dir, f), 0o644);
+  await writeFile(join(dir, 'mosquitto.conf'), [
+    'listener 8883', 'cafile /tls/ca.pem', 'certfile /tls/broker.pem', 'keyfile /tls/broker-key.pem',
+    'require_certificate true', 'use_identity_as_username true', 'allow_anonymous false', '',
+  ].join('\n'), { mode: 0o644 });
+  await writeFile(join(dir, 'rabbitmq.conf'), [
+    'listeners.tcp = none', 'listeners.ssl.default = 5671', 'loopback_users = none',
+    'ssl_options.cacertfile = /tls/ca.pem', 'ssl_options.certfile = /tls/broker.pem', 'ssl_options.keyfile = /tls/broker-key.pem',
+    'ssl_options.verify = verify_peer', 'ssl_options.fail_if_no_peer_cert = true', '',
+  ].join('\n'), { mode: 0o644 });
   await chmod(dir, 0o755);
 }
 
-async function docker(args: string[]): Promise<{ ok: boolean; out: string }> {
+export async function docker(args: string[]): Promise<{ ok: boolean; out: string }> {
   try {
     return { ok: true, out: (await sh('docker', args)).trim() };
   } catch (e) {
@@ -96,14 +105,20 @@ async function docker(args: string[]): Promise<{ ok: boolean; out: string }> {
   }
 }
 
-export async function secureKafkaBroker(probe: (k: SecureKafka) => Promise<boolean>): Promise<SecureKafka | undefined> {
-  if (!(await dockerAvailable())) return undefined;
+/** The test PKI directory (CA, a broker certificate for localhost / 127.0.0.1, a client certificate), made once. */
+export async function ensureTestPki(): Promise<string> {
   const dir = join(tmpdir(), 'eztest-it-kafka-sec');
-  const state = await docker(['inspect', '-f', '{{.State.Running}}', NAME]);
-  if (!existsSync(join(dir, 'server.properties'))) {
-    if (state.ok) await docker(['rm', '-f', NAME]);
+  if (!existsSync(join(dir, 'rabbitmq.conf'))) {
+    // Containers built on older material would not trust the new certificates.
+    for (const n of [NAME, 'eztest-it-mqtt-tls', 'eztest-it-rabbit-tls']) await docker(['rm', '-f', n]);
     await makeMaterial(dir);
   }
+  return dir;
+}
+
+export async function secureKafkaBroker(probe: (k: SecureKafka) => Promise<boolean>): Promise<SecureKafka | undefined> {
+  if (!(await dockerAvailable())) return undefined;
+  const dir = await ensureTestPki();
   const k: SecureKafka = {
     ssl: '127.0.0.1:19093', saslSsl: '127.0.0.1:19094', dir,
     ca: await readFile(join(dir, 'ca.pem'), 'utf8'), clientCert: await readFile(join(dir, 'client.pem'), 'utf8'), clientKey: await readFile(join(dir, 'client-key.pem'), 'utf8'),
