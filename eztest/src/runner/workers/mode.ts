@@ -18,7 +18,8 @@ export function requestedWorkerMode(options: Pick<RunOptions, 'workers'>, env: R
 export function workerMode(options: RunOptions, _concurrency: number, logger: Logger): WorkerModeChoice {
   if (requestedWorkerMode(options) !== 'process') return { kind: 'inline' };
   const inline = (reason: string): WorkerModeChoice => {
-    logger.warn(`process workers not used, journeys run inline: ${reason}`);
+    // A warning when this run asked for them; a note when only EZTEST_WORKERS did (it applies to every run of the process).
+    logger[options.workers === 'process' ? 'warn' : 'info'](`process workers not used, journeys run inline: ${reason}`);
     return { kind: 'inline', reason };
   };
   if (options.debug) return inline('the debugger drives the journeys in this process');
