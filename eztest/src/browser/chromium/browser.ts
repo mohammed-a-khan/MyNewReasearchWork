@@ -10,6 +10,7 @@ import { debugLog } from '../debug.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError, isClosedError } from '../errors.js';
 import { checkLaunchOptions, signalHandlingOf } from '../launch-options.js';
+import { HarRecorder, checkRecordHar } from '../har-record.js';
 import { makeTempDir, untrackTempDir } from '../launcher/temp-dirs.js';
 import { DOWNLOADS_OFF_TEXT, bindingTakenMessage, closedMessage } from '../messages.js';
 import { routeFromHAR, type RouteFromHAROptions } from '../har.js';
@@ -164,6 +165,19 @@ export class ChromiumContext extends TypedEmitter<ContextEvents> {
     this.tracing = new Tracing(this);
     this.request = new APIRequestContext(this);
     if (options.clientCertificates?.length) this.certFetcher = clientCertificateFetcher(options.clientCertificates, this);
+    if (options.recordHar) checkRecordHar(options.recordHar);
+  }
+
+  /** recordHar: records the requests of every page of this context; the HAR is written on close(). */
+  protected har?: HarRecorder;
+
+  /** Internal: start the recordHar recorder (once; existing pages included). */
+  protected startHarRecording(): void {
+    if (this.har || !this.options.recordHar) return;
+    const har = new HarRecorder(this.options.recordHar);
+    this.har = har;
+    for (const p of this.pages_) har.attach(p);
+    this.on('page', (p) => har.attach(p));
   }
 
   protected override eventTimeout(): number {
@@ -172,6 +186,7 @@ export class ChromiumContext extends TypedEmitter<ContextEvents> {
 
   /** Internal: apply options that live in the browser (downloads, permissions, storage state). */
   async initialize(): Promise<void> {
+    this.startHarRecording();
     await this.applyDownloadBehavior();
     if (this.options.permissions?.length) await this.grantPermissions(this.options.permissions);
     if (this.options.storageState) await this.loadStorageState(this.options.storageState);
@@ -549,6 +564,8 @@ export class ChromiumContext extends TypedEmitter<ContextEvents> {
   // ------------------------------------------------------------------ close
   async close(_options: { reason?: string } = {}): Promise<void> {
     if (this.closed) return;
+    // The HAR first, while the pages can still give their response bodies.
+    const harError = await this.har?.save().then(() => undefined, (e: unknown) => e);
     this.closed = true;
     const pages = [...this.pages_];
     const videos = pages.map((p) => p.video()).filter((v): v is NonNullable<typeof v> => !!v);
@@ -563,6 +580,7 @@ export class ChromiumContext extends TypedEmitter<ContextEvents> {
     await Promise.all(videos.map((v) => v.finished().catch(() => undefined)));
     this.browser_.contextClosed(this);
     this.emitEvent('close', this);
+    if (harError) throw harError;
   }
 
   isClosed(): boolean {

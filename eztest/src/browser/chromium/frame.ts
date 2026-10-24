@@ -5,7 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { ENGINE_WORLD_NAME } from '../injected/contract.js';
 import { TimeoutError, TargetClosedError, isContextGoneError, rewriteError } from '../errors.js';
-import { FRAME_GONE_TEXT, timeoutMessage } from '../messages.js';
+import { FRAME_GONE_TEXT, timeoutMessage, tooManyMatchesMessage } from '../messages.js';
 import { FrameLocator, Locator, frameScope, type GetByRoleOptions, type LocatorOptions, type TextOptions } from '../locator.js';
 import type { LifecycleEvent, URLMatch } from '../types.js';
 import { Deadline, deferred, sleep, urlMatches, type Deferred } from '../util.js';
@@ -268,6 +268,10 @@ export class ChromiumFrame {
 
   async $(selector: string): Promise<ElementHandle | null> {
     const all = await this.$$(selector);
+    if (all.length > 1 && this._page.context().options.strictSelectors) {
+      for (const h of all) await h.dispose();
+      throw new Error(`$: ${tooManyMatchesMessage(`"${selector}"`, all.length)} (strictSelectors is on for this context)`);
+    }
     for (const h of all.slice(1)) await h.dispose();
     return all[0] ?? null;
   }
@@ -293,7 +297,8 @@ export class ChromiumFrame {
   async waitForSelector(selector: string, options: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number; strict?: boolean } = {}): Promise<ElementHandle | null> {
     const loc = this.locator(selector);
     const state = options.state ?? 'visible';
-    await (options.strict ? loc : loc.first()).waitFor({ state, timeout: options.timeout });
+    const strict = options.strict ?? !!this._page.context().options.strictSelectors;
+    await (strict ? loc : loc.first()).waitFor({ state, timeout: options.timeout });
     if (state === 'detached' || state === 'hidden') return null;
     return loc.first().elementHandle({ timeout: options.timeout });
   }

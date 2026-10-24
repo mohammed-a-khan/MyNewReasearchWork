@@ -107,6 +107,11 @@ export interface BrowserContextOptions {
   serviceWorkers?: 'allow' | 'block';
   /** A StorageState object or the path of a JSON file holding one. */
   storageState?: string | StorageState;
+  /**
+   * Locator actions always need exactly one match. With strictSelectors, the handle queries
+   * (page.$, frame.$, elementHandle.$, $eval and waitForSelector) need one too, instead of
+   * taking the first of several.
+   */
   strictSelectors?: boolean;
   timezoneId?: string;
   userAgent?: string;

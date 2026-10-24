@@ -171,6 +171,7 @@ export class FirefoxContext extends ChromiumContext {
 
   /** Apply what lives in the browser: data collector, downloads, emulation, headers, permissions, storage state. */
   override async initialize(): Promise<void> {
+    this.startHarRecording();
     const o = this.options;
     const optional = (p: Promise<unknown>, what: string) => p.catch((e) => debugLog('browser', `${what}: ${(e as Error).message}`));
     const steps: Array<Promise<unknown>> = [
@@ -548,6 +549,8 @@ export class FirefoxContext extends ChromiumContext {
   // ------------------------------------------------------------------ close
   override async close(_options: { reason?: string } = {}): Promise<void> {
     if (this.closed) return;
+    // The HAR first, while the data collector still holds the response bodies.
+    const harError = await this.har?.save().then(() => undefined, (e: unknown) => e);
     this.closed = true;
     const pages = [...this.pages_] as FirefoxPage[];
     const videos = pages.map((p) => p.video()).filter((v): v is NonNullable<typeof v> => !!v);
@@ -571,6 +574,7 @@ export class FirefoxContext extends ChromiumContext {
     await Promise.all(videos.map((v) => v.finished().catch(() => undefined)));
     this.ffBrowser_.contextClosed(this);
     this.emitEvent('close', this);
+    if (harError) throw harError;
   }
 }
 

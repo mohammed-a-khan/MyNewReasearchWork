@@ -7,6 +7,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { ENGINE_WORLD_NAME } from '../injected/contract.js';
 import { TypedEmitter } from '../events.js';
 import { TargetClosedError, TimeoutError, isClosedError } from '../errors.js';
+import { NO_DEBUGGER_TEXT, pauseHandlerFor } from '../pause.js';
 import { FRAME_GONE_TEXT, bindingTakenMessage, dialogHandledMessage, timeoutMessage } from '../messages.js';
 import { FrameLocator, Locator, type GetByRoleOptions, type LocatorOptions, type TextOptions } from '../locator.js';
 import { KEEP_NAMES_SHIM, functionSource, pageCodec, serializeArgument } from '../serializer.js';
@@ -1382,8 +1383,11 @@ export class ChromiumPage extends TypedEmitter<PageEvents> {
     await Promise.race([closed, sleep(5000)]);
   }
 
+  /** Hand control to the live debugger (eztest debug, Studio); throws when no debugger is attached. */
   async pause(): Promise<void> {
-    /* No inspector: a no-op kept for API compatibility. */
+    const handler = pauseHandlerFor(this.context_);
+    if (!handler) throw new Error(NO_DEBUGGER_TEXT);
+    await handler(this);
   }
 
   async pdf(options: { path?: string; scale?: number; displayHeaderFooter?: boolean; headerTemplate?: string; footerTemplate?: string; printBackground?: boolean; landscape?: boolean; pageRanges?: string; format?: string; width?: string | number; height?: string | number; margin?: { top?: string | number; right?: string | number; bottom?: string | number; left?: string | number }; preferCSSPageSize?: boolean } = {}): Promise<Buffer> {

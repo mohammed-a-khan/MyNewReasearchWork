@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Route } from '../browser/index.js';
+import { buildHarLog } from '../browser/har-record.js';
 import { EzTestError, NotSupportedError, sleep, type Step } from '../core/index.js';
 import type { ActionOutcome } from './actions.js';
 import { safeName } from './evidence.js';
@@ -157,32 +158,5 @@ export async function networkAction(step: Step, ctx: StepContext, opts: RunOptio
 
 /** HAR 1.2 from the session's recorded traffic (headers and bodies masked; text bodies up to 64 KiB). */
 export async function buildHar(session: BrowserSession, urlPattern?: string) {
-  const entries = [];
-  for (const r of session.requests) {
-    if (urlPattern && !urlMatches(r.url, urlPattern)) continue;
-    let content: { size: number; mimeType: string; text?: string } = { size: -1, mimeType: r.responseHeaders?.['content-type'] ?? '' };
-    if (r.response && /json|text|xml|javascript|html/.test(content.mimeType)) {
-      const text = await r.response.text().catch(() => undefined);
-      if (text !== undefined) content = { size: text.length, mimeType: content.mimeType, text: session.mask(text.slice(0, 64 * 1024)) };
-    }
-    const u = new URL(r.url);
-    entries.push({
-      startedDateTime: new Date(r.startedAt).toISOString(),
-      time: r.durationMs ?? 0,
-      request: {
-        method: r.method, url: r.url, httpVersion: 'HTTP/1.1', cookies: [], headersSize: -1, bodySize: r.postData?.length ?? 0,
-        headers: Object.entries(r.headers).map(([name, value]) => ({ name, value })),
-        queryString: [...u.searchParams].map(([name, value]) => ({ name, value: session.mask(value) })),
-        ...(r.postData ? { postData: { mimeType: r.headers['content-type'] ?? '', text: r.postData } } : {}),
-      },
-      response: {
-        status: r.status ?? 0, statusText: r.failure ?? '', httpVersion: 'HTTP/1.1', cookies: [], headersSize: -1, bodySize: content.size, redirectURL: '',
-        headers: Object.entries(r.responseHeaders ?? {}).map(([name, value]) => ({ name, value })), content,
-      },
-      cache: {},
-      timings: { send: 0, wait: r.durationMs ?? 0, receive: 0 },
-      _resourceType: r.resourceType,
-    });
-  }
-  return { log: { version: '1.2', creator: { name: 'EZTest', version: '0.1.0' }, entries } };
+  return buildHarLog(session.requests, { mask: session.mask, maxBodyChars: 64 * 1024, ...(urlPattern ? { urlFilter: (u: string) => urlMatches(u, urlPattern) } : {}) });
 }

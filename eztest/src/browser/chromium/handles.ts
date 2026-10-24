@@ -7,6 +7,7 @@ import type { FilePayload, Rect } from '../types.js';
 import type { ExecutionContext, RemoteObject } from './exec-context.js';
 import type { ChromiumFrame } from './frame.js';
 import { parseSelector } from '../selector-parser.js';
+import { tooManyMatchesMessage } from '../messages.js';
 import type { PageFunctionOn } from '../eval-types.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -256,6 +257,10 @@ export class ElementHandle<T extends Node = Element> extends JSHandle<T> {
   /** First element matching `selector` under this element, or null. */
   async $(selector: string): Promise<ElementHandle | null> {
     const all = await this.$$(selector);
+    if (all.length > 1 && this.frame.page().context().options.strictSelectors) {
+      for (const h of all) await h.dispose();
+      throw new Error(`elementHandle.$: ${tooManyMatchesMessage(`"${selector}"`, all.length)} (strictSelectors is on for this context)`);
+    }
     for (const h of all.slice(1)) await h.dispose();
     return all[0] ?? null;
   }
