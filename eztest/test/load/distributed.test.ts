@@ -92,6 +92,36 @@ describe('controller + 2 agents in process', () => {
     expect(r.sla.status).toBe('pass');
   }, 60_000);
 
+  it('agents with 2 generator threads each: the same split, exact merge and live control', async () => {
+    hits.length = 0;
+    const c = new LoadController(shopScenario({ vus: 10 }), { agents: 2, listen: '127.0.0.1:0', token: TOKEN, startDelayMs: 1500 });
+    await c.listen();
+    const a1 = startAgent({ controller: `127.0.0.1:${c.port}`, token: TOKEN, id: 'a1', zone: 'eu', once: true, generators: 2 });
+    const a2 = startAgent({ controller: `127.0.0.1:${c.port}`, token: TOKEN, id: 'a2', zone: 'us', once: true, generators: 2 });
+    let added = false;
+    c.on('point', (p) => {
+      if (!added && p.t >= 1) {
+        added = true;
+        c.addVus(2, 'shoppers');
+      }
+    });
+    const r = await c.run();
+    await Promise.all([a1.done, a2.done]);
+    await c.close();
+    expect(r.totals.errors).toBe(0);
+    // shoppers 6 VUs over 4 generator threads (1 + 1 + 2 + 2), eu-api 4 on the eu agent's two threads; +2 shoppers live
+    expect(r.totals.maxVus).toBe(12);
+    const a1s = r.agents.find((a) => a.id === 'a1')!;
+    const a2s = r.agents.find((a) => a.id === 'a2')!;
+    expect(a1s.requests + a2s.requests).toBe(r.totals.requests);
+    expect(r.timeline.reduce((a, p) => a + p.requests, 0)).toBe(r.totals.requests);
+    expect(hits.length).toBe(r.totals.requests);
+    const rowsUsed = new Set(hits.filter((h) => h.user).map((h) => h.user));
+    expect(rowsUsed.size).toBeLessThanOrEqual(8);
+    expect(rowsUsed.size).toBeGreaterThanOrEqual(6);
+    expect(r.sla.status).toBe('pass');
+  }, 60_000);
+
   it('rejects an agent with a wrong token', async () => {
     const c = new LoadController(shopScenario({ duration: '1s' }), { agents: 1, listen: '127.0.0.1:0', token: TOKEN, waitMs: 1500 });
     await c.listen();

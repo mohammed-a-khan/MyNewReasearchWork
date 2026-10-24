@@ -4,11 +4,12 @@
  * Configuration by flags or environment:
  *
  *   EZTEST_LOAD_CONTROLLER=host:7400  EZTEST_LOAD_TOKEN=...  EZTEST_LOAD_ZONE=eu-west
- *   EZTEST_LOAD_AGENT_ID=...  EZTEST_LOAD_CAPACITY=1  EZTEST_LOAD_ONCE=1
+ *   EZTEST_LOAD_AGENT_ID=...  EZTEST_LOAD_CAPACITY=1  EZTEST_LOAD_ONCE=1  EZTEST_LOAD_GENERATORS=4 (default: one per CPU)
  *   EZTEST_LOAD_TLS_CA / _CERT / _KEY (mutual TLS)
  */
 import { hostname } from 'node:os';
 import { startAgent } from './distributed/agent.js';
+import { defaultGenerators } from './engine/generators.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -36,6 +37,7 @@ const agent = startAgent({
   once,
   tls: ca || cert ? { ca, cert, key } : undefined,
   connectTimeoutMs: once ? 120_000 : 24 * 3_600_000,
+  generators: Number(arg('generators') ?? env.EZTEST_LOAD_GENERATORS ?? 0) || defaultGenerators(),
   log: (l) => process.stderr.write(`${new Date().toISOString()} ${l}\n`),
 });
 for (const sig of ['SIGTERM', 'SIGINT'] as const) process.once(sig, () => agent.stop());

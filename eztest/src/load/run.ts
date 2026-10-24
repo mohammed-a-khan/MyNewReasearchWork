@@ -10,9 +10,10 @@ import { randomBytes } from 'node:crypto';
 import { EzTestError } from '../core/index.js';
 import type { Scenario } from './model.js';
 import { loadAllData, type Row } from './data.js';
-import { MetricsCollector, type NameStats, type TimelinePoint, type ErrorSample } from './metrics.js';
+import { MetricsCollector, type EncodedInterval, type NameStats, type TimelinePoint, type ErrorSample } from './metrics.js';
 import { profileCurve, apportion } from './profiles.js';
 import { Executor } from './engine/executor.js';
+import { GeneratorPool } from './engine/generators.js';
 import { LoadRuntime, type PopulationRuntime } from './engine/vu.js';
 import { MonitorRunner, type MonitorSeries } from './monitors/index.js';
 import { evaluateSla, LiveSla, worst, type LiveSlaEvent, type SlaItem, type SlaResult } from './sla.js';
@@ -62,6 +63,8 @@ export interface LoadResults {
   comparison?: ComparisonResult;
   verdict: 'pass' | 'warn' | 'fail';
   stopReason?: string;
+  /** Generator processes per load generator process (when more than one). */
+  generators?: number;
 }
 
 export interface LiveSnapshot {
@@ -88,6 +91,19 @@ export interface LoadTestOptions {
   baseline?: Pick<LoadResults, 'runId' | 'names'>;
   regressionRules?: Partial<RegressionRules>;
   seed?: number;
+  /**
+   * Load generator processes on this machine (docs/load.md, "Generators"): each runs 1/N of every
+   * population on its own event loop; their metrics merge exactly. Default 1 (`eztest load run`:
+   * one per CPU). Scenarios with browser-level users use one generator.
+   */
+  generators?: number;
+}
+
+/** How many generator processes a scenario runs on: browser-level users stay on one (they are separate browser processes anyway). */
+export function generatorsFor(s: Scenario, wanted: number | undefined): { count: number; note?: string } {
+  const n = Math.max(1, Math.floor(wanted ?? 1));
+  if (n > 1 && s.populations.some((p) => p.browser ?? s.userPaths[p.userPath]?.browser)) return { count: 1, note: 'browser-level users run on one generator process' };
+  return { count: n };
 }
 
 export function newRunId(): string {
@@ -101,12 +117,12 @@ export function newRunId(): string {
  * generator's share of the load: one fraction for all populations, or one
  * per population (distributed runs; 0 = not on this generator).
  */
-export function buildPopulations(s: Scenario, rt: LoadRuntime, slice: number | Record<string, number> = 1): PopulationRuntime[] {
+export function buildPopulations(s: Scenario, rt: LoadRuntime, slice: number | Record<string, number> = 1, o: { generators?: number } = {}): PopulationRuntime[] {
   const total = s.populations.reduce((a, p) => a + p.share, 0);
   const frac = (name: string) => (typeof slice === 'number' ? slice : (slice[name] ?? 0));
   const pops = s.populations.filter((p) => frac(p.name) > 0 && p.share > 0);
-  // maxVus is per load generator (open model), split over its populations by share.
-  const maxVus = apportion(Math.max(pops.length, s.options.maxVus), pops.map((p) => p.share));
+  // maxVus is per load generator (open model; a machine with several generator processes shares it), split over its populations by share.
+  const maxVus = apportion(Math.max(pops.length, Math.ceil(s.options.maxVus / Math.max(1, o.generators ?? 1))), pops.map((p) => p.share));
   return pops.map((p, i) => {
     const prof = p.profile ?? s.profile;
     if (!prof) throw new EzTestError(`population ${p.name}: no profile`, 'LOAD_SCENARIO');
@@ -178,6 +194,7 @@ export class LoadTest extends EventEmitter {
   readonly runId: string;
   readonly metrics: MetricsCollector;
   private executor?: Executor;
+  private pool?: GeneratorPool;
   private runtime?: LoadRuntime;
   private monitors?: MonitorRunner;
   private readonly live: LiveSla;
@@ -206,6 +223,9 @@ export class LoadTest extends EventEmitter {
   private async execute(): Promise<LoadResults> {
     const s = this.scenario;
     const data = this.o.data ?? (await loadAllData(s));
+    const gens = generatorsFor(s, this.o.generators);
+    if (gens.note) this.emit('note', gens.note);
+    if (gens.count > 1) return this.executeOnGenerators(gens.count, data);
     this.runtime = new LoadRuntime(s, data, this.metrics, { seed: this.o.seed });
     const pops = buildPopulations(s, this.runtime);
     this.executor = new Executor({ runtime: this.runtime, populations: pops, model: s.model, mode: 'local', durationMs: this.o.durationMs });
@@ -228,6 +248,40 @@ export class LoadTest extends EventEmitter {
     return results;
   }
 
+  /** The scenario on several generator processes; their seconds are merged into this test's metrics. */
+  private async executeOnGenerators(threads: number, data: Record<string, Row[]>): Promise<LoadResults> {
+    const s = this.scenario;
+    const durationMs = this.o.durationMs ?? Math.max(...s.populations.map((p) => profileCurve((p.profile ?? s.profile)!, s.model).durationMs));
+    const seed = this.o.seed ?? s.options.seed;
+    const pool = new GeneratorPool({ scenario: s, data, slices: 1, processes: threads, ...(this.o.durationMs !== undefined ? { durationMs: this.o.durationMs } : {}), ...(seed !== undefined ? { seed } : {}) }, durationMs);
+    this.pool = pool;
+    this.monitors = new MonitorRunner(this.o.monitors === false ? [] : s.monitors, s);
+    let monitorsStarted: Promise<void> = Promise.resolve();
+    pool.on('started', (at: number) => {
+      this.metrics.startedAt = at;
+      this.state = 'running';
+      monitorsStarted = this.monitors!.start(at);
+      this.emit('started', { runId: this.runId });
+    });
+    pool.on('interval', (e: EncodedInterval) => this.onPoint(this.metrics.ingest([e])));
+    pool.on('vu-error', (e: Error) => this.emit('vu-error', e));
+    let out;
+    try {
+      out = await pool.run();
+    } finally {
+      await monitorsStarted.catch(() => undefined);
+      await this.monitors.stop();
+    }
+    this.metrics.ingestFinal(out.details);
+    for (const e of out.errors) this.metrics.noteError(e);
+    this.metrics.maxVus = Math.max(this.metrics.maxVus, out.maxVus);
+    this.state = 'done';
+    const results = summarizeResults({ runId: this.runId, scenario: s, metrics: this.metrics, startedAt: this.metrics.startedAt, finishedAt: Date.now(), monitors: this.monitors.series, live: this.live, baseline: this.o.baseline, rules: this.o.regressionRules, stopReason: this.stopReason });
+    results.generators = threads;
+    this.emit('done', results);
+    return results;
+  }
+
   private onPoint(p: TimelinePoint): void {
     this.liveItems = this.live.update(this.metrics.timeline);
     const stopOn = this.scenario.stopOnSlaFail;
@@ -242,7 +296,7 @@ export class LoadTest extends EventEmitter {
   }
 
   snapshot(): LiveSnapshot {
-    const st = this.executor?.status();
+    const st = this.executor?.status() ?? this.pool?.status();
     const tl = this.metrics.timeline;
     const reqs = tl.reduce((a, p) => a + p.requests, 0);
     return {
@@ -268,23 +322,27 @@ export class LoadTest extends EventEmitter {
     this.stopReason ??= reason;
     this.state = 'stopping';
     this.executor?.stop();
+    this.pool?.stop();
   }
 
   abort(): void {
     this.stopReason ??= 'aborted';
     this.state = 'stopping';
     this.executor?.abort();
+    this.pool?.abort();
   }
 
   addVus(n: number, population?: string): void {
-    if (!this.executor) throw new EzTestError('the test is not running', 'LOAD_CONTROL');
+    const g = this.executor ?? this.pool;
+    if (!g) throw new EzTestError('the test is not running', 'LOAD_CONTROL');
     if (this.scenario.model !== 'closed') throw new EzTestError('adding VUs applies to the closed model; use setFactor for arrival rates', 'LOAD_CONTROL');
-    this.executor.addVus(n, population);
+    g.addVus(n, population);
   }
 
   setFactor(f: number): void {
-    if (!this.executor) throw new EzTestError('the test is not running', 'LOAD_CONTROL');
-    this.executor.setFactor(f);
+    const g = this.executor ?? this.pool;
+    if (!g) throw new EzTestError('the test is not running', 'LOAD_CONTROL');
+    g.setFactor(f);
   }
 }
 

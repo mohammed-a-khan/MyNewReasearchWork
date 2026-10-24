@@ -45,6 +45,19 @@ export function clearBddAllState(runDir: string): void {
   states.delete(runDir);
 }
 
+/** What the BeforeAll hooks of a run shared and which failed (handed between process workers). */
+export function exportBddAllState(runDir: string): { shared: Array<[string, Record<string, unknown>]>; failed: Array<[string, string]> } {
+  const s = states.get(runDir);
+  return { shared: s ? [...s.shared] : [], failed: s ? [...s.failed] : [] };
+}
+
+/** Take over BeforeAll results another process of the run recorded (hooks that ran here are kept). */
+export function importBddAllState(runDir: string, snap: { shared: Array<[string, Record<string, unknown>]>; failed: Array<[string, string]> }): void {
+  const s = bddAllState(runDir);
+  for (const [id, v] of snap.shared) if (!s.shared.has(id) && !s.failed.has(id)) s.shared.set(id, v);
+  for (const [id, why] of snap.failed) if (!s.shared.has(id) && !s.failed.has(id)) s.failed.set(id, why);
+}
+
 const rel = (file: string, base: string) => {
   const r = relative(base, file);
   return (r && !r.startsWith('..') ? r : file).split(sep).join('/');

@@ -62,6 +62,8 @@ export interface EngineOptions {
   pipelineOut?: (line: string) => void;
   /** Name of the `pipelines:` entry being run (recorded in the store export). */
   pipeline?: string;
+  /** What process workers need beyond the configuration (eztest run flags), see src/engine/worker-setup.ts. */
+  worker?: { updateBaselines?: boolean; timeTravel?: boolean };
 }
 
 export interface Engine {
@@ -78,6 +80,12 @@ export interface Engine {
   close(): Promise<void>;
   /** The shared store and data pools (docs/shared-data.md). */
   store: SharedStore;
+}
+
+/** URL of a module next to this one: the .js build when it exists, else the TypeScript source (development). */
+function siblingModule(from: string, name: string): string {
+  const js = new URL(`./${name}.js`, from);
+  return existsSync(js) ? js.href : new URL(`./${name}.ts`, from).href;
 }
 
 function resolvePath(cwd: string, p: string): string {
@@ -602,6 +610,17 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     ...(integration.apiHook ? { apiHook: integration.apiHook } : {}),
     ...(integration.specs[0] ? { apiSpec: integration.specs[0] } : {}),
     ...(registries.steps.names().length ? { customSteps: pluginSteps() } : {}),
+    // Process workers (docs/scale.md): each worker builds these handlers from the same resolved configuration.
+    // The email sink is one SMTP listener whose mailbox the steps read: runs with it stay in one process.
+    ...(config.workers ? { workers: config.workers } : {}),
+    ...(config.email?.provider === 'sink' ? {} : {
+      workerSetup: {
+        module: siblingModule(import.meta.url, 'worker-setup'), export: 'setupEngineWorker',
+        args: { cwd, config, variables: loaded.variables, ...(loaded.env ? { env: loaded.env } : {}), ...(loaded.project ? { project: loaded.project } : {}), ...(opts.pipeline ? { pipeline: opts.pipeline } : {}), ...(opts.worker ?? {}) },
+      },
+    }),
+    addSecret: (v: string) => void loaded.masker.add(v),
+    knownSecrets: () => loaded.masker.secrets(),
     ...opts.runOptions,
   };
   // "Expect <element|the page> to look like the baseline": visual assertions with modes, keyed and branched baselines.

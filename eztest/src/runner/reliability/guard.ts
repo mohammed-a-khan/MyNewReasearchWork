@@ -54,11 +54,17 @@ export function noteRecovered(ctx: StepContext, cause: FlakeCause, detail: strin
   log(ctx).recovered.push({ cause, detail });
 }
 
+/** Record that a deadline was extended under load (logged too: a slow run on a busy machine says why). */
+export function noteExtended(ctx: StepContext, e: { what: string; baseMs: number; ms: number; reason: string }): void {
+  (log(ctx).extended ??= []).push(e);
+  ctx.logger.warn('deadline extended under load', { journeyId: ctx.journey.id, stepId: ctx.step.id, what: e.what, baseMs: e.baseMs, ms: e.ms, reason: e.reason });
+}
+
 /** Take (and clear) the reliability record of a step context. */
 export function takeReliability(ctx: StepContext): StepReliability | undefined {
   const l = LOGS.get(ctx);
   LOGS.delete(ctx);
-  return l && (l.waits.length || l.recovered.length) ? l : undefined;
+  return l && (l.waits.length || l.recovered.length || l.extended?.length) ? l : undefined;
 }
 
 export function causeOfBlock(b: BlockCause): FlakeCause {

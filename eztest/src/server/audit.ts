@@ -20,7 +20,7 @@
  * audit key rotations.
  */
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { num, optStr, type Store } from './store.js';
 
@@ -68,9 +68,38 @@ interface KeyFile {
  */
 export class AuditKeyring {
   private data: KeyFile;
+  private mtime = 0;
 
   private constructor(readonly file: string, data: KeyFile) {
     this.data = data;
+    this.mtime = this.fileTime();
+  }
+
+  private fileTime(): number {
+    try {
+      return statSync(this.file).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Take over a rotation made by another process (`eztest server audit rotate-key` on the server
+   * machine while the server runs): the file changed, so its keys and current key are read again.
+   * Keys are only ever added, so nothing this process signed with is lost.
+   */
+  private refresh(): void {
+    const t = this.fileTime();
+    if (!t || t === this.mtime) return;
+    try {
+      const disk = JSON.parse(readFileSync(this.file, 'utf8')) as KeyFile;
+      if (disk?.keys?.[disk.current]) {
+        this.data = { ...disk, keys: { ...this.data.keys, ...disk.keys } };
+        this.mtime = t;
+      }
+    } catch {
+      // being replaced right now: keep what we have, read it next time
+    }
   }
 
   /** Open the key file, creating it (with a new key) when it does not exist. */
@@ -91,6 +120,7 @@ export class AuditKeyring {
   }
 
   private addKey(): string {
+    this.refresh();
     const id = `k${Date.now().toString(36)}${randomUUID().slice(0, 4)}`;
     const now = new Date().toISOString();
     const prev = this.data.keys[this.data.current];
@@ -106,6 +136,7 @@ export class AuditKeyring {
     const tmp = `${this.file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
     renameSync(tmp, this.file);
+    this.mtime = this.fileTime();
     try {
       chmodSync(this.file, 0o600);
     } catch {
@@ -114,10 +145,12 @@ export class AuditKeyring {
   }
 
   current(): { id: string; secret: Buffer } {
+    this.refresh();
     return { id: this.data.current, secret: Buffer.from(this.data.keys[this.data.current].secret, 'base64') };
   }
 
   get(id: string): { id: string; secret: Buffer } | undefined {
+    if (!this.data.keys[id]) this.refresh();
     const k = this.data.keys[id];
     return k ? { id, secret: Buffer.from(k.secret, 'base64') } : undefined;
   }

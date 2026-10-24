@@ -9,6 +9,7 @@ import { equals, subsetEquals, subsetForDiff } from './equals.js';
 import { inline } from './format.js';
 import { isMock, type MockInstance } from './mock.js';
 import { state } from './state.js';
+import { cpuMark, loadFactor } from './load.js';
 
 export class AssertionError extends Error {
   actual?: unknown;
@@ -298,7 +299,10 @@ export interface Assertion<R = void> {
 }
 
 export interface PollOptions {
-  /** Total time to keep retrying, ms (default 1000). */
+  /**
+   * Total time to keep retrying, ms (default 1000). When it runs out while the machine's CPUs are
+   * oversubscribed, it is extended in proportion, up to 3x (see load.ts).
+   */
   timeout?: number;
   /** Pause between attempts, ms (default 50). */
   interval?: number;
@@ -377,7 +381,7 @@ function build(actual: unknown, flags: Flags): Assertion<any> {
 }
 
 function pollAssertion(fn: () => unknown, opts: PollOptions, not: boolean): Assertion<Promise<void>> {
-  const timeout = opts.timeout ?? 1000;
+  const base = opts.timeout ?? 1000;
   const interval = opts.interval ?? 50;
   const site = new Error('expect.poll');
   const target: Record<string, unknown> = {};
@@ -386,13 +390,24 @@ function pollAssertion(fn: () => unknown, opts: PollOptions, not: boolean): Asse
       new Promise<void>((resolve, reject) => {
         let last: unknown;
         let done = false;
-        const deadline = setTimeout(() => {
+        const started = Date.now();
+        const mark = cpuMark();
+        let timeout = base;
+        const expire = () => {
+          // A machine whose CPUs were oversubscribed while this poll ran gave it less real time: extend in proportion.
+          const want = Math.round(base * loadFactor(mark));
+          if (want - (Date.now() - started) >= base * 0.1 && want > timeout) {
+            timeout = want;
+            deadline = setTimeout(expire, want - (Date.now() - started));
+            return;
+          }
           done = true;
           const why = last instanceof Error ? last : new AssertionError(last === undefined ? 'the polled function did not settle in time' : `expect.poll: ${inline(last)}`);
-          const err = new AssertionError(`${opts.message ? `${opts.message}: ` : ''}expect.poll timed out after ${timeout}ms: ${why.message}`, { diff: (why as AssertionError).diff });
+          const err = new AssertionError(`${opts.message ? `${opts.message}: ` : ''}expect.poll timed out after ${timeout}ms${timeout > base ? ` (extended from ${base}ms: CPUs oversubscribed)` : ''}: ${why.message}`, { diff: (why as AssertionError).diff });
           err.stack = `AssertionError: ${err.message}\n${site.stack?.split('\n').slice(1).join('\n') ?? ''}`;
           reject(err);
-        }, timeout);
+        };
+        let deadline = setTimeout(expire, base);
         const attempt = async () => {
           while (!done) {
             try {

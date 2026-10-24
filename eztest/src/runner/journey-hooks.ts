@@ -5,7 +5,7 @@
 import { slugify, type Journey, type JourneyResult, type Step } from '../core/index.js';
 import type { EvidenceWriter } from './evidence.js';
 import type { BrowserSession } from './session.js';
-import { runJourneyAttempt, type JourneyRunEnv } from './journey.js';
+import type { JourneyRunEnv } from './journey.js';
 import type { RunOptions } from './types.js';
 import { fillXPath } from './reliability/xpath.js';
 
@@ -76,18 +76,21 @@ export function hookJourneys(opts: RunOptions): Journey[] {
   return [...(h.beforeAll ?? []), ...(h.beforeEach ?? []), ...(h.afterEach ?? []), ...(h.afterAll ?? [])];
 }
 
+/** Runs one hook attempt (inline: on this process's browser; process workers: on a worker). `teardown`: without the cancel signal. */
+export type HookAttempt = (h: Journey, attempt: number, seed: Record<string, unknown> | undefined, teardown: boolean) => Promise<JourneyResult>;
+
 /** Run beforeAll/afterAll hook journeys, each in its own browser context; results are tagged "hook". */
-export async function runAllHook(kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult[]> {
+export async function runAllHook(kind: 'beforeAll' | 'afterAll', opts: RunOptions, run: HookAttempt, seed?: Record<string, unknown>): Promise<JourneyResult[]> {
   const out: JourneyResult[] = [];
   // Cancelled runs skip hook journeys, except teardown (afterAll) with teardownOnCancel, which runs without the signal.
-  if (kind === 'afterAll' && env.opts.signal?.aborted && env.opts.teardownOnCancel) env = teardownEnv(env);
-  for (const h of env.opts.hooks?.[kind] ?? []) {
-    if (env.opts.signal?.aborted) break;
-    env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
-    const r = await runJourneyAttempt(h, 1, env, seed);
+  const teardown = kind === 'afterAll' && !!opts.signal?.aborted && !!opts.teardownOnCancel;
+  for (const h of opts.hooks?.[kind] ?? []) {
+    if (!teardown && opts.signal?.aborted) break;
+    opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
+    const r = await run(h, 1, seed, teardown);
     r.tags = [...new Set([...r.tags, 'hook', kind])];
     out.push(r);
-    env.opts.events?.emit({ type: 'journey:end', journeyId: h.id, status: r.status });
+    opts.events?.emit({ type: 'journey:end', journeyId: h.id, status: r.status });
   }
   return out;
 }

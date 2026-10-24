@@ -184,7 +184,8 @@ describe('matchers', () => {
     await expect.poll(() => ++n, { interval: 5 }).toBeGreaterThan(3);
     await expect.poll(async () => 'ready').not.toBe('busy');
     const e = await asyncFailure(() => expect.poll(() => 'busy', { timeout: 120, interval: 10 }).toBe('ready'));
-    expect(e.message).toMatch(/^expect\.poll timed out after 120ms: expected 'busy' to be 'ready'/);
+    // On a machine whose CPUs are oversubscribed the poll gets more time (tools/testkit/load.ts) and says so.
+    expect(e.message).toMatch(/^expect\.poll timed out after (?:120ms|\d+ms \(extended from 120ms: CPUs oversubscribed\)): expected 'busy' to be 'ready'/);
     const hung = await asyncFailure(() => expect.poll(() => new Promise(() => {}), { timeout: 50 }).toBe(1));
     expect(hung.message).toContain('did not settle');
   });

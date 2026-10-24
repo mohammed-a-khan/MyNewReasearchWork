@@ -100,7 +100,15 @@ Every state change that matters is appended to `ez_audit` with the actor, the ac
 - retention changes and retention runs;
 - sign-ins.
 
-Each entry's hash is an HMAC-SHA256 of its fields and the previous hash under the server's audit key, so changing, deleting or inserting an entry breaks the chain at that point, and someone who can only write to the database cannot re-chain a forged entry. The key is not in the database: it is created on first start in `<dataDir>/audit-key.json` (mode 0600; `auditKeyFile:` to keep it elsewhere; back it up with the data) and rotated with `POST /api/audit/rotate-key` (admins); older keys stay in the file to verify what they signed. Entries written before keying still verify, with a warning. `GET /api/audit/verify`, `eztest server audit-verify` and the `/ui/audit` page all check the chain.
+Each entry's hash is an HMAC-SHA256 of its fields and the previous hash under the server's audit key, so changing, deleting or inserting an entry breaks the chain at that point, and someone who can only write to the database cannot re-chain a forged entry. The key is not in the database: it is created on first start in `<dataDir>/audit-key.json` (mode 0600; `auditKeyFile:` to keep it elsewhere; back it up with the data) and rotated with `eztest server audit rotate-key` or `POST /api/audit/rotate-key` (admins); older keys stay in the file to verify what they signed. A running server takes over a rotation made by the CLI on its machine (it reads the key file again when it changes, and keys are only ever added). Entries written before keying still verify, with a warning. `GET /api/audit/verify`, `eztest server audit verify` (`audit-verify` is the same) and the `/ui/audit` page all check the chain.
+
+```bash
+eztest server audit verify --config eztest-server.yaml          # on the server machine: its database and key file
+eztest server audit verify --url https://eztest.example.com      # through the API (token: --token or EZTEST_SERVER_TOKEN)
+eztest server audit rotate-key --url https://eztest.example.com  # admin token
+```
+
+`verify` exits 1 when the chain was tampered with.
 
 ## Retention
 

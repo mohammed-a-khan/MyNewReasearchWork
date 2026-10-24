@@ -22,23 +22,35 @@ export type TempDirKind = 'profile' | 'downloads' | 'firefox-profile';
 export const TEMP_DIR_PREFIXES: readonly string[] = ['eztest-profile-', 'eztest-downloads-', 'eztest-firefox-profile-'];
 
 const tracked = new Set<string>();
+let observer: (() => void) | undefined;
+
+/** Internal: called whenever the tracked set changes (a process worker reports its directories to the run). */
+export function observeTrackedTempDirs(fn: (() => void) | undefined): void {
+  observer = fn;
+}
+const changed = () => observer?.();
 
 /** Create a tracked temporary directory `<tmp>/eztest-<kind>-<pid>-XXXXXX`. */
 export function makeTempDir(kind: TempDirKind, root = tmpdir()): string {
   const dir = mkdtempSync(join(root, `eztest-${kind}-${process.pid}-`));
   tracked.add(dir);
+  changed();
   return dir;
 }
 
 /** Track a directory for removal at exit or on a signal; returns the untrack function. */
 export function trackTempDir(dir: string): () => void {
   tracked.add(dir);
-  return () => tracked.delete(dir);
+  changed();
+  return () => {
+    tracked.delete(dir);
+    changed();
+  };
 }
 
 /** Stop tracking a directory (it was removed, or handed to the user). */
 export function untrackTempDir(dir: string): void {
-  tracked.delete(dir);
+  if (tracked.delete(dir)) changed();
 }
 
 /** The directories this process would remove at exit. */
@@ -56,6 +68,7 @@ export function removeTrackedTempDirsSync(): void {
     }
     tracked.delete(dir);
   }
+  changed();
 }
 
 /** The pid in an EZTest temp dir name (`eztest-profile-1234-abcdef`), or undefined for older names without one. */

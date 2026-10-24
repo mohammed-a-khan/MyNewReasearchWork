@@ -4,6 +4,7 @@ This guide covers suites of thousands of journeys that run on many machines, in 
 
 | Need | Use |
 |---|---|
+| Run journeys in parallel on one machine, isolated from each other | `eztest run --workers 4` (process workers) |
 | Split a suite across machines | `eztest run --shard i/n`, then `eztest merge` |
 | Size the CI matrix | `eztest ci matrix --shards auto` |
 | Keep two journeys off the same account | `Locks: account-123` |
@@ -13,6 +14,67 @@ This guide covers suites of thousands of journeys that run on many machines, in 
 | Share results, heal decisions and locks across a team | the results server (see [server.md](server.md)) |
 | Map PR, nightly and deployment stages to journeys | `pipelines:` and `eztest run --pipeline` (see [pipelines.md](pipelines.md)) |
 | Hand data between journeys, runs and stages; pools of test data | the shared store (see [shared-data.md](shared-data.md)) |
+
+## Process workers
+
+`eztest run --workers 4` runs the journeys in four worker processes. Each worker has its own
+browser and runs one journey at a time from the run's queue, so a journey that crashes its process
+or burns a CPU affects only itself.
+
+| Setting | Effect |
+|---|---|
+| `--workers N` / `concurrency: N` | N journeys at a time |
+| `--worker-mode process` / `workers: process` | worker processes (the default of `eztest run` when N > 1) |
+| `--worker-mode inline` / `workers: inline` | async tasks of one process, as before |
+| `EZTEST_WORKERS=process` or `inline` | the mode of every run that does not choose one (CLI runs without `--worker-mode`, library runs without `workers`) |
+| `RunOptions.workers` | library runs; `inline` is the default there and in the Studio |
+
+**What stays with the run.** The queue, resource locks, `Depends on:` handoff, `Setup:` run-wide
+values, retries (inline and isolated), the circuit breaker, results and `run.json` are kept by the
+run itself. Workers write their screenshots, traces and downloads into the run directory and the
+run records each one in the evidence manifest, so the hash chain is one sequence whatever the
+number of workers (`eztest evidence verify` checks it as usual). History, reports and readiness
+read `run.json` and do not change.
+
+**What a worker builds itself.** Engine runs (`eztest run`, `createEngine(...).run`) hand each
+worker the run's resolved configuration; the worker builds the same handlers from it: identity,
+databases, the data fabric, document checks, the healer, lenses, the shared store, integrations,
+add-ons and plugins. Library runs copy their data options (base URL, timeouts, hooks, variables,
+...) to the workers; an option that is a function or an object with behaviour (custom steps, a
+`login` handler, a lens) needs a `workerSetup` module that builds it in the worker:
+
+```ts
+await runJourneys(journeys, {
+  outputDir: 'results', concurrency: 4, workers: 'process',
+  workerSetup: { module: new URL('./worker-setup.js', import.meta.url).href, export: 'setup', args: { env: 'sit' } },
+});
+// worker-setup.ts: export async function setup(args) { return { options: { customSteps: {...}, login: ... }, close: async () => {} }; }
+```
+
+Without one, such a run stays inline and logs which options kept it there.
+
+**State shared between workers.** Fingerprints and verified heals are merged into the store file
+under a cross-process lock; the shared store and data pools were already safe across processes
+(file locks, or the results server); Gherkin `BeforeAll` results reach every worker; values saved
+for the pipeline are exported once; secrets found in a worker are masked in `run.json` and the
+reports. Events (the console lines of `eztest run`, `--log-format json`) come from the workers as
+they happen.
+
+**A worker that dies.** When a worker process dies while it runs a journey (a native crash, an
+out-of-memory kill, user code calling `process.abort()`), that attempt is an environment failure
+(`error`, `WorkerCrashed`, `reliability.environment`) with the end of the worker's output as
+evidence (`journeys/<id>/worker-crash.txt`). The run starts a new worker and goes on; retries and
+the circuit breaker treat the failure like any environment failure. `run.json` says
+`environment.workers: "4 processes, 1 restarted after a crash"`.
+
+**Cancel.** The first SIGINT, SIGTERM or SIGHUP reaches every worker: journeys not started are
+skipped, running ones stop (a terminal signal closes their browsers at once, as it does inline),
+`run.json` is written with `cancelled`, and the workers close. When the run cannot wind down in the
+grace period, or on a second signal, the run kills the workers and their browsers and removes their
+temporary folders before it exits.
+
+**Stays inline:** the debugger, `--manual prompt` (it asks in this terminal), and runs with
+`email: { provider: sink }` (one SMTP listener whose mailbox the steps read).
 
 ## Sharding
 

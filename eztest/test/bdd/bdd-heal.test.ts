@@ -39,6 +39,7 @@ afterEach(async () => {
 });
 
 describe('healing Gherkin steps', () => {
+  // Three full `eztest run`s (each starting its browser; the second heals after waiting out the locate timeouts): more than 60 s on a busy machine.
   it('heals fallback steps (top level and inside groups), lists them for review and applies an accepted heal through the sidecar', async () => {
     const p = await bddProject();
     let restored = false;
@@ -116,5 +117,5 @@ describe('healing Gherkin steps', () => {
     expect(clickAgain.status, tree(again.steps)).toBe('passed');
     expect(clickAgain.heal).toBeUndefined();
     expect(flattenStepResults(again.steps).length).toBeGreaterThan(4);
-  });
+  }, 120_000);
 });

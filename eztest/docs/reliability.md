@@ -377,6 +377,43 @@ improvement proposals; `Requires:` preconditions and session-expiry re-login
 (both live in the web journey runner); context reuse; and locale/time-zone
 emulation of the browser. Expression functions still use the pinned time zone.
 
+## Waits under load
+
+A wait given 5 s on an idle machine gets much less than 5 s of real work when the machine's CPUs
+are oversubscribed: the browser renders and runs scripts at a fraction of its speed and the runner
+is descheduled. The runner does not fail such a wait, or heal an element that is only slow to
+appear: it measures how loaded the machine was while the wait ran and extends the deadline in
+proportion, up to 3x (`EZTEST_ADAPTIVE_MAX`, 1 to 10; `EZTEST_ADAPTIVE_WAITS=0` turns it off).
+
+| Measured | How | Deadline factor |
+|---|---|---|
+| CPU saturation | CPU busy share of the machine over the wait (from the CPU times) and the run queue: runnable tasks per CPU (`/proc/loadavg`, sampled each second; elsewhere the 1-minute load average) | runnable tasks per CPU, when the CPUs were at least 85% busy |
+| The runner's own starvation | a 50 ms timer adds up how late it fires: time the process could not run | 1 / (1 - starved share), from 10% |
+| Browser responsiveness | the round trip of a trivial evaluation in the page (a few ms when idle) | 1 + round trip / 250 ms, from 60 ms |
+
+The factor is the largest of the three, and 1 on an idle machine. Locating a target and
+post-conditions check it when their deadline comes and keep polling while it allows; waits inside
+the browser driver (an action's actionability wait, a navigation) get a timeout scaled by the load
+of the three seconds before they start. Every extension is recorded on the step and logged:
+
+```json
+"reliability": { "waits": [], "recovered": [], "extended": [
+  { "what": "locate the \"Go\" button", "baseMs": 1000, "ms": 3000, "reason": "CPUs 100% busy with 3.0 runnable tasks per CPU" } ] }
+```
+
+so a run that took longer on a busy machine says why. EZTest's own test suite does the same for its
+`expect.poll` waits (tools/testkit/load.ts).
+
+Measured on the 4-core development container, with one busy-loop process per core added on top of
+the other suites sharing it (load average 15 to 35): `test/browser`, `test/runner`, `test/e2e` and
+`test/studio/ui.test.ts` on Chromium.
+
+| | Tests passed | Failed |
+|---|---|---|
+| Before (fixed deadlines) | 377 | 5 (Studio UI: a 1 s poll for the first page, then the tests that depend on it) |
+| After (adaptive deadlines) | 387 (10 new) | 0 |
+| After, second run (load average about 30) | 381 | 7, all passing when run again: the two new process-worker cancel tests (their wait for two workers to start was then raised), four Studio UI tests, and one 50 ms query-speed check |
+
 ## Measurements
 
 All numbers come from scripts in `scripts/bench/`, run on one shared CI-like

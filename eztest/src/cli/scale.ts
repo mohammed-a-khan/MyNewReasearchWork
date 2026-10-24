@@ -621,24 +621,66 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
         await store.close();
       }
     });
-  server
-    .command('audit-verify')
-    .description('verify the audit log hash chain')
-    .option('--config <file>', 'server config')
-    .action(async (o: { config?: string }) => {
-      const { loadServerConfig, AuditLog, auditKeyFileFor } = await import('../server/index.js');
-      const cfg = await loadServerConfig({ file: o.config, cwd: io.cwd, env: io.env });
-      const store = await openServerStore(cfg);
+  // The audit log: on the server machine (--config: its database and key file directly), or through
+  // a running server (--url, a token with audit.read / admin rights).
+  type AuditOpts = { config?: string; url?: string; token?: string };
+  const remote = (o: AuditOpts) => {
+    const token = o.token ?? io.env.EZTEST_SERVER_TOKEN;
+    if (!token) throw new Error('--url needs a token: --token or EZTEST_SERVER_TOKEN');
+    return new ResultsClient({ url: o.url!, token, project: 'default' });
+  };
+  const withAudit = async <T>(o: AuditOpts, fn: (log: import('../server/index.js').AuditLog, actor: string) => Promise<T>): Promise<T> => {
+    const { loadServerConfig, AuditLog, auditKeyFileFor } = await import('../server/index.js');
+    const cfg = await loadServerConfig({ file: o.config, cwd: io.cwd, env: io.env });
+    const store = await openServerStore(cfg);
+    try {
+      return await fn(new AuditLog(store, auditKeyFileFor(cfg)), `cli:${process.env.USER ?? 'admin'}`);
+    } finally {
+      await store.close();
+    }
+  };
+  const verifyAudit = async (o: AuditOpts) => {
+    try {
+      const v = o.url ? await remote(o).auditVerify() : await withAudit(o, (log) => log.verify());
+      io.out(`${v.ok ? 'VALID' : 'TAMPERED'}: ${v.entries} audit entries, head ${v.head.slice(0, 16)}...`);
+      for (const p of v.problems) io.err(`  ${p}`);
+      for (const w of v.warnings ?? []) io.err(`  warning: ${w}`);
+      process.exitCode = v.ok ? 0 : 1;
+    } catch (e) {
+      io.err(`error: ${(e as Error).message}`);
+      process.exitCode = 2;
+    }
+  };
+  const auditCmd = server.command('audit').description('the server\'s keyed audit log: verify its hash chain, rotate its key');
+  auditCmd
+    .command('verify')
+    .description('verify the audit log hash chain (exit 1 when it was tampered with)')
+    .option('--config <file>', 'server config (on the server machine: reads its database and audit key file)')
+    .option('--url <url>', 'a running results server instead (GET /api/audit/verify)')
+    .option('--token <token>', 'API token for --url (or EZTEST_SERVER_TOKEN)')
+    .action(verifyAudit);
+  auditCmd
+    .command('rotate-key')
+    .description('start signing new audit entries with a new key; older keys stay in the key file to verify what they signed')
+    .option('--config <file>', 'server config (on the server machine: its database and audit key file)')
+    .option('--url <url>', 'a running results server instead (POST /api/audit/rotate-key, admin token)')
+    .option('--token <token>', 'API token for --url (or EZTEST_SERVER_TOKEN)')
+    .action(async (o: AuditOpts) => {
       try {
-        const v = await new AuditLog(store, auditKeyFileFor(cfg)).verify();
-        io.out(`${v.ok ? 'VALID' : 'TAMPERED'}: ${v.entries} audit entries, head ${v.head.slice(0, 16)}...`);
-        for (const p of v.problems) io.err(`  ${p}`);
-        for (const w of v.warnings) io.err(`  warning: ${w}`);
-        process.exitCode = v.ok ? 0 : 1;
-      } finally {
-        await store.close();
+        const r = o.url ? await remote(o).auditRotateKey() : await withAudit(o, (log, actor) => log.rotateKey(actor));
+        io.out(`audit key rotated: new entries are signed with ${r.keyId}`);
+      } catch (e) {
+        io.err(`error: ${(e as Error).message}`);
+        process.exitCode = 2;
       }
     });
+  server
+    .command('audit-verify')
+    .description('verify the audit log hash chain (same as: server audit verify)')
+    .option('--config <file>', 'server config')
+    .option('--url <url>', 'a running results server instead')
+    .option('--token <token>', 'API token for --url (or EZTEST_SERVER_TOKEN)')
+    .action(verifyAudit);
 }
 
 async function openServerStore(cfg: Awaited<ReturnType<typeof import('../server/index.js')['loadServerConfig']>>) {

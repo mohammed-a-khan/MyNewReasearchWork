@@ -866,6 +866,11 @@ export const EzTestConfigSchema = z.object({
   /** Screenshot policy; before-assertions also captures the page before every assertion. Default: the CLI/runner default. */
   screenshots: z.enum(['every-step', 'on-failure', 'off', 'before-assertions']).optional(),
   concurrency: z.number().int().min(1).max(64).default(1),
+  /**
+   * Where parallel journeys run: process (one worker process with its own browser per concurrency slot; the
+   * default of `eztest run` when concurrency > 1) or inline (async tasks of one process). docs/scale.md.
+   */
+  workers: z.enum(['process', 'inline']).optional(),
   retries: z.number().int().min(0).max(10).default(0),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   timeouts: TimeoutsSchema.prefault({}),

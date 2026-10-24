@@ -540,7 +540,7 @@ When a node is missing, the failure names it (`missing - button "Confirm order"`
 
 A description like `the "Sign in" button` becomes an ordered list of locators: role `button` named "Sign in", then the text "Sign in", and so on. Only a locator that matches **exactly one** element is used. When none does, the verified healing ladder runs:
 
-1. **T0 cache:** the last locator that worked and was verified.
+1. **T0 cache:** the last locator that worked and was verified. A step with a cached verified heal looks for its original element for one second only; when it is still missing and the cached heal matches exactly one element, the step heals at once instead of waiting out the locate timeout.
 2. **T1 fingerprint:** compares a stored element fingerprint (role, name, text, id, classes, label, position and more) against the current page, with an ambiguity margin.
 3. **T2 semantic:** matches the description words against accessible names and labels.
 

@@ -180,8 +180,28 @@ export class SharedStore implements StoreStepRuntime {
       await this.backend.put({ ...e, sealed: (await this.sealer()).seal(value), updatedAt: new Date().toISOString() });
       n++;
     }
-    if (n) this.logger.info(`shared store: re-sealed ${n} secret value(s) with the store's own salt`);
-    return n;
+    // Secret pool items too (claimed ones keep their claim: the backend swaps the sealed value in place).
+    let items = 0;
+    let skipped = 0;
+    for (const s of await this.backend.pools(namespace)) {
+      for (const it of await this.backend.poolItems(s.namespace, s.pool)) {
+        if (!it.secret || !isLegacySealed(it.sealed)) continue;
+        if (!this.backend.poolReseal) {
+          skipped++;
+          continue;
+        }
+        if (await this.resealItem(s.namespace, s.pool, it.id, it.sealed)) items++;
+      }
+    }
+    if (skipped) this.logger.warn(`shared store: ${skipped} secret pool item(s) still in the older format: the ${this.backend.name} backend cannot re-seal pool items`);
+    if (n || items) this.logger.info(`shared store: re-sealed ${n} secret value(s) and ${items} secret pool item(s) with the store's own salt`);
+    return n + items;
+  }
+
+  /** Re-seal one EZS1 pool item as EZS2 (false when it changed or went away meanwhile). */
+  private async resealItem(namespace: string, pool: string, id: string, sealed: string): Promise<boolean> {
+    const value = this.cipher().open(sealed);
+    return (await this.backend.poolReseal?.(namespace, pool, id, sealed, (await this.sealer()).seal(value))) ?? false;
   }
 
   private secret(v: unknown): void {
@@ -346,6 +366,8 @@ export class SharedStore implements StoreStepRuntime {
         'POOL_EMPTY',
       );
     }
+    // An item still in the older format is re-sealed as it is taken (it may go back to the pool).
+    if (item.secret && isLegacySealed(item.sealed)) await this.resealItem(namespace, pool, item.id, item.sealed).catch(() => false);
     const list = this.claims.get(attempt) ?? [];
     list.push({ namespace, pool, id: item.id, owner, keep: !!o.keep });
     this.claims.set(attempt, list);
@@ -378,6 +400,11 @@ export class SharedStore implements StoreStepRuntime {
   }
 
   // ---------------------------------------------------------------- pipeline export
+  /** Values saved "for the pipeline" by another process of the same run (a process worker): exported with this run's. */
+  absorbExports(entries: StoreExport['entries']): void {
+    for (const e of entries) this.exported.set(`${e.namespace}\u0000${e.key}`, e);
+  }
+
   pipelineExport(o: { runId?: string; pipeline?: string } = {}): StoreExport {
     return { kind: 'eztest-store-export', version: 1, createdAt: new Date().toISOString(), ...(o.runId ? { runId: o.runId } : {}), ...(o.pipeline ? { pipeline: o.pipeline } : {}), entries: [...this.exported.values()] };
   }

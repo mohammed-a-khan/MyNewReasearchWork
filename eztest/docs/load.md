@@ -215,6 +215,43 @@ for a VU, or a system that stalls shows up as latency, not as missing samples (c
 omission). The **service time** (from the actual send) is kept too; the report shows both.
 Think time before the first request moves the intended start, so it is never counted as latency.
 
+## Generators
+
+One Node.js event loop sends a few thousand requests a second. `eztest load run` therefore starts
+one **generator process** per CPU (`--generators N` to choose; `eztest load agent --generators N`
+does the same on each agent, `EZTEST_LOAD_GENERATORS` for the slim agent image). Each generator runs
+1/N of every population with its own scheduler, connections and slice of the data sets; their
+per-second intervals are merged exactly (histograms added, counts summed), so the results are those
+of one generator N times as fast.
+
+- **Closed model**: generator g of G (G = agents x generators) runs curve / G VUs rounded with
+  offset (g + 0.5) / G, so the VU counts add up to the curve, as one generator's would.
+- **Open model**: each generator runs rate / G and its k-th arrival is due when its curve's
+  integral reaches k - 1 + (g + 1) / G. The generators' arrivals interleave into the sequence one
+  generator would produce, never G at the same instant. Response time is still measured from each
+  arrival's intended start (coordinated omission), and `maxVus` is shared between the generators.
+- Unique data rows stay unique (each generator takes its slice), VU ids do not overlap, and seeded
+  randomness differs per generator.
+- Live control (add VUs, scale, stop) reaches every generator. Scenarios with browser-level users
+  run on one generator (each user is a browser process anyway).
+- `LoadTest` (library) uses one generator unless `generators` is set.
+
+Measured on the 4-core development container (shared with other suites), closed model, 64 VUs,
+zero think time, against a two-process target that counts and times each request itself (98% at
+once, 2% after 40 ms, so the true p99 is 40 ms), `npx tsx scripts/bench/load-generators.ts 1,2,3,4 closed 64 8`:
+
+| Generators | Requests/s | Generator count = server count | p99 measured (server's own) |
+|---|---|---|---|
+| 1 | 8,670 | 70,108 = 70,108 | 48.3 ms (39.8) |
+| 2 | 19,174 | 155,039 = 155,039 | 42.7 ms (39.7) |
+| 3 | 27,561 | 222,938 = 222,938 | 41.6 ms (39.9) |
+| 4 | 24,144 | 195,207 = 195,207 | 42.0 ms (40.0) |
+
+Four generators share the 4 CPUs with the two target processes, so three is the best here; on a
+machine of its own each agent scales with its CPUs. The single generator's p99 is 8 ms too high
+because its own event loop is saturated (its median event-loop delay was 19 ms); with three, the
+error is under 2 ms.
+
 ## Distributed tests
 
 ```sh
@@ -229,8 +266,11 @@ eztest load agent --controller controller.example:7400 --token "$EZTEST_LOAD_TOK
   the controller requires agent client certificates (mutual TLS). Use both across networks.
 - **Jobs**: each agent gets the scenario, its share of each population (by `--capacity`; zone
   populations only go to agents of that `--zone`), its slice of each sequential/unique data set
-  (so unique rows stay unique across agents) and a common wall-clock start (run NTP). Closed-model
-  VU counts are split so they add up exactly.
+  (so unique rows stay unique across agents), its slot among the agents and a common wall-clock
+  start (run NTP). Closed-model VU counts are split so they add up exactly, and open-model
+  arrivals interleave across agents and their generators (see Generators).
+- **Generators per agent**: an agent runs its share on one generator process per CPU and sends one
+  merged interval per second, so the controller sees one agent whatever its size.
 - **Metrics**: one encoded interval per second per agent (sparse histograms); the controller
   merges them exactly, runs the monitors and SLAs on the merged timeline and relays live control
   (add VUs, scale, stop). A lost agent is reported and the test continues.
@@ -339,4 +379,7 @@ Reproduce on your hardware with `npx tsx scripts/bench/load-engine.ts 100,500,10
 - Bandwidth caps apply per connection; packet loss is emulated as retransmission delay.
 - Agents need the files a scenario references for TLS client certificates and gRPC protos
   (data sets are shipped by the controller).
-- Browser-level users cost a browser context each: plan tens to low hundreds per generator.
+- Browser-level users cost a browser context each: plan tens to low hundreds per generator; such
+  scenarios run on one generator process per agent.
+- Generators on one machine start together within a few milliseconds of each other; their
+  interleaved arrivals are as exact as the machine's timers.

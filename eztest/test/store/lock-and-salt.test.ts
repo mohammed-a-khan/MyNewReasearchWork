@@ -108,4 +108,48 @@ describe('store cipher salt', () => {
     }
     expect(await store.migrateSealedValues()).toBe(0);
   });
+
+  it('migrates secret pool items in the old format too: claims are kept, a taken item is re-sealed', async () => {
+    const backend = new FileStoreBackend(await mkdtemp(join(tmpdir(), 'ez-salt-pool-')));
+    await backend.poolAdd('default', 'accounts', ['u1', 'u2', 'u3'].map((u) => ({ id: u, sealed: legacySeal({ user: u, password: `pw-${u}` }), secret: true })), 'test');
+    await backend.poolAdd('default', 'plain', [{ id: 'p1', value: 'not secret' }], 'test');
+    const store = new SharedStore({ backend, key: KEY });
+    // u1 is claimed by a running journey while the migration runs: it keeps its claim.
+    const held = await backend.poolClaim('default', 'accounts', 'journey-x#1', 60_000);
+    expect(held?.id).toBe('u1');
+    expect(await store.migrateSealedValues()).toBe(3);
+    const items = await backend.poolItems('default', 'accounts');
+    expect(items.map((i) => isLegacySealed(i.sealed))).toEqual([false, false, false]);
+    expect(items.every((i) => i.sealed!.startsWith('EZS2:'))).toBe(true);
+    expect(items.find((i) => i.id === 'u1')!.claim?.owner).toBe('journey-x#1');
+    expect(new StoreCipher(KEY).open(items.find((i) => i.id === 'u2')!.sealed!)).toEqual({ user: 'u2', password: 'pw-u2' });
+    expect(await store.migrateSealedValues()).toBe(0);
+    // Taking an item that is still in the older format re-seals it.
+    await backend.poolAdd('default', 'late', [{ id: 'l1', sealed: legacySeal('late-secret'), secret: true }], 'test');
+    const taken = await store.take('late', 'j#1', { namespace: 'default' });
+    expect(taken.value).toBe('late-secret');
+    expect((await backend.poolItems('default', 'late'))[0].sealed).toMatch(/^EZS2:/);
+  });
+
+  it('re-seals pool items on the results server (compare and swap; the server never sees the value)', async () => {
+    const { startTestServer, BOOT } = await import('../server/helpers.js');
+    const { ResultsClient } = await import('../../src/server/client.js');
+    const { ServerStoreBackend } = await import('../../src/store/server.js');
+    const server = await startTestServer();
+    try {
+      const backend = new ServerStoreBackend(new ResultsClient({ url: server.url, token: BOOT, project: 'pay' }));
+      await backend.poolAdd('default', 'accounts', ['s1', 's2'].map((u) => ({ id: u, sealed: legacySeal(`pw-${u}`), secret: true })), 'test');
+      const store = new SharedStore({ backend, key: KEY });
+      expect(await store.migrateSealedValues()).toBe(2);
+      const items = await backend.poolItems('default', 'accounts');
+      expect(items.every((i) => i.sealed!.startsWith('EZS2:'))).toBe(true);
+      expect(new StoreCipher(KEY).open(items[0].sealed!)).toBe(`pw-${items[0].id}`);
+      // A stale "from" changes nothing.
+      expect(await backend.poolReseal('default', 'accounts', 's1', legacySeal('x'), items[0].sealed!)).toBe(false);
+      const audit = (await server.req('GET', '/api/audit?project=pay&action=pool.reseal', { token: BOOT })).json as unknown[];
+      expect(audit.length).toBe(2);
+    } finally {
+      await server.close();
+    }
+  });
 });

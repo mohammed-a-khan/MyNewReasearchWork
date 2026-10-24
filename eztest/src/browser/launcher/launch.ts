@@ -129,6 +129,17 @@ const SIGNAL_NUMBER: Record<HandledSignal, number> = { SIGHUP: 1, SIGINT: 2, SIG
 
 /** Every live browser, so a crashing, exiting or interrupted process does not leave browsers or profiles behind. */
 const live = new Set<LiveBrowser>();
+let liveObserver: (() => void) | undefined;
+
+/** Internal: called whenever a browser starts or stops being tracked (a process worker reports its browsers to the run). */
+export function observeLiveBrowsers(fn: (() => void) | undefined): void {
+  liveObserver = fn;
+}
+
+/** Internal: process ids of the live browsers of this process. */
+export function liveBrowserPids(): number[] {
+  return [...live].map((b) => b.pid).filter((p): p is number => typeof p === 'number');
+}
 let exitHookInstalled = false;
 const signalHooks = new Map<HandledSignal, () => void>();
 
@@ -150,6 +161,7 @@ export function cleanupBrowsersNow(only?: (b: LiveBrowser) => boolean): void {
     removeProfile(b);
     live.delete(b);
   }
+  liveObserver?.();
   // Download folders and other tracked dirs belong to the browsers just killed; with some browsers
   // left running (they opted out of this signal) they stay.
   if (!live.size) removeTrackedTempDirsSync();
@@ -191,11 +203,13 @@ export function trackLiveBrowser(record: { pid?: number; userDataDir?: string; t
   const entry: LiveBrowser = { ...record, signals: { SIGINT: signals.SIGINT ?? true, SIGTERM: signals.SIGTERM ?? true, SIGHUP: signals.SIGHUP ?? true } };
   live.add(entry);
   if (record.temp && record.userDataDir) trackTempDir(record.userDataDir);
+  liveObserver?.();
   installExitHook();
   for (const sig of HANDLED_SIGNALS) if (entry.signals[sig] && (process.platform !== 'win32' || sig === 'SIGINT')) installSignalHook(sig);
   sweepStaleTempDirsOnce();
   return () => {
     live.delete(entry);
+    liveObserver?.();
   };
 }
 

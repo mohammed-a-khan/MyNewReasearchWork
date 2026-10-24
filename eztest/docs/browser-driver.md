@@ -27,9 +27,9 @@ locator.ts         Locator / FrameLocator: lazy, strict, chainable, auto-waiting
 actions.ts         resolve -> engine actionability check -> real input events, with retries and call logs
 firefox/           the WebDriver BiDi engine (see "Firefox engine")
 chromium/          the CDP engine
-  browser.ts       Browser, BrowserContext (Target.createBrowserContext), downloads, BrowserType
-  page.ts          Page, its target sessions (page + out-of-process iframes), events, emulation, screenshots
-  frame.ts         Frame: lifecycle, execution contexts (main world + isolated engine world), navigation
+  browser.ts       ChromiumBrowser, ChromiumContext (Target.createBrowserContext), downloads, ChromiumBrowserType
+  page.ts          ChromiumPage: its target sessions (page + out-of-process iframes), events, emulation, screenshots
+  frame.ts         ChromiumFrame: lifecycle, execution contexts (main world + isolated engine world), navigation
   exec-context.ts  evaluate via Runtime.callFunctionOn with the tagged-JSON codec (serializer.ts)
   handles.ts       JSHandle, ElementHandle
   network.ts       Request / Response / Route / WebSocket, Fetch-domain interception, HTTP auth

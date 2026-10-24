@@ -75,9 +75,14 @@ describe('lost locks', () => {
       outputDir: out, fingerprintStore: join(out, 'fp.json'),
       locks: { tryAcquire: (x) => locker.tryAcquire(x), pollMs: 10 },
     });
-    // Another holder overwrites the lease file while the journey runs.
-    await wait(300);
-    for (const f of await readdir(dir)) if (f.endsWith('.lease')) await writeFile(join(dir, f), JSON.stringify({ resource: 'lock:ledger', owner: 'someone-else', token: 'other', acquiredAt: Date.now(), expiresAt: Date.now() + 60_000 }));
+    // Another holder overwrites the lease file while the journey runs (once the run holds it: after its browser started).
+    let leases: string[] = [];
+    for (let i = 0; i < 200 && !leases.length; i++) {
+      await wait(50);
+      leases = (await readdir(dir)).filter((f) => f.endsWith('.lease'));
+    }
+    expect(leases.length).toBe(1);
+    for (const f of leases) await writeFile(join(dir, f), JSON.stringify({ resource: 'lock:ledger', owner: 'someone-else', token: 'other', acquiredAt: Date.now(), expiresAt: Date.now() + 60_000 }));
     const r = await run;
     expect(r.journeys[0].reliability?.locksLost).toEqual([expect.stringMatching(/lock "ledger" was lost while held: another holder took the lease over/)]);
   }, 30_000);

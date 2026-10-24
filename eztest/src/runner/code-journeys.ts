@@ -26,9 +26,9 @@
  *
  * `EZTEST_CODE_LOADER=esbuild|native|tsx` forces one strategy.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -151,8 +151,13 @@ async function bundle(esbuild: Esbuild, file: string, cwd: string): Promise<{ ou
   const out = join(cacheDir, `${name}.mjs`);
   if (!existsSync(out)) {
     await mkdir(cacheDir, { recursive: true });
-    await writeFile(`${out}.map`, map?.text ?? '');
-    await writeFile(out, `${js.text.replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n')}//# sourceMappingURL=${basename(out)}.map\n`);
+    // Several processes (process workers, parallel test files) bundle the same file at once: each writes its
+    // own temporary file and renames it into place, so no process ever imports a half-written module.
+    const tmp = `${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+    await writeFile(`${out}.map.${tmp}`, map?.text ?? '');
+    await rename(`${out}.map.${tmp}`, `${out}.map`);
+    await writeFile(`${out}.${tmp}`, `${js.text.replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n')}//# sourceMappingURL=${basename(out)}.map\n`);
+    await rename(`${out}.${tmp}`, out);
   }
   if (map) {
     const m = JSON.parse(map.text) as { sources: string[]; mappings: string };

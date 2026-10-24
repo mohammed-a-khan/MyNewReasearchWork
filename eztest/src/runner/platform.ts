@@ -25,6 +25,7 @@ import type { EvidenceWriter } from './evidence.js';
 import type { RunOptions } from './types.js';
 import { isManualJourney, manualDriver } from './manual.js';
 import { bddRecord } from './bdd-run.js';
+import { noteLocalRegistration } from './workers/local.js';
 
 /** A platform name: 'web' (built in), 'android', 'ios', or one a driver adds. */
 export type PlatformName = 'web' | 'android' | 'ios' | (string & {});
@@ -66,9 +67,11 @@ const REGISTRY: PlatformDriver[] = [];
  */
 export function registerPlatformDriver(driver: PlatformDriver): () => void {
   REGISTRY.push(driver);
+  const forget = noteLocalRegistration('a registered platform driver');
   return () => {
     const i = REGISTRY.indexOf(driver);
     if (i >= 0) REGISTRY.splice(i, 1);
+    forget();
   };
 }
 
