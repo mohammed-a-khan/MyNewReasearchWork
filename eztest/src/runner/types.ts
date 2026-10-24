@@ -201,6 +201,11 @@ export interface RunOptions {
   compareDocument?: CompareDocumentHandler;
   customSteps?: Record<string, CustomStepHandler>;
   lenses?: Lens[];
+  /**
+   * Builds a lens by its config name ("a11y", "security:warn", a plugin's lens), for journeys whose
+   * `Lenses:` header names a lens the run does not have: that journey gets its own instance.
+   */
+  lensFactory?: (spec: string) => Lens;
   /** Masks secrets in captured text (dialogs, cookies, storage, network, evidence). The engine passes the config masker. */
   mask?: (text: string) => string;
   /** Default handling of dialogs nobody armed for. */
@@ -258,6 +263,11 @@ export interface RunOptions {
   };
   /** Reuse one browser context per worker and reset its state between journeys (opt-in, for speed). */
   reuseContext?: boolean;
+  /**
+   * Start a fresh browser after this many journeys (the old one closes when its journeys end); 0 never.
+   * Default: 15 on Firefox (its parent process does not give back the memory of closed windows), 0 otherwise.
+   */
+  recycleBrowserAfter?: number;
   /** Fingerprint capture: every passing step (default), or only steps that have none yet ("missing", used by --fast). */
   fingerprints?: 'always' | 'missing';
   /** Store console/network logs as evidence for passing journeys too (default true; --fast keeps them only on failure). */

@@ -72,6 +72,12 @@ export interface FailureDiagnosis {
   similar: SimilarElement[];
   consoleErrors: string[];
   failedRequests: string[];
+  /**
+   * Visible form fields the browser's own validation rejects (`:invalid`, with the browser's message),
+   * after a click or key press: a form that never submitted because of a native constraint (required,
+   * pattern, min/max, step) shows nothing in the page itself.
+   */
+  invalidFields?: string[];
   /** Elements outlined in the failure screenshot (the matches, else the nearest similar element). */
   outlined?: number;
   /** Evidence id of the screenshot with the target (or the nearest match) highlighted. */

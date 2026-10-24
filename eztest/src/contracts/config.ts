@@ -86,9 +86,22 @@ export const ContractsSchema = z.object({
 export type ContractsConfig = z.infer<typeof ContractsSchema>;
 export type ProviderStateConfig = z.infer<typeof ProviderStateSchema>;
 
+/**
+ * One `api.spec` entry: a spec file, or `{ file, baseUrl }` to validate only the calls whose URL
+ * starts with `baseUrl` (a suite that calls several services, each with its own spec, or services
+ * that have none).
+ */
+export const ApiSpecEntrySchema = z.union([z.string().min(1), z.object({ file: z.string().min(1), baseUrl: z.string().min(1).optional() })]);
+export type ApiSpecEntry = z.infer<typeof ApiSpecEntrySchema>;
+
+/** `api.spec` as a list of `{ file, baseUrl? }`. */
+export function apiSpecEntries(spec: ApiSpecEntry | ApiSpecEntry[] | undefined): Array<{ file: string; baseUrl?: string }> {
+  return (Array.isArray(spec) ? spec : spec ? [spec] : []).map((e) => (typeof e === 'string' ? { file: e } : e));
+}
+
 export const ApiSpecOptionsSchema = {
-  /** OpenAPI/Swagger spec file(s): every API step is validated against them. */
-  spec: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
+  /** OpenAPI/Swagger spec file(s): every API step is validated against them (an entry with `baseUrl` only the calls to that base URL). */
+  spec: z.union([ApiSpecEntrySchema, z.array(ApiSpecEntrySchema)]).optional(),
   /** enforce (default): a contract break fails the step; warn: it is recorded only. */
   specMode: z.enum(['enforce', 'warn']).default('enforce'),
   /** Also fail calls that match no operation in the spec (default false). */

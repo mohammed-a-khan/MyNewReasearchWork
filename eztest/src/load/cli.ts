@@ -16,6 +16,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { stringify as toYaml } from 'yaml';
 import type { CliIO } from '../cli/program.js';
+import { loadDotenvFile } from '../config/dotenv.js';
 import { evaluateReadiness, loadReadinessPolicy, type ReadinessResult } from '../insights/index.js';
 import { loadRunArtifacts } from '../insights/index.js';
 import { ResultsClient } from '../server/client.js';
@@ -109,8 +110,14 @@ export function registerLoadCommands(program: Command, io: CliIO): void {
       .option('--server-project <name>', 'results server project', 'default')
       .option('--json', 'print the results JSON')
       .option('-q, --quiet', 'no live lines')
+      .option('-e, --env <name>', 'also read .env.<name> (after .env), like eztest run')
       .action(async (file: string, o: Record<string, string | number | boolean | undefined>) => {
         try {
+          // ${env.X} in a scenario reads the environment: fill it from .env files as eztest run does
+          // (variables already set in the real environment win), so a suite has one place for secrets.
+          const dotenv: Record<string, string> = {};
+          for (const f of ['.env', ...(o.env ? [`.env.${String(o.env)}`] : [])]) Object.assign(dotenv, loadDotenvFile(cwdPath(f)) ?? {});
+          for (const [k, v] of Object.entries(dotenv)) if (process.env[k] === undefined) process.env[k] = v;
           let s = await loadScenarioFile(cwdPath(file));
           if (typeof o.scale === 'number') s = scaleScenario(s, o.scale);
           const { parseDurationMs } = await import('./model.js');

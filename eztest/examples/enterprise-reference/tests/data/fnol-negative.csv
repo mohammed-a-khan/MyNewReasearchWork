@@ -1,0 +1,9 @@
+caseId,policyId,type,incidentDate,amount,description,expectedStatus,expectedError,expectedMessage,runFlag
+NEG-01,POL-H-100877,WATER,2025-11-02,900,Leak from the boiler upstairs,409,policy_not_active,claims can only be filed on active policies,Y
+NEG-02,POL-H-100231,COLLISION,2026-09-30,1200,Car hit the garden wall,422,validation_failed,type must be one of WATER,Y
+NEG-03,POL-H-100231,WATER,2025-06-01,700,Old leak found during renovation,422,validation_failed,incidentDate is outside the policy period,Y
+NEG-04,POL-M-200455,GLASS,2026-10-01,0,Windscreen chip from gravel,422,validation_failed,amountClaimed must be positive,Y
+NEG-05,POL-M-200455,THEFT,2026-10-01,999999,Car stolen from the driveway,422,validation_failed,amountClaimed exceeds the sum insured,Y
+NEG-06,POL-H-100231,FIRE,2026-10-01,300,short,422,validation_failed,description must be at least 10 characters,Y
+NEG-07,POL-H-999999,FIRE,2026-10-01,300,Unknown policy number used by broker,404,policy_not_found,policy POL-H-999999 not found,Y
+NEG-08,POL-H-100231,STORM,2026-10-01,300,Pending business decision on storm cover,422,validation_failed,to be confirmed,N

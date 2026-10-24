@@ -1,0 +1,17 @@
+# ClaimDesk (back office) review page.
+screen: ClaimDesk
+elements:
+  search:
+    description: the "Find claim" field
+    locators: [css=#q]
+  approvedAmount:
+    description: the "Approved amount" field
+    locators: [css=#approvedAmount]
+  reason:
+    description: the "Decision reason" dropdown
+    locators: [css=#reason]
+  approve: role=button[name="Approve"]
+  reject: role=button[name="Reject"]
+  refer: role=button[name="Refer to senior"]
+  status: css=#status
+  payout: css=#payout

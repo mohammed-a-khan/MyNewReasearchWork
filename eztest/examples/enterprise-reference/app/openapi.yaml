@@ -1,0 +1,316 @@
+openapi: 3.0.3
+info:
+  title: Larkspur Mutual partner API
+  version: 1.4.0
+  description: Quotes, policies, claims and batch jobs for broker and reporting partners. Invented for the EZTest reference system.
+servers:
+  - url: http://127.0.0.1:4702
+security:
+  - oauth2: []
+paths:
+  /v1/health:
+    get:
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, time]
+                properties:
+                  status: { type: string, enum: [UP] }
+                  service: { type: string }
+                  time: { type: string, format: date-time }
+  /v1/policies/{policyId}:
+    get:
+      operationId: getPolicy
+      parameters:
+        - { name: policyId, in: path, required: true, schema: { type: string, pattern: '^POL-[HM]-\d{6}$' } }
+      responses:
+        '200': { description: The policy, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/customers/{customerId}/policies:
+    get:
+      operationId: listCustomerPolicies
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Policies of the customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Policy' } }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/quotes:
+    post:
+      operationId: createQuote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+      responses:
+        '201': { description: Rated quote, content: { application/json: { schema: { $ref: '#/components/schemas/Quote' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/quotes/{quoteId}:
+    get:
+      operationId: getQuote
+      parameters:
+        - { name: quoteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The quote, content: { application/json: { schema: { $ref: '#/components/schemas/StoredQuote' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/claims:
+    get:
+      operationId: listClaims
+      parameters:
+        - { name: customerId, in: query, required: true, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: '#/components/schemas/ClaimStatus' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: A page of claims
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ClaimSummary' } }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimRequest' }
+      responses:
+        '201': { description: Claim created, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/claims/{claimId}:
+    get:
+      operationId: getClaim
+      parameters:
+        - { name: claimId, in: path, required: true, schema: { type: string, pattern: '^CLM-\d{6}$' } }
+      responses:
+        '200': { description: The claim, content: { application/json: { schema: { $ref: '#/components/schemas/Claim' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/batch/jobs:
+    post:
+      operationId: startBatchJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessDate]
+              properties:
+                job: { type: string, enum: [nightly-settlement] }
+                businessDate: { type: string, format: date }
+      responses:
+        '202': { description: Started, content: { application/json: { schema: { $ref: '#/components/schemas/BatchJob' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/batch/jobs/{jobId}:
+    get:
+      operationId: getBatchJob
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The job, content: { application/json: { schema: { $ref: '#/components/schemas/BatchJob' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /graphql:
+    post:
+      operationId: graphql
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                variables: { type: object }
+      responses:
+        '200': { description: GraphQL result, content: { application/json: { schema: { type: object } } } }
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth/token
+          scopes:
+            claims:read: Read claims
+            claims:write: File claims
+            quotes:write: Rate quotes
+            policies:read: Read policies
+            batch:run: Run batch jobs
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, message]
+            properties:
+              error: { type: string }
+              message: { type: string }
+  schemas:
+    Money: { type: number, minimum: 0, multipleOf: 0.01 }
+    ClaimStatus: { type: string, enum: [SUBMITTED, IN_REVIEW, REFERRED, APPROVED, REJECTED, SETTLEMENT_ACCEPTED, SETTLED] }
+    Policy:
+      type: object
+      required: [policyId, customerId, product, status, sumInsured, deductible, region, startDate, endDate, annualPremium]
+      properties:
+        policyId: { type: string }
+        customerId: { type: string }
+        product: { type: string, enum: [HOME, MOTOR] }
+        status: { type: string, enum: [ACTIVE, LAPSED] }
+        sumInsured: { type: number }
+        deductible: { type: number }
+        region: { type: string, enum: [NORTH, SOUTH, COAST, METRO] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        annualPremium: { type: number }
+    QuoteRequest:
+      type: object
+      required: [product, sumInsured, region, riskAge]
+      properties:
+        product: { type: string, enum: [HOME, MOTOR] }
+        sumInsured: { type: number, minimum: 1000, maximum: 10000000 }
+        region: { type: string, enum: [NORTH, SOUTH, COAST, METRO] }
+        riskAge: { type: integer, minimum: 0 }
+        noClaimsYears: { type: integer, minimum: 0 }
+    Premium:
+      type: object
+      required: [basePremium, regionFactor, loadingPct, loadedPremium, noClaimsDiscountPct, discount, netPremium, taxRate, tax, totalPremium]
+      properties:
+        basePremium: { type: number }
+        regionFactor: { type: number }
+        loadingPct: { type: number }
+        loadedPremium: { type: number }
+        noClaimsDiscountPct: { type: number }
+        discount: { type: number }
+        netPremium: { type: number, minimum: 150 }
+        taxRate: { type: number }
+        tax: { type: number }
+        totalPremium: { type: number }
+    Quote:
+      allOf:
+        - $ref: '#/components/schemas/QuoteRequest'
+        - type: object
+          required: [quoteId, premium]
+          properties:
+            quoteId: { type: string, pattern: '^Q-\d+$' }
+            premium: { $ref: '#/components/schemas/Premium' }
+    StoredQuote:
+      type: object
+      required: [quoteId, product, sumInsured, region, riskAge, noClaimsYears, premium]
+      properties:
+        quoteId: { type: string }
+        product: { type: string }
+        sumInsured: { type: number }
+        region: { type: string }
+        riskAge: { type: integer }
+        noClaimsYears: { type: integer }
+        premium:
+          type: object
+          required: [basePremium, loadedPremium, discount, netPremium, tax, totalPremium]
+          properties:
+            basePremium: { type: number }
+            loadedPremium: { type: number }
+            discount: { type: number }
+            netPremium: { type: number }
+            tax: { type: number }
+            totalPremium: { type: number }
+    ClaimRequest:
+      type: object
+      required: [policyId, type, incidentDate, amountClaimed, description]
+      properties:
+        policyId: { type: string }
+        type: { type: string, enum: [WATER, FIRE, THEFT, STORM, GLASS, COLLISION] }
+        incidentDate: { type: string, format: date }
+        amountClaimed: { type: number, exclusiveMinimum: true, minimum: 0 }
+        description: { type: string, minLength: 10 }
+        externalRef: { type: string }
+    ClaimSummary:
+      type: object
+      required: [claimId, policyId, customerId, type, channel, incidentDate, reportedAt, amountClaimed, status, priority, lateNotification]
+      properties:
+        claimId: { type: string, pattern: '^CLM-\d{6}$' }
+        policyId: { type: string }
+        customerId: { type: string }
+        type: { type: string }
+        channel: { type: string, enum: [PORTAL, BROKER, PHONE] }
+        incidentDate: { type: string, format: date }
+        reportedAt: { type: string, format: date-time }
+        description: { type: string }
+        amountClaimed: { type: number }
+        status: { $ref: '#/components/schemas/ClaimStatus' }
+        priority: { type: string, enum: [NORMAL, HIGH] }
+        lateNotification: { type: boolean }
+        approvedAmount: { type: number, nullable: true }
+        payoutAmount: { type: number, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        externalRef: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+    Claim:
+      allOf:
+        - $ref: '#/components/schemas/ClaimSummary'
+        - type: object
+          required: [documents]
+          properties:
+            documents:
+              type: array
+              items:
+                type: object
+                required: [filename, size, sha256]
+                properties:
+                  filename: { type: string }
+                  contentType: { type: string }
+                  size: { type: integer }
+                  sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    BatchJob:
+      type: object
+      required: [jobId, job, businessDate, status, startedAt]
+      properties:
+        jobId: { type: string }
+        job: { type: string }
+        businessDate: { type: string, format: date }
+        status: { type: string, enum: [RUNNING, COMPLETED, FAILED] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, nullable: true }
+        fileName: { type: string, nullable: true }
+        recordCount: { type: integer, nullable: true }
+        totalAmount: { type: number, nullable: true }

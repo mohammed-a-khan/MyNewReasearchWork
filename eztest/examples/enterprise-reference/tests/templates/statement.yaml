@@ -1,0 +1,21 @@
+# Extraction template for the Larkspur claim settlement statement (PDF).
+name: larkspur-settlement-statement
+locale: en
+fields:
+  - { name: statementNo, label: Statement No, readFrom: right }
+  - { name: claimRef, label: Claim reference, readFrom: right }
+  - { name: policyNo, label: Policy number, readFrom: right }
+  - { name: holder, label: Policyholder, readFrom: right }
+  - { name: claimed, label: Amount claimed, type: currency, readFrom: right }
+  - { name: status, label: Status, readFrom: right }
+  - { name: paymentRef, label: Payment reference, readFrom: right }
+  - { name: assessed, regex: '^Assessed loss\s+(?<value>-?[\d,]+\.\d{2})$', type: currency }
+  - { name: excess, regex: '^Less policy excess\s+(?<value>-?[\d,]+\.\d{2})$', type: currency }
+  - { name: settlement, label: Settlement amount, type: currency, readFrom: right }
+tables:
+  - name: lines
+    key: Item
+    columns:
+      - Item
+      - { name: Amount, type: currency }
+    totalPattern: '^Settlement amount'

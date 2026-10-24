@@ -117,6 +117,10 @@ credentials), `${__vu}`, `${__iter}`, `${__uuid}`, `${__now}`, `${__rand(1,100)}
 (`${qty * 2}`). An unset variable is an error (type `template`): a correlation that did not
 happen never sends a stale value.
 
+`eztest load run` fills `${env.NAME}` from the suite's `.env` file (and `.env.<name>` with `-e <name>`),
+as `eztest run` does; variables set in the real environment win. `baseUrl` is a template too, so one
+scenario follows the environment: `baseUrl: "${env.API_URL}"`.
+
 Extractors: `json` (JSONPath), `regex` (group 1 or `group`), `boundary` (`left`/`right`),
 `from: header | headers | cookie | url | status` with `name`; `index: 0 | last | random | all`;
 `default`; `decode: url | html | base64`. A required extractor that matches nothing fails the

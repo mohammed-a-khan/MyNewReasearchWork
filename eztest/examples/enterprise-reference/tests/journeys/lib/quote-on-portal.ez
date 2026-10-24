@@ -1,0 +1,18 @@
+Journey: Rate a risk on the MyCover quote screen
+Id: quote-on-portal
+Tags: @library
+Description: Reusable sub-journey: fills the quote form, reads the breakdown and returns it with the quote reference.
+Params: product, sumInsured, regionLabel, riskAge, noClaimsYears
+Returns: premium, quoteRef
+
+Open /app/quote
+  Expect the page contains "Get a quote"
+Select "${product}" from the Product dropdown
+Fill the "Sum insured (GBP)" field with ${sumInsured}
+Select "${regionLabel}" from the Region dropdown
+Fill css=#riskAge with ${riskAge}
+Fill the "No-claims years" field with ${noClaimsYears}
+Click the "Calculate premium" button
+  Expect the page contains "Premium breakdown"
+Read the premium breakdown into premium
+Capture the text of testid=quote-ref as quoteRef

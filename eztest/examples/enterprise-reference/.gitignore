@@ -1,0 +1,5 @@
+var/
+tests/eztest-results/
+tests/.eztest/
+tests/.env
+tests/shards/

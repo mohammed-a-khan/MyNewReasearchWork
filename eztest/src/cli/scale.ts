@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, extname, join, resolve, isAbsolute } from 'node:path';
+import { apiSpecEntries, recordApiCoverage } from '../contracts/index.js';
 import { hostname } from 'node:os';
 import { Command, Option } from 'commander';
 import { EvidenceVault, type Journey, type RunResult } from '../core/index.js';
@@ -377,6 +378,9 @@ export function registerScaleCommands(program: Command, io: CliIO, load: Loader)
       io.out(`evidence: ${v.ok ? 'VALID' : 'TAMPERED'} merged chain (${v.merged.entries} entries, head ${v.merged.head.slice(0, 16)}...), ${v.shards.filter((x) => x.ok && x.linked).length}/${v.shards.length} shard chains linked`);
       const cfg = loaded?.config;
       const policy = o.policy ?? cfg?.readiness.policyPath;
+      // API coverage of the whole merged run (each shard covered only its share of the operations).
+      const specs = apiSpecEntries(cfg?.api.spec).map((e) => ({ ...e, file: isAbsolute(e.file) ? e.file : resolve(io.cwd, e.file) }));
+      if (specs.length) await recordApiCoverage(r.runDir, specs).catch((e: Error) => io.err(`warning: API coverage not recorded: ${e.message}`));
       const a = await analyzeRun(r.runDir, {
         historyPath: resolve(io.cwd, '.eztest', 'history.json'),
         recordHistory: o.history !== false,

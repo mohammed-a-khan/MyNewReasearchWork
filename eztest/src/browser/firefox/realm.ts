@@ -137,8 +137,9 @@ export class FfRealm extends ExecutionContext {
 
   /** The realm is gone (its document was replaced): forget it now, not when the event arrives, and say so. */
   private gone(e: unknown): Error {
-    // A stale element reference ("no such node") leaves the realm alive.
-    if (/no such frame|Realm with id|discarded|does not exist|not found/i.test((e as Error).message) && !/no such node|no such handle/i.test((e as Error).message)) {
+    // A stale element reference ("no such node", or the agent's "realm is null" for a node whose
+    // document went away) leaves the realm alive: the caller retries with a fresh element.
+    if (/no such frame|Realm with id|discarded|does not exist|not found/i.test((e as Error).message) && !/no such node|no such handle|realm is null/i.test((e as Error).message)) {
       if (!this.disposed && this.frame) this.frame.contextDestroyed(this);
       this.disposed = true;
     }

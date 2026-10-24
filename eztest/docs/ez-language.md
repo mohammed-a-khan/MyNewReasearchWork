@@ -249,7 +249,7 @@ Times read as `YYYY-MM-DD[ HH:mm[:ss]]` in the journey's `Timezone:`, else the r
 | Named-query values | `Get the value of query "INVOICE_TOTAL" on ledger with invoice_no=${no} as total` · `Get the first row of query "ANY_OPEN_INVOICE" as pick` · `Get the row count of query "OPEN_INVOICES" with customer_id=7 as n` |
 | Named-query checks | `Expect query "OPEN_INVOICES" on ledger with customer_id=7 returns 2 rows` · `... returns at least 1 row` · `... returns no rows` · `Wait until query "INVOICE_POSTED" with invoice_no=${no} returns 1 row within 30 seconds every 2 seconds` |
 | Compare | `Compare ${dbRows} with ${uiRows} by id` · `Compare rows dbRows to apiRows by id, name ignoring case and store the result as diff` |
-| Rows vs a named query | `Expect rows rows equal query "INVOICE_LINES" on ledger by key "Id" ignoring columns "Updated" with tolerance 0.01` · `... with params "OPEN", ${orderKey} ...` · `Expect rows uiRows equal rows dbRows by key "Id"` (a step of its own; column names match case-insensitively) |
+| Rows vs a named query | `Expect rows rows equal query "INVOICE_LINES" on ledger by key "Id" ignoring columns "Updated" with tolerance 0.01` · `... with params "OPEN", ${orderKey} ...` · `... on ledger with status="OPEN", region=${region} by key ...` (named binds) · `Expect rows uiRows equal rows dbRows by key "Id"` (a step of its own; column names match case-insensitively) |
 | Check | `Expect query rows returns 2 rows` · `Expect the query rows returns more than 2 rows` · `Expect ${rows.0.status} equals "Open"` |
 
 **SQL is never built from values.** Every `${var}` in SQL (and every quoted literal that contains one, such as `'%${name}%'`) becomes a bound parameter in the connection's placeholder style (`?`, `$n`, `@pN`, `:n` on Oracle). A captured value like `EU' OR '1'='1` stays a value.
@@ -481,13 +481,14 @@ These open a non-browser surface. While it is active, the ordinary phrasings (Cl
 
 On a device, the usual phrasings work natively: `Tap the "Log in" button`, `Type ... into ...`, `Go back`, `Press Enter`, `Open "shop://cart"` (a deep link) and `Expect the screen to contain "ORD-"`.
 
-## Expectations (70 phrasings)
+## Expectations (72 phrasings)
 
 | Checks | Examples |
 |---|---|
 | Screen text (any surface) | `the screen contains "ACCOUNT FOUND"` · `the screen does not contain "ERROR"` · `Expect the screen to contain "READY"` |
+| Captured values | `${mail.text} contains "approved"` · `${status} does not contain "Error"` |
 | Page text | `the page contains "Saved"` · `the page does not contain "Error"` · `I see "Welcome"` · `I do not see "Error"` · `the text "Saved" is visible` |
-| URL and title | `the URL contains "/orders"` · `the URL matches "orders/\d+"` · `the URL is "/dashboard"` · `the title contains "Orders"` |
+| URL and title | `the URL contains "/orders"` · `the URL does not contain "/login"` · `the URL matches "orders/\d+"` · `the URL is "/dashboard"` · `the title contains "Orders"` |
 | Elements | `the Save button is visible` · `the spinner is hidden` · `the Status field has value "Open"` · `the value of the Total field is "10.00"` · `the Heading has text "Orders"` · `the "Order created" toast contains "created"` |
 | States | `the Save button is enabled` · `the Save button is disabled` · `the Name field is editable` · `the Reference field is read-only` · `the Search field is focused` · `the Terms checkbox is checked` · `the Terms checkbox is not checked` · `the Footer section is in the viewport` · `the Notes field is empty` · `the Chart is stable` · `the Spinner is detached` |
 | Attributes, CSS, classes | `the "Docs" link has attribute "href"` · `the "href" attribute of the "Docs" link is "/docs"` · `the "class" attribute of #x contains "on"` · `the Name field does not have attribute "disabled"` · `the CSS "color" of #badge is "rgb(200, 0, 0)"` · `#badge has class "active"` · `#badge does not have class "inactive"` |

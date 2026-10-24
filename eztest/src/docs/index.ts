@@ -15,3 +15,4 @@ export * from './threeway.js';
 export * from './diff.js';
 export * from './checks.js';
 export * from './report.js';
+export { docsReadinessInputs, isDocumentCheckEvidence } from './readiness.js';

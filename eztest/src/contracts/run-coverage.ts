@@ -12,6 +12,7 @@ import { EvidenceVault } from '../core/index.js';
 import { readEvidenceManifest } from '../insights/artifacts.js';
 import { apiCoverageMarkdown, callsFromNetworkLogs, computeApiCoverage, type ApiCall, type ApiCoverageReport } from './coverage.js';
 import type { ContractEvidence } from './hook.js';
+import { urlUnder } from './hook.js';
 import { cachedSpec } from './openapi.js';
 
 export const API_COVERAGE_FILE = 'api-coverage.json';
@@ -22,7 +23,8 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
   const calls: ApiCall[] = [];
   const covered = new Set<string>();
   for (const e of evidence) {
-    if (e.kind !== 'data' || !e.path.startsWith('contracts/')) continue;
+    // Paths are run-relative; a merged run's are under shards/<shard run>/.
+    if (e.kind !== 'data' || !/^(?:shards\/[^/]+\/)?contracts\//.test(e.path)) continue;
     try {
       const c = JSON.parse(await readFile(join(runDir, e.path), 'utf8')) as ContractEvidence;
       calls.push({ method: c.method, url: c.url, status: c.status, ...(e.journeyId ? { journeyId: e.journeyId } : {}), ...(e.stepId ? { stepId: e.stepId } : {}), evidenceId: e.id, headerNames: c.headerNames, violations: c.violations.length, hasBody: c.hasBody });
@@ -32,7 +34,7 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
     }
   }
   for (const e of evidence) {
-    if (e.kind !== 'network' || !e.path.startsWith('api/') || covered.has(`${e.journeyId}|${e.stepId}`)) continue;
+    if (e.kind !== 'network' || !/^(?:shards\/[^/]+\/)?api\//.test(e.path) || covered.has(`${e.journeyId}|${e.stepId}`)) continue;
     try {
       const raw = JSON.parse(await readFile(join(runDir, e.path), 'utf8')) as { entries?: Array<Record<string, unknown>> };
       calls.push(...callsFromNetworkLogs([{ evidenceId: e.id, journeyId: e.journeyId, stepId: e.stepId, entries: (raw.entries ?? []) as never }]));
@@ -43,13 +45,20 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
   return calls;
 }
 
-export async function computeRunApiCoverage(runDir: string, specFiles: string[]): Promise<ApiCoverageReport[]> {
+/**
+ * API coverage of a run per spec. A spec given as `{ file, baseUrl }` (api.spec entries) counts only the
+ * calls to its base URL, so a suite that calls several services is not measured against one service's spec.
+ */
+export async function computeRunApiCoverage(runDir: string, specFiles: Array<string | { file: string; baseUrl?: string }>): Promise<ApiCoverageReport[]> {
   const calls = await apiCallsOfRun(runDir);
-  return specFiles.map((f) => computeApiCoverage(cachedSpec(resolve(f)), calls));
+  return specFiles.map((f) => {
+    const { file, baseUrl } = typeof f === 'string' ? { file: f, baseUrl: undefined } : f;
+    return computeApiCoverage(cachedSpec(resolve(file)), baseUrl ? calls.filter((c) => urlUnder(c.url, baseUrl)) : calls);
+  });
 }
 
 /** Compute, write (api-coverage.json/.md) and record the run's API coverage as evidence. */
-export async function recordApiCoverage(runDir: string, specFiles: string[]): Promise<{ reports: ApiCoverageReport[]; evidenceId?: string }> {
+export async function recordApiCoverage(runDir: string, specFiles: Array<string | { file: string; baseUrl?: string }>): Promise<{ reports: ApiCoverageReport[]; evidenceId?: string }> {
   const reports = await computeRunApiCoverage(runDir, specFiles);
   const json = JSON.stringify({ version: 1, reports }, null, 2);
   let evidenceId: string | undefined;

@@ -1,0 +1,8 @@
+# dev: the reference system on this machine (node ../server.ts). Secrets come from .env (see .env.example).
+environment: dev
+vars:
+  PORTAL_URL: ${LARKSPUR_PORTAL_URL:-http://127.0.0.1:4700}
+  BACKOFFICE_URL: ${LARKSPUR_BACKOFFICE_URL:-http://127.0.0.1:4701}
+  API_URL: ${LARKSPUR_API_URL:-http://127.0.0.1:4702}
+  SOAP_URL: ${LARKSPUR_SOAP_URL:-http://127.0.0.1:4703}
+concurrency: 4

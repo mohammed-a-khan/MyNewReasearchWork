@@ -1,0 +1,23 @@
+Journey: The customer's key pages meet WCAG 2.2 AA
+Id: a11y-customer-pages
+Tags: @a11y @nonfunctional
+Role: policyholder
+Risk: 4
+Requirements: A11Y-1
+
+Open /login
+  Expect the page contains "Sign in to MyCover"
+Check the page for accessibility issues at WCAG 2.2 level AA
+Log in
+Open /app/home
+  Expect the page contains "Your policies"
+Check the page for accessibility issues at WCAG 2.2 level AA
+Click the "Get a quote" link
+  Expect the page contains "Calculate premium"
+Check the page for accessibility issues at WCAG 2.2 level AA
+Click the "Make a claim" link
+  Expect the page contains "Supporting documents"
+Check the page for accessibility issues at WCAG 2.2 level AA
+Click the "My claims" link
+  Expect the page contains "My claims"
+Check the page for accessibility issues at WCAG 2.2 level AA

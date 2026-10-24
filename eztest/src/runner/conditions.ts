@@ -49,6 +49,26 @@ function fail(condition: Condition, message: string, actual?: string): Condition
 function ok(condition: Condition, actual?: string): ConditionResult {
   return { condition, passed: true, ...(actual !== undefined ? { actual } : {}) };
 }
+/** A dotted path ("order.lines.0.sku") into a variables record. */
+function pathIn(vars: Record<string, unknown>, key: string): unknown {
+  let cur: unknown = vars;
+  for (const part of key.split('.')) {
+    if (cur && typeof cur === 'object' && part in (cur as Record<string, unknown>)) cur = (cur as Record<string, unknown>)[part];
+    else return undefined;
+  }
+  return cur;
+}
+
+const NUMERIC = /^\s*-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\s*$/i;
+/** Equal as text, or as numbers when both sides are numbers or numeric text ("2450.7" equals 2450.70). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (show(a) === show(b)) return true;
+  const num = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && NUMERIC.test(x) ? Number(x) : undefined);
+  const x = num(a);
+  const y = num(b);
+  return x !== undefined && y !== undefined && Number.isFinite(x) && Math.abs(x - y) < 1e-9;
+}
+
 function show(v: unknown): string {
   if (v === undefined) return 'undefined';
   return typeof v === 'string' ? v : JSON.stringify(v);
@@ -82,7 +102,8 @@ export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Pr
     }
     case 'pageContainsText':
     case 'pageNotContainsText': {
-      const body = norm(await page.locator('body').innerText({ timeout: 2000 }).catch(() => ''));
+      // Inside a frame block (In the "payment" frame ... End) the page is the current frame.
+      const body = norm(await rootFor(page, env.frames).locator('body').innerText({ timeout: 2000 }).catch(() => ''));
       const v = norm(I(c.value));
       if (!v) return fail(c, 'expected text is empty');
       const has = body.includes(v);
@@ -136,15 +157,20 @@ export async function evaluateConditionOnce(c: Condition, env: ConditionEnv): Pr
       return n === c.equals ? ok(c, String(n)) : fail(c, `${c.target.description}: found ${n}, expected ${c.equals}`, String(n));
     }
     case 'ledgerEquals': {
-      const v = ledger.get(c.key);
-      if (v === undefined) return fail(c, `ledger has no value "${c.key}"`);
+      // ${a} == ${b}: both sides are looked up like ${...} interpolation (captured values, then journey and run variables).
+      const lookup = (k: string) => {
+        const hit = ledger.get(k);
+        return hit !== undefined ? hit : pathIn(env.vars(), k);
+      };
+      const v = lookup(c.key);
+      if (v === undefined) return fail(c, `no value "${c.key}" (not captured, and no journey or run variable of that name)`);
       let want: unknown;
       if (c.otherKey !== undefined) {
-        want = ledger.get(c.otherKey);
-        if (want === undefined) return fail(c, `ledger has no value "${c.otherKey}"`);
+        want = lookup(c.otherKey);
+        if (want === undefined) return fail(c, `no value "${c.otherKey}" (not captured, and no journey or run variable of that name)`);
       } else if (c.expected !== undefined) want = I(c.expected);
       else return fail(c, 'ledgerEquals needs expected or otherKey');
-      return show(v) === show(want) ? ok(c, show(v)) : fail(c, `${c.key} is "${show(v)}", expected "${show(want)}"`, show(v));
+      return sameValue(v, want) ? ok(c, show(v)) : fail(c, `${c.key} is "${show(v)}", expected "${show(want)}"`, show(v));
     }
     case 'apiStatus': {
       const r = ledger.get(c.captureKey) as { status?: unknown } | undefined;

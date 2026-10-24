@@ -121,6 +121,13 @@ function apiOptions(tail: string, q: string[]): Partial<ApiCall> & { asRole?: st
   if (role) {
     out.asRole = role[1];
     rest = rest.slice(role[0].length).trim();
+  } else {
+    // "... with body from file "x" as broker and store as r": the role may also come after the options.
+    const trailing = /\s+as\s+([\w-]+)$/i.exec(rest);
+    if (trailing) {
+      out.asRole = trailing[1];
+      rest = rest.slice(0, trailing.index).trim();
+    }
   }
   for (const raw of rest.split(/(?:^|\s+)(?:and\s+)?with\s+/i)) {
     const p = raw.trim();
@@ -704,7 +711,7 @@ export const ADVANCED_RULES: IntentRule[] = [
   // ================================================================== API, GraphQL, SOAP, WebSocket
   ...cat('API', [
     { name: 'call-api-options', keywords: ['call', 'send'], example: 'Call API "POST /api/notes" with form title=Hello, body=World and store as note',
-      re: new RegExp(String.raw`^(?:call\s+(?:the\s+)?api|send\s+(?:an?\s+)?(?:api\s+)?request)\s+(${Q})\s+((?:as\s+[\w-]+\s+)?(?:and\s+)?with\s+(?:form|query|params|headers?|multipart|body\s+from|json\s+from|file|timeout|errors|role|(?:the\s+)?client\s+cert(?:ificate)?)\b.*)$`, 'i'),
+      re: new RegExp(String.raw`^(?:call\s+(?:the\s+)?api|send\s+(?:an?\s+)?(?:api\s+)?request)\s+(${Q})\s+((?:as\s+[\w-]+\s+)?(?:and\s+)?with\s+(?:form|query|params|headers?|multipart|body|json|file|timeout|errors|role|(?:the\s+)?client\s+cert(?:ificate)?)\b.*)$`, 'i'),
       build: (m, q) => {
         const r = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)$/i.exec(V(m[1], q).trim());
         if (!r) throw new Error('API call must look like "GET /path"');

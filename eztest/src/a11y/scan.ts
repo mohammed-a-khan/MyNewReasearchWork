@@ -282,13 +282,19 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
   for (const id of ['keyboard.trap', 'focus.visible', 'focus.hidden-stop', 'focus.order', 'focus.not-obscured']) bucket(m, id);
   try {
     if (prep.tabbables === 0) return;
-    const limit = Math.max(3, Math.min(prep.tabbables + 3, opts.maxTabStops ?? 80));
+    let limit = Math.max(3, Math.min(prep.tabbables + 3, opts.maxTabStops ?? 80));
     const stops: FocusStop[] = [];
     const seen = new Map<number, number>();
     let cycleStart = -1;
+    let inside = 0;
     for (let i = 0; i < limit; i++) {
       await page.keyboard.press('Tab');
-      const s = await call<FocusStop>(main, 'kbProbe()', true);
+      let s = await call<FocusStop>(main, 'kbProbe()', true);
+      if (s.key !== 0 && s.focused === false) {
+        // Another window took focus (parallel journeys in one Firefox): take it back and look again.
+        await page.bringToFront().catch(() => undefined);
+        s = await call<FocusStop>(main, 'kbProbe()', true);
+      }
       if (s.key === 0) {
         if (i > 0) break; // wrapped to the document: focus left every component
         continue;
@@ -296,9 +302,17 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
       if (seen.has(s.key)) {
         // Tab from the last stop moved focus to the browser UI and the document kept it (Firefox).
         if (s.last && stops[stops.length - 1]?.key === s.key) break;
+        // The same element again right away: Tab moves between the parts of a composite native control
+        // (the day, month and year of <input type=date>, the fields of time inputs). Not a cycle.
+        if (stops[stops.length - 1]?.key === s.key && inside < 8) {
+          inside++;
+          limit++;
+          continue;
+        }
         cycleStart = seen.get(s.key)!;
         break;
       }
+      inside = 0;
       seen.set(s.key, stops.length);
       stops.push(s);
       // The next Tab would leave the page for the browser UI (and Firefox does not hand focus back): stop here.
@@ -306,7 +320,7 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
     }
 
     for (const s of stops) {
-      if (s.inOpaqueFrame) continue;
+      if (s.inOpaqueFrame || s.focused === false) continue; // not judged: no visible focus styles without window focus
       if (!s.visible) {
         add(m, 'focus.hidden-stop', 'fail', nodeOf(s, `Focus lands on ${s.label}, which is not visible.`), maxNodes);
         continue;
@@ -347,6 +361,10 @@ async function keyboardWalk(page: Page, m: Merged, opts: A11yScanOptions, maxNod
 
 /** When focus sits outside the document (browser UI), one Tab brings it back into the page. */
 async function focusDocument(page: Page, main: Frame): Promise<void> {
+  // Firefox matches :focus and :focus-visible only in the focused window: with several pages open
+  // (actors, popups, parallel journeys in one browser) this page may not be it, and every stop
+  // would look unfocused. Bring it to the front first.
+  if (!(await main.evaluate('document.hasFocus()'))) await page.bringToFront().catch(() => undefined);
   for (let i = 0; i < 2; i++) {
     if (await main.evaluate('document.hasFocus()')) return;
     await page.keyboard.press('Tab');

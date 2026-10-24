@@ -28,13 +28,14 @@ export type RoleLogin =
   | { type: 'entra'; tenantHint?: string; staySignedIn?: boolean; promptLogin?: boolean };
 
 export interface RoleDefinition {
-  /** Plain username, secret://ref, or handle. Plain usernames are not treated as secrets. */
-  username: string | SecretHandle;
-  /** secret://ref, ENC(...), or handle. A plain string is wrapped as an inline secret. */
-  password: string | SecretHandle;
+  /** Plain username, secret://ref, or handle. Plain usernames are not treated as secrets. Absent for an API-only role. */
+  username?: string | SecretHandle;
+  /** secret://ref, ENC(...), or handle. A plain string is wrapped as an inline secret. Absent for an API-only role. */
+  password?: string | SecretHandle;
   /** Base32 TOTP seed: secret://ref, ENC(...), or handle. */
   totp?: string | SecretHandle;
-  loginUrl: string;
+  /** Where the browser signs in. Absent for an API-only role (only `api`). */
+  loginUrl?: string;
   flow?: 'form';
   /** Login recipe (default: form). */
   login?: RoleLogin;
@@ -73,13 +74,17 @@ interface ResolvedRole {
   username: string | SecretHandle;
   password: SecretHandle;
   totp?: SecretHandle;
-  def: RoleDefinition;
+  def: RoleDefinition & { loginUrl: string };
 }
 
 const SELECTOR_RE = /^(css=|xpath=|text=|role=|id=|data-testid=|internal:|\/\/|#|\.|\[)|^[a-z][a-z0-9-]*[#.[:]/i;
 
-function successMatches(url: string, spec: string): boolean {
-  const m = /^\/(.+)\/([a-z]*)$/.exec(spec);
+/**
+ * `/regex/flags` is a pattern; anything else is a substring of the URL. Only valid RegExp flags
+ * make a pattern, so a plain path like "/app/home" or "/portal/dashboard" stays a path.
+ */
+export function successMatches(url: string, spec: string): boolean {
+  const m = /^\/(.+)\/([dgimsuyv]*)$/.exec(spec);
   if (m) {
     try {
       return new RegExp(m[1], m[2]).test(url);
@@ -95,6 +100,8 @@ export class IdentityVault {
   readonly sessionDir: string;
   readonly registry: SecretRegistry;
   private readonly roles = new Map<string, ResolvedRole>();
+  /** Roles with only API credentials (`api:`): usable on API steps, never for a browser sign-in. */
+  private readonly apiOnly = new Set<string>();
   private readonly tokens = new Map<string, TokenProvider>();
   private readonly maxAgeMs: number;
   private readonly timeoutMs: number;
@@ -109,22 +116,41 @@ export class IdentityVault {
     this.logger = o.logger ?? silentLogger;
     for (const [name, def] of Object.entries(o.roles)) {
       if (def.flow && def.flow !== 'form') throw new EzTestError(`Role ${name}: login flow "${def.flow}" is not supported`, 'IDENTITY_CONFIG');
+      const browser = def.loginUrl !== undefined || def.username !== undefined || def.password !== undefined;
+      if (!browser && def.api) {
+        // An API-only (machine) role: OAuth2 client credentials for API steps, no browser sign-in.
+        this.apiOnly.add(name);
+        continue;
+      }
       if (!def.loginUrl) throw new EzTestError(`Role ${name}: loginUrl is required`, 'IDENTITY_CONFIG');
+      if (def.username === undefined) throw new EzTestError(`Role ${name}: username is required`, 'IDENTITY_CONFIG');
+      if (def.password === undefined) throw new EzTestError(`Role ${name}: password is required`, 'IDENTITY_CONFIG');
       this.roles.set(name, {
         username: typeof def.username === 'string' && isSecretRef(def.username) ? this.registry.handle(def.username) : def.username,
         password: this.registry.from(def.password, `${name}.password`),
         totp: def.totp !== undefined ? this.registry.from(def.totp, `${name}.totp`) : undefined,
-        def,
+        def: { ...def, loginUrl: def.loginUrl },
       });
     }
   }
 
   roleNames(): string[] {
-    return [...this.roles.keys()];
+    return [...this.roles.keys(), ...this.apiOnly];
+  }
+
+  /** True for a role that has only API credentials (no browser sign-in). */
+  isApiOnly(name: string): boolean {
+    return this.apiOnly.has(name);
   }
 
   private role(name: string): ResolvedRole {
     const r = this.roles.get(name);
+    if (!r && this.apiOnly.has(name)) {
+      throw new EzTestError(
+        `Role "${name}" is an API-only role (identity.roles.${name}.api: OAuth2 client credentials), so it cannot sign in to a browser. Use it on API steps ("... as ${name}"), or give it username, password and loginUrl.`,
+        'IDENTITY_API_ONLY_ROLE',
+      );
+    }
     if (!r) throw new EzTestError(`Unknown role "${name}". Known roles: ${this.roleNames().join(', ') || '(none)'}`, 'IDENTITY_UNKNOWN_ROLE');
     return r;
   }
@@ -364,10 +390,9 @@ export class IdentityVault {
   }
 
   async tokenProvider(role: string): Promise<TokenProvider> {
-    const r = this.role(role);
     const hit = this.tokens.get(role);
     if (hit) return hit;
-    const api = r.def.api;
+    const api = this.apiOnly.has(role) ? this.o.roles[role].api : this.role(role).def.api;
     if (!api) throw new EzTestError(`Role ${role} has no API credentials configured`, 'IDENTITY_NO_API');
     const p: TokenProvider =
       'getToken' in api

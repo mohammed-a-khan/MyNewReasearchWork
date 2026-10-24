@@ -1,0 +1,15 @@
+# sit: the shared system-integration environment. Hosts are injected by the pipeline
+# (variable group "larkspur-sit"); secrets come from Key Vault through secret:// references.
+environment: sit
+vars:
+  PORTAL_URL: ${LARKSPUR_PORTAL_URL:-https://mycover.sit.larkspur.test}
+  BACKOFFICE_URL: ${LARKSPUR_BACKOFFICE_URL:-https://claimdesk.sit.larkspur.test}
+  API_URL: ${LARKSPUR_API_URL:-https://api.sit.larkspur.test}
+  SOAP_URL: ${LARKSPUR_SOAP_URL:-https://legacy.sit.larkspur.test}
+concurrency: 6
+retries: 1                     # shared environment: one isolated retry, and the flake classifier explains it
+identity:
+  sessionMaxAgeMinutes: 20
+messaging:
+  brokers:
+    events: { type: kafka, brokers: ["${KAFKA_BROKERS:-kafka-1.sit.larkspur.test:9092}"], clientId: eztest-larkspur-sit }

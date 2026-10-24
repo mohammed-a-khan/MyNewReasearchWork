@@ -72,13 +72,14 @@ function parseCaps(s: string, where: string): Record<string, string | number | b
   return out;
 }
 
-function parseVars(s: string, where: string, colonKeys = false): Record<string, string> {
+function parseVars(s: string, where: string, colonKeys = false, header = 'Variables'): Record<string, string> {
   const { text, quotes } = protectQuotes(s);
   const out: Record<string, string> = {};
-  for (const part of text.split(',')) {
+  // Data constraints read like the other filters ("where region=EU and segment=RETAIL"); quoted values are protected.
+  for (const part of text.split(header === 'Data' ? /\s*,\s*|\s+and\s+/i : ',')) {
     if (!part.trim()) continue;
     const m = (colonKeys ? /^\s*([A-Za-z_][\w.:-]*)\s*=\s*(.*)$/ : /^\s*([A-Za-z_][\w.-]*)\s*=\s*(.*)$/).exec(part);
-    if (!m) throw new Error(`${where}: expected name=value in Variables, got "${part.trim()}"`);
+    if (!m) throw new Error(`${where}: expected name=value in ${header}, got "${part.trim()}"`);
     out[m[1]] = literal(m[2], quotes);
   }
   return out;
@@ -89,7 +90,7 @@ function parseData(s: string, where: string): DataNeed[] {
   return s.split(';').filter((p) => p.trim()).map((part) => {
     const m = /^\s*(\w+)\s+as\s+(\w+)(?:\s+where\s+(.+))?\s*$/i.exec(part);
     if (!m) throw new Error(`${where}: expected "<Entity> as <alias> [where k=v, ...]" in Data, got "${part.trim()}"`);
-    return { entity: m[1], as: m[2], where: m[3] ? parseVars(m[3], where) : {}, strategy: 'find-or-create' as const };
+    return { entity: m[1], as: m[2], where: m[3] ? parseVars(m[3], where, false, 'Data') : {}, strategy: 'find-or-create' as const };
   });
 }
 
@@ -122,6 +123,17 @@ interface Frame {
 }
 
 /** Parse an .ez script into a validated Journey. Errors carry line numbers. */
+/**
+ * Examples placeholders (`<column>`) are filled in after a line is parsed, so they work where the
+ * grammar takes text but not where it needs a number (a status code, a row count, a duration).
+ * A line that fails with one gets a hint with the ${column} form, which works everywhere.
+ */
+function placeholderHint(line: string, message: string): string {
+  const m = /<([A-Za-z_][\w -]*)>/.exec(line);
+  if (!m || /placeholder/i.test(message)) return '';
+  return ` (Examples placeholders like <${m[1]}> are filled in after the line is read, so they cannot stand where a number is expected; every row value is also a variable, so write the check as an expression, e.g. "Expect \${response.status} == \${${m[1]}}")`;
+}
+
 export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey {
   const src = opts.source ? `${opts.source}:` : '';
   const j: JourneyInput & { steps: StepInput[] } = { id: '', name: '', steps: [] };
@@ -144,7 +156,7 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
     for (const c of [...(s.steps ?? []), ...(s.else ?? []), ...(s.catch ?? [])]) register(c);
   };
   const fail = (where: string, line: string, lineNumber: number, message: string, suggestions: string[] = []): never => {
-    throw new IntentParseError(`${where}: ${message}`, line, lineNumber, suggestions);
+    throw new IntentParseError(`${where}: ${message}${placeholderHint(line, message)}`, line, lineNumber, suggestions);
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -259,7 +271,7 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
       try {
         (prev.postconditions ??= []).push(parseCondition(e[1].replace(/[.;]+$/, '')));
       } catch (err) {
-        throw new IntentParseError(`${where}: ${(err as Error).message}`, line, lineNumber, []);
+        throw new IntentParseError(`${where}: ${(err as Error).message}${placeholderHint(line, (err as Error).message)}`, line, lineNumber, []);
       }
       continue;
     }
@@ -270,7 +282,7 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
       step = parseIntent(line, { lineNumber });
     } catch (err) {
       if (err instanceof IntentParseError) {
-        throw new IntentParseError(err.message.replace(/^line \d+: /, `${where}: `), line, lineNumber, err.suggestions);
+        throw new IntentParseError(err.message.replace(/^line \d+: /, `${where}: `) + placeholderHint(line, err.message), line, lineNumber, err.suggestions);
       }
       throw err;
     }

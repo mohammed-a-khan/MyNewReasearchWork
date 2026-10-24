@@ -1,0 +1,24 @@
+Journey: A leased synthetic customer's policy takes a broker claim, and the legacy system counts it
+Id: leased-customer-claim
+Tags: @data @api @soap @integration @regression
+Risk: 3
+Requirements: DATA-1, LEG-2
+Description: The Test Data Fabric leases one COAST retail customer per journey (never the same one to two workers at once). What the journey does depends on that customer's data: an active policy takes a claim, a lapsed one must refuse it.
+Data: Customer as holder where region=COAST and segment=DIRECT
+Requires: db claims "SELECT id FROM customers WHERE region = 'COAST' AND segment = 'DIRECT'" has at least 5 rows; api GET ${API_URL}/v1/health returns 200
+
+Get the first row of query "SELECT id, status, product FROM policies WHERE customer_id = '${holder.id}'" on claims as pol
+Set variable claimType to pol.product == "HOME" ? "WATER" : "GLASS"
+Count the rows of query "SELECT id FROM claims WHERE customer_id = '${holder.id}'" on claims as before
+
+If ${pol.status} == "ACTIVE" then
+  Run code "steps/claims.steps.ts#seedClaim" with policyId="${pol.id}", type="${claimType}", amount="420" as seeded
+  Call SOAP action "urn:larkspur:policyadmin:v1#GetClaimsSummary" on ${SOAP_URL}/legacy/PolicyAdministration with body '<pa:GetClaimsSummary xmlns:pa="urn:larkspur:policyadmin:v1"><pa:CustomerId>${holder.id}</pa:CustomerId></pa:GetClaimsSummary>' and store as summary
+  Set variable after to before + 1
+  Expect response summary "$.GetClaimsSummaryResponse.Summary.TotalClaims" equals "${after}"
+  Run code "steps/claims.steps.ts#removeClaim" with claimId="${seeded.claimId}" as cleanup
+Otherwise
+  Call API "POST ${API_URL}/v1/claims" with body '{"policyId":"${pol.id}","type":"${claimType}","incidentDate":"2026-10-01","amountClaimed":420,"description":"Claim on a lapsed policy must be refused"}' as broker and store as refused
+  Expect the refused response status is 409
+  Expect response refused "$.error" equals "policy_not_active"
+End

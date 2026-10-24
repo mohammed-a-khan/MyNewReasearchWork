@@ -317,6 +317,12 @@ ids (`btn-8f3a2c91`, `ember1234`, `:r5:`), with runs, journeys, first and last s
   fingerprints captured only for steps that have none, console/network logs
   kept only for attempts that did not pass. Actionability, re-render safety and
   diagnosis stay on.
+- `reliability.recycleBrowserAfter`: new journeys start on a fresh browser after this many, and the
+  old one closes when its last journey ends. The default is 15 on Firefox, whose parent process keeps
+  about 30 MB for every closed window (a 4-worker suite of ~45 journeys reached 10 GB and was killed
+  out of memory), and off on Chromium. A browser that dies mid-run (a crash, an out-of-memory kill) is
+  launched again for the journeys still to run; the journeys it took down are reported as environment
+  failures, and the run goes on and writes its results.
 - `eztest run --reuse-context` (`reliability.reuseContext`): one browser context
   per worker, reset between journeys: pages closed, the previous journey's
   listeners removed, cookies, permissions, routes, extra headers, geolocation and

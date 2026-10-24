@@ -71,12 +71,14 @@ A request whose tests expect a 4xx or 5xx status is sent `with errors allowed`.
 
 ```yaml
 api:
-  spec: specs/shop.yaml        # or a list of specs
+  spec: specs/shop.yaml        # or a list: [specs/shop.yaml, { file: specs/partner.yaml, baseUrl: https://partner.example/v2 }]
   specMode: enforce            # enforce (default) | warn
   specStrict: false            # also fail calls that match no operation
 ```
 
-With `api.spec` set, every REST API step is matched to an operation. The most specific path template wins: `/orders/special` beats `/orders/{id}`. Server base paths such as `/v1` are stripped before matching.
+With `api.spec` set, every REST API step is matched to an operation. The most specific path template wins: `/orders/special` beats `/orders/{id}`. Server base paths such as `/v1` are stripped before matching. A spec given as `{ file, baseUrl }` checks only the calls under that base URL, so calls to other services (an OAuth token endpoint, another app) are neither validated against it nor counted in its coverage.
+
+A request the spec calls invalid that the server refuses with a 4xx response is a passing negative test, not a violation; it is recorded as `refusedInvalidRequest`.
 
 EZTest validates the request and the response.
 

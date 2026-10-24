@@ -63,8 +63,9 @@ export function computeApiCoverage(spec: ApiSpec, calls: ApiCall[]): ApiCoverage
   const unmatched: ApiCoverageReport['unmatched'] = [];
   let violations = 0;
   for (const c of calls) {
-    violations += c.violations ?? 0;
     const hit = matchOperation(spec, c.method, c.url);
+    // A call to a path the spec does not document is reported under "not in the spec", not as a contract violation.
+    if (hit) violations += c.violations ?? 0;
     if (!hit) {
       unmatched.push({ method: c.method.toUpperCase(), url: c.url, ...(c.status !== undefined ? { status: c.status } : {}), ...(c.journeyId ? { journeyId: c.journeyId } : {}), ...(c.evidenceId ? { evidenceId: c.evidenceId } : {}) });
       continue;

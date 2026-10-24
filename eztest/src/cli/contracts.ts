@@ -12,7 +12,7 @@ import { parse as parseYaml } from 'yaml';
 import type { LoadedConfig } from '../config/index.js';
 import { createEngine, journeyFileResolver } from '../engine/index.js';
 import {
-  apiCoverageMarkdown, canReleaseText, contractFileName, contractFromMockStore, contractHash, contractToJson, createOpenApiMock, isContractFile, lintReportText, lintSpec,
+  apiCoverageMarkdown, apiSpecEntries, canReleaseText, contractFileName, contractFromMockStore, contractHash, contractToJson, createOpenApiMock, isContractFile, lintReportText, lintSpec,
   loadApiSpec, messageProducersFromConfig, mockStoreFromSpec, parseContract, readContractFile, recordApiCoverage, recordContractResults, stateHandlersFromConfig, verificationText, verifyContract,
   type Contract, type ContractVerification, type LintSeverity,
 } from '../contracts/index.js';
@@ -71,11 +71,10 @@ export function registerContractCommands(program: Command, io: CliIO, load: Load
     .option('--spec <files>', 'spec file(s), comma separated (default: api.spec)', list)
     .option('--min <ratio>', 'exit 1 when operation coverage is below this ratio', Number)
     .action(async (runDir: string, o: { spec?: string[]; min?: number; config?: string; env?: string; project?: string }) => {
-      let specs = (o.spec ?? []).map((s) => resolve(io.cwd, s));
+      let specs: Array<string | { file: string; baseUrl?: string }> = (o.spec ?? []).map((s) => resolve(io.cwd, s));
       if (!specs.length) {
         const l = await load(o);
-        const s = l.config.api.spec;
-        specs = (Array.isArray(s) ? s : s ? [s] : []).map((x) => resolve(io.cwd, x));
+        specs = apiSpecEntries(l.config.api.spec).map((x) => ({ ...x, file: resolve(io.cwd, x.file) }));
       }
       if (!specs.length) throw new Error('No spec: pass --spec or set api.spec in the config');
       const { reports } = await recordApiCoverage(resolve(io.cwd, runDir), specs);

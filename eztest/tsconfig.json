@@ -18,6 +18,7 @@
   "exclude": [
     "src/studio/client/**",
     "test/importers/fixtures/**",
-    "test/lint/fixtures/**"
+    "test/lint/fixtures/**",
+    "examples/enterprise-reference/**"
   ]
 }

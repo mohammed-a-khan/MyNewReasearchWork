@@ -226,6 +226,9 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         process.exitCode = 2;
         return;
       }
+      // Sub-journeys ("Run journey ...", hooks, Depends on) resolve against the whole journeys dir, also when
+      // only some paths run: `eztest run journeys/portal` still finds the @library journeys in journeys/lib.
+      const library = paths.length ? await libraryWith(all, cfg.journeysDir, io.cwd) : all;
       // Journeys tagged @library are reusable sub-journeys ("Run journey ..."): callable, not run on their own.
       const filtered = filterJourneys(all, { tags: o.tags, exclude: o.excludeTags, grep: o.grep, ids: onlyIds }).filter((j) => !j.tags.includes('library'));
       // Setup:/Teardown: journeys run around whatever is selected (not filtered by tags, not sharded).
@@ -305,13 +308,15 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         logger: log ? log.child({}) : createMaskedLogger(cfg.logLevel === 'debug' ? 'debug' : 'warn', loaded.masker),
         runOptions: {
           events,
-          library: all,
+          library,
           ...(o.trace ? { trace: true } : {}),
           ...(locks ? { locks } : {}),
           ...(cancel ? { signal: cancel.signal } : {}),
           ...(o.retryStrategy ? { retryStrategy: o.retryStrategy } : {}),
           screenshots: o.screenshots ?? cfg.screenshots ?? 'every-step',
           lenses: lensesFromConfig(cfg.lenses, io.cwd, { updateBaselines: !!o.updateBaselines, branchBaselines: cfg.vcs.branchScope.baselines, defaultBranch: cfg.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(cfg) }),
+          // A journey's Lenses: header turns a lens on for that journey only.
+          lensFactory: (spec: string) => lensesFromConfig([spec], io.cwd, { updateBaselines: !!o.updateBaselines, branchBaselines: cfg.vcs.branchScope.baselines, defaultBranch: cfg.vcs.branchScope.defaultBranch, a11y: a11yLensOptions(cfg) })[0],
           // Manual steps: ask in the terminal (--manual prompt), or record them as not executed.
           ...(o.manual === 'prompt' ? { manual: terminalManualProvider({ input: process.stdin, output: (t: string) => io.out(t), masker: loaded.masker }) } : {}),
           ...(o.timeTravel ? { timeTravel: { ...cfg.trace.timeTravel, enabled: true, masker: loaded.masker } } : {}),
@@ -331,6 +336,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const s = run.summary;
       if (log) log.info('run summary', { runId: run.runId, ...s, runDir });
       else io.out(`\n${s.total} journeys: ${s.passed} passed, ${s.passedHealed} passed-healed, ${s.failed} failed, ${s.skipped} skipped, ${s.errors} errors`);
+      // Why each journey failed, so a CI log is useful without opening the report.
+      if (!log) for (const line of failureLines(run)) io.out(loaded.masker.mask(line));
       if (s.passedHealed) out(`Healed steps need review: ${join(runDir, 'heal-proposals.json')}`);
       // Reliability: environment problems, and the circuit breaker.
       if (run.health?.preflight && !run.health.preflight.ok) io.err(`environment unavailable: ${run.health.preflight.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.message}`).join('; ')} (nothing ran)`);
@@ -893,4 +900,37 @@ export function buildProgram(io: CliIO = defaultIO): Command {
   for (const hook of registries.commands.list()) hook(program, io);
 
   return program;
+}
+
+/**
+ * The journeys a run can call: the selected ones plus every journey of the journeys dir (by id;
+ * the selected file wins). Files there that do not parse are left out here; they fail when they run.
+ */
+export async function libraryWith(selected: Journey[], journeysDir: string, cwd: string): Promise<Journey[]> {
+  const dir = resolve(cwd, journeysDir);
+  if (!existsSync(dir)) return selected;
+  const { journeys } = await loadJourneys([journeysDir], cwd);
+  const ids = new Set(selected.map((j) => j.id));
+  return [...selected, ...journeys.filter((j) => !ids.has(j.id))];
+}
+
+/** One line per failed or errored journey: the deepest failing step and the first line of its error. */
+export function failureLines(run: RunResult, max = 200): string[] {
+  type S = { stepId: string; intent: string; status: string; error?: { message?: string }; children?: S[] };
+  const firstFailure = (steps: S[]): S | undefined => {
+    for (const st of steps) {
+      if (st.status !== 'failed' && st.status !== 'error') continue;
+      return (st.children?.length ? firstFailure(st.children) : undefined) ?? st;
+    }
+    return undefined;
+  };
+  const lines: string[] = [];
+  for (const j of run.journeys) {
+    if (j.status !== 'failed' && j.status !== 'error') continue;
+    const st = firstFailure(j.steps as unknown as S[]);
+    const jerr = (j as { error?: { message?: string } }).error?.message;
+    const msg = (st?.error?.message ?? jerr ?? 'failed').split('\n')[0].slice(0, max);
+    lines.push(`  x ${j.journeyId}${st ? ` at "${st.intent.slice(0, 80)}"` : ''}: ${msg}`);
+  }
+  return lines.length ? ['failures:', ...lines] : [];
 }

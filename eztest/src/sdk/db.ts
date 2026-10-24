@@ -82,19 +82,19 @@ function templateQuery(strings: TemplateStringsArray, values: unknown[], capture
 function surface(connection?: string, base: DbOptions = {}) {
   return {
     /** Rows of a catalogue query. */
-    async query<T extends Row = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<T[]> {
+    async query<T extends object = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<T[]> {
       return ((await named(name, params, 'rows', { ...base, ...o }, connection)) ?? []) as T[];
     },
     /**
      * Rows of a catalogue query as `{ rows, rowCount }` (the result shape many database helpers
      * return, handy for migrated code). Parameters may be named (`{ region }`) or positional (`[a, b]`).
      */
-    async execute<T extends Row = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<{ rows: T[]; rowCount: number }> {
+    async execute<T extends object = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<{ rows: T[]; rowCount: number }> {
       const rows = ((await named(name, params, 'rows', { ...base, ...o }, connection)) ?? []) as T[];
       return { rows, rowCount: rows.length };
     },
     /** The first row (fails when there is none). */
-    async row<T extends Row = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<T> {
+    async row<T extends object = Row>(name: string, params?: Record<string, BindValue> | BindValue[], o: DbOptions = {}): Promise<T> {
       return (await named(name, params, 'row', { ...base, ...o }, connection)) as T;
     },
     /** The first cell of the first row (fails when there is no row). */
@@ -106,7 +106,7 @@ function surface(connection?: string, base: DbOptions = {}) {
       return Number(await named(name, params, 'count', { ...base, ...o }, connection));
     },
     /** Ad-hoc SQL as a tagged template; values are bound. */
-    async sql<T extends Row = Row>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]> {
+    async sql<T extends object = Row>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]> {
       return ((await templateQuery(strings, values, 'rows', base, connection)) ?? []) as T[];
     },
     /** Like sql`...` but the first cell of the first row. */

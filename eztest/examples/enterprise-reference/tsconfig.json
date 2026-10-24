@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rootDir": "../..",
+    "paths": {
+      "eztest/sdk": ["../../src/sdk/index.ts"],
+      "eztest/plugins": ["../../src/plugins/index.ts"],
+      "eztest": ["../../src/index.ts"]
+    }
+  },
+  "include": ["server.ts", "app/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["tests/eztest-results/**", "tests/.eztest/**"]
+}

@@ -1,0 +1,21 @@
+Journey: Expected premium from the published rating rules
+Id: expected-premium
+Tags: @library
+Description: The rating rules of the Larkspur underwriting manual as expressions; callers compare the app against it.
+Params: product, sumInsured, region, riskAge, noClaimsYears
+Returns: base, regionFactor, loadingPct, loaded, ncdPct, discount, net, tax, total
+
+Set variable rate to product == "HOME" ? 0.0025 : 0.035
+Set variable regionFactor to region == "NORTH" ? 1 : region == "SOUTH" ? 1.1 : region == "COAST" ? 1.25 : 1.15
+If product == "HOME" then
+  Set variable loadingPct to number(riskAge) > 30 ? 12 : 0
+Otherwise
+  Set variable loadingPct to number(riskAge) < 25 ? 30 : 0
+End
+Set variable ncdPct to min(number(noClaimsYears), 5) * 5
+Set variable base to round(number(sumInsured) * rate, 2)
+Set variable loaded to round(base * regionFactor * (1 + loadingPct / 100), 2)
+Set variable discount to round(loaded * ncdPct / 100, 2)
+Set variable net to max(150, round(loaded - discount, 2))
+Set variable tax to round(net * number(TAX_RATE), 2)
+Set variable total to round(net + tax, 2)

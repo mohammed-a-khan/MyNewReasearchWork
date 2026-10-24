@@ -1,0 +1,50 @@
+Journey: Claim of <amount> is decided at the right authority level
+Id: decide-by-authority
+Tags: @backoffice @claims @regression @authority
+Risk: 4
+Requirements: ADJ-2, ADJ-4
+Actors: adjuster as adjuster, senior as senior-adjuster
+Description: Data-dependent branching: within the adjuster's limit the adjuster approves; above it the claim is referred and a senior adjuster approves. Over-limit approval attempts are refused.
+
+Run code "steps/claims.steps.ts#seedClaim" with policyId="POL-H-100231", type="FIRE", amount="<amount>" as seeded
+Set variable claimId to seeded.claimId
+Set variable overLimit to number("<amount>") > number(ADJUSTER_LIMIT)
+
+As adjuster:
+  Open ${BACKOFFICE_URL}/claims/${claimId}
+    Expect the page contains "Review claim ${claimId}"
+  Select "<reason>" from the "Decision reason" dropdown
+  If ${overLimit} then
+    # The adjuster first tries to approve: the system must refuse, then the adjuster refers it
+    Click the "Approve" button
+      Expect the page contains "exceeds your limit"
+    Select "Over my authority" from the "Decision reason" dropdown
+    Click the "Refer to senior" button
+      Expect the page contains "referred to a senior adjuster"
+    Expect the page does not contain "Approve"
+  Otherwise
+    Click the "Approve" button
+      Expect the page contains "Claim ${claimId} approved"
+  End
+
+If ${overLimit} then
+  As senior:
+    Open ${BACKOFFICE_URL}/queue?show=referred
+      Expect the "Claims queue" table contains "${claimId}"
+    Click the "Review" link in the row containing "${claimId}"
+      Expect the page contains "Status Referred"
+    Select "Covered in full" from the "Decision reason" dropdown
+    Click the "Approve" button
+      Expect the page contains "Claim ${claimId} approved"
+End
+
+Get the first row of query "SELECT status, decision_by, referred_to FROM claims WHERE id = '${claimId}'" on claims as decided
+Expect ${decided.status} equals "APPROVED"
+Expect ${decided.decision_by} equals "<expectedDecider>"
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup
+
+Examples:
+  | amount   | reason           | expectedDecider  |
+  | 4200.00  | Covered in full  | dana.okafor      |
+  | 10000.00 | Covered in full  | dana.okafor      |
+  | 18750.00 | Covered in full  | victor.lindqvist |

@@ -140,7 +140,19 @@ export function noRowsJourney(journey: Journey, reason: string, browserName: str
  * Run one attempt of a journey. Never throws: infrastructure errors become an "error" journey.
  * `seed` pre-fills the ledger (values handed over by `Depends on:` prerequisites).
  */
-export async function runJourneyAttempt(journey: Journey, attempt: number, env: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult> {
+/**
+ * A journey's `Lenses:` header turns lenses on for that journey: the run's lenses, plus one instance
+ * (from RunOptions.lensFactory) of each named lens the run does not have. "security:warn" records only.
+ */
+export function withJourneyLenses(journey: Journey, env: JourneyRunEnv): JourneyRunEnv {
+  const have = new Set((env.opts.lenses ?? []).map((l) => l.name));
+  const wanted = journey.lenses.filter((spec) => !have.has(spec.split(':')[0]));
+  if (!wanted.length || !env.opts.lensFactory) return env;
+  return { ...env, opts: { ...env.opts, lenses: [...(env.opts.lenses ?? []), ...wanted.map((spec) => env.opts.lensFactory!(spec))] } };
+}
+
+export async function runJourneyAttempt(journey: Journey, attempt: number, runEnv: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult> {
+  const env = withJourneyLenses(journey, runEnv);
   const { opts, evidence } = env;
   const started = Date.now();
   const startedAt = nowIso();
@@ -343,7 +355,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, env: 
   const scope: FlowScope = { journey, ledger, prefix, depth: 0 };
 
   try {
-    const missingLenses = journey.lenses.filter((n) => !(opts.lenses ?? []).some((l) => l.name === n));
+    const missingLenses = journey.lenses.filter((n) => !(opts.lenses ?? []).some((l) => l.name === n.split(':')[0]));
     if (missingLenses.length) throw new Error(`Journey requires lens(es) not provided to the runner: ${missingLenses.join(', ')}`);
     // Data-state preconditions and data needs: a miss is a data problem, not a product failure.
     if (journey.requires?.length) (result.reliability ??= {}).preconditions = await checkPreconditions(journey.requires, ctxFor(journey.steps[0]), opts);

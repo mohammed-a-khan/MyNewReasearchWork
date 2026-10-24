@@ -1,0 +1,28 @@
+# MyCover "Make a claim" form. Used by .ez journeys as @ClaimForm.<key> and by code journeys
+# through screens/portal.ts (same ids), so one verified heal repairs every journey.
+screen: ClaimForm
+elements:
+  policy:
+    description: the Policy dropdown
+    locators: [css=#policyId, { strategy: label, value: Policy }]
+  claimType:
+    description: the "Claim type" dropdown
+    locators: [css=#type, { strategy: label, value: Claim type }]
+  incidentDate:
+    description: the "Incident date" field
+    locators: [css=#incidentDate, { strategy: label, value: Incident date }]
+  amount:
+    description: the "Amount claimed (GBP)" field
+    locators: [css=#amountClaimed, { strategy: label, value: Amount claimed (GBP) }]
+  description:
+    description: the "What happened?" field
+    locators: [css=#description]
+  documents:
+    description: the "Supporting documents" field
+    locators: [css=#evidence]
+  submit:
+    description: the "Submit claim" button
+    locators:
+      - role=button[name="Submit claim"]
+      - css=#submit-claim
+  dateNote: css=#date-note

@@ -1,0 +1,28 @@
+Journey: A claim's events arrive on Kafka in business order, keyed by claim, each matching the event contract
+Id: claim-event-sequence
+Tags: @kafka @integration @contract @regression
+Role: adjuster
+Risk: 4
+Requirements: EVT-1, EVT-2, EVT-4
+
+Start listening on Kafka topic "larkspur.claims.events" on events as stream
+Run code "steps/claims.steps.ts#seedClaim" with policyId="POL-M-200455", type="COLLISION", amount="2210" as seeded
+Set variable claimId to seeded.claimId
+
+Log in
+Open ${BACKOFFICE_URL}/claims/${claimId}
+  Expect the page contains "Review claim ${claimId}"
+Select "Partially covered" from @ClaimDesk.reason
+Clear @ClaimDesk.approvedAmount
+Type "1980" into @ClaimDesk.approvedAmount
+Click @ClaimDesk.approve
+  Expect the page contains "Claim ${claimId} approved"
+
+Wait for 3 messages in stream where "$.claimId" = "${claimId}" within 20 s matching schema "schemas/claim-event.schema.json" as lifecycle
+Expect join(pluck(lifecycle, "type"), ",") == "claim.submitted,claim.in_review,claim.approved"
+Expect ${lifecycle_meta.0.key} equals "${claimId}"
+Expect ${lifecycle.2.approvedAmount} == 1980
+Expect ${lifecycle.2.payoutAmount} == 1230
+Verify no messages arrive in stream where "$.claimId" = "${claimId}" and "$.type" = "claim.rejected" within 2 s
+Stop listening to stream
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup

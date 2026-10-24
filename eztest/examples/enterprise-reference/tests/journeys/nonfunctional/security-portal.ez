@@ -1,0 +1,22 @@
+Journey: The portal sends its security headers and cookie flags, and never shows another customer's claim
+Id: security-portal
+Tags: @security @nonfunctional @portal
+Role: policyholder
+Risk: 5
+Requirements: SEC-1, SEC-4
+Lenses: security
+
+Log in
+Open /app/home
+  Expect the page contains "Your policies"
+Click the "My claims" link
+  Expect the page contains "My claims"
+Click the "Make a claim" link
+  Expect the page contains "Make a claim"
+
+# Object-level authorization: CLM-100001 belongs to another customer (Bramble Property Group)
+Open /bff/claims/CLM-100001
+  Expect the page contains "not found"
+Expect the page does not contain "Bramble"
+Open /bff/claims/CLM-100001/statement.pdf
+  Expect the page contains "not found"

@@ -89,14 +89,15 @@ export const PasswordRotationSchema = z.object({
 
 export const RoleSchema = z
   .object({
-    /** Plain username or a secret reference. */
-    username: z.string().min(1),
+    /** Plain username or a secret reference. Not needed for an API-only role (just `api:`). */
+    username: z.string().min(1).optional(),
     /** Secret reference (secret://store/key) or ENC(...) value. Optional when `passwordRotation` is set. */
     password: z.string().min(1).optional(),
     /** Derive the password from a rotation provider (see docs/configuration.md). */
     passwordRotation: PasswordRotationSchema.optional(),
     totp: z.string().min(1).optional(),
-    loginUrl: z.string().min(1),
+    /** Where the browser signs in. Not needed for an API-only role. */
+    loginUrl: z.string().min(1).optional(),
     flow: z.literal('form').default('form'),
     /** Login recipe; default the generic form login. */
     login: RoleLoginSchema.optional(),
@@ -105,7 +106,19 @@ export const RoleSchema = z
     verifyUrl: z.string().optional(),
     api: RoleApiSchema.optional(),
   })
-  .refine((r) => r.password !== undefined || r.passwordRotation !== undefined, { message: 'a role needs "password" or "passwordRotation"', path: ['password'] });
+  .superRefine((r, ctx) => {
+    // A role either signs in to a browser (username, password, loginUrl) or is an API-only machine
+    // identity (OAuth2 client credentials under `api:`), or both.
+    const browser = r.username !== undefined || r.loginUrl !== undefined || r.password !== undefined || r.passwordRotation !== undefined || r.totp !== undefined;
+    if (!browser && r.api) return;
+    if (!browser) {
+      ctx.addIssue({ code: 'custom', path: ['username'], message: 'a role needs a browser sign-in (username, password, loginUrl) or API credentials (api: tokenUrl, clientId, clientSecret)' });
+      return;
+    }
+    if (r.username === undefined) ctx.addIssue({ code: 'custom', path: ['username'], message: 'a role that signs in to a browser needs "username"' });
+    if (r.loginUrl === undefined) ctx.addIssue({ code: 'custom', path: ['loginUrl'], message: 'a role that signs in to a browser needs "loginUrl"' });
+    if (r.password === undefined && r.passwordRotation === undefined) ctx.addIssue({ code: 'custom', path: ['password'], message: 'a role needs "password" or "passwordRotation"' });
+  });
 
 export const SecretStoreConfigSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('env'), name: z.string().optional(), prefix: z.string().default('') }),
@@ -236,6 +249,11 @@ export const DataEntitySchema = z.object({
   table: z.string().optional(),
   key: z.string().default('id'),
   columns: z.record(z.string(), z.string()).optional(),
+  /**
+   * sql: values for records the fabric creates when none matches (field -> value, or "gen:<generator>"
+   * such as "gen:fullName" or "gen:email"); the constraints of the need are applied on top.
+   */
+  defaults: z.record(z.string(), z.unknown()).optional(),
   createPath: z.string().optional(),
   findPath: z.string().optional(),
   deletePath: z.string().optional(),
@@ -586,6 +604,8 @@ export const ReliabilitySchema = z.object({
   }).optional(),
   /** Reuse one browser context per worker, reset between journeys (opt-in, for speed). */
   reuseContext: z.boolean().default(false),
+  /** Start a fresh browser after this many journeys (0: never). Default: 15 on Firefox, never on Chromium. */
+  recycleBrowserAfter: z.number().int().min(0).optional(),
   /** Propose verified, more robust locators in the heal inbox. */
   suggestLocators: z.boolean().default(true),
   /** Remove orphaned test data left by crashed runs at the start of a run. */

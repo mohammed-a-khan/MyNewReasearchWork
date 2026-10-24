@@ -1,0 +1,29 @@
+Journey: Broker submission <scenarioId> appears in the customer's My claims grid
+Id: broker-claim-in-grid
+Tags: @portal @api @grid @data-driven @integration @regression
+Risk: 4
+Requirements: API-2, PORTAL-7
+Description: Seed through the partner API, verify in the UI. Rows come from the broker's JSON feed: first batch only (JSONPath), broker channel only, runFlag Yes.
+
+Set variable incidentDate to format(addDays(today(), -number("<daysAgo>")), "YYYY-MM-DD")
+Set variable externalRef to unique("HB-")
+Call API "POST ${API_URL}/v1/claims" with body '{"policyId":"<policyId>","type":"<type>","incidentDate":"${incidentDate}","amountClaimed":<amount>,"description":"<description>","externalRef":"${externalRef}"}' as broker and store as created
+Expect the created response status is 201
+Expect response created matches schema "schemas/claim.schema.json"
+Capture "$.claimId" from created as claimId
+Expect response created "$.channel" equals "BROKER"
+Expect response created "$.externalRef" equals "${externalRef}"
+
+# The policyholder the row names signs in (the role is test data too)
+Log in as <role>
+Click the "My claims" link
+  Expect the page contains "claims"
+Type "${claimId}" into the "Search claims" field
+  Expect the page contains "1 claim"
+Expect the My claims grid to have a row where Claim is "${claimId}"
+Expect the Status of the row where Claim is "${claimId}" in the My claims grid to be "Submitted"
+Expect the Amount of the row where Claim is "${claimId}" in the My claims grid to be "<amount>"
+Expect the Type of the row where Claim is "${claimId}" in the My claims grid to be "<type>"
+Run code "steps/claims.steps.ts#removeClaim" with claimId="${claimId}" as cleanup
+
+Examples: from data "data/partner-submissions.json" path "$.batches[0].submissions" where channel = BROKER and runFlag = Yes

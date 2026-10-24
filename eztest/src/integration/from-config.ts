@@ -7,6 +7,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import type { EzTestConfig } from '../config/index.js';
 import { ContractRecorder } from '../contracts/consumer.js';
+import { apiSpecEntries } from '../contracts/config.js';
 import { createContractHook } from '../contracts/hook.js';
 import { cachedSpec } from '../contracts/openapi.js';
 import type { ApiExchangeHook, StepContext } from '../runner/types.js';
@@ -16,6 +17,8 @@ export interface IntegrationFromConfig {
   runtime: Integration;
   contracts: ContractRecorder;
   apiHook?: ApiExchangeHook;
+  /** api.spec entries with absolute files (a baseUrl scopes a spec to the calls to that service). */
+  specEntries: Array<{ file: string; baseUrl?: string }>;
   /** Absolute api.spec paths. */
   specs: string[];
 }
@@ -59,8 +62,8 @@ export async function integrationFromConfig(
   const messaging = config.messaging ? await resolveSecrets(config.messaging, o.resolveSecret, add) : undefined;
   const files = config.files ? await resolveSecrets(config.files, o.resolveSecret, add) : undefined;
   const grpc = config.grpc ? await resolveSecrets(config.grpc, o.resolveSecret, add) : undefined;
-  const specRaw = config.api.spec;
-  const specs = (Array.isArray(specRaw) ? specRaw : specRaw ? [specRaw] : []).map((s) => (isAbsolute(s) ? s : resolve(o.cwd, s)));
+  const specEntries = apiSpecEntries(config.api.spec).map((e) => ({ ...e, file: isAbsolute(e.file) ? e.file : resolve(o.cwd, e.file) }));
+  const specs = specEntries.map((e) => e.file);
   // Load specs now so a broken spec fails the run up front, not halfway.
   for (const s of specs) cachedSpec(s);
   const contracts = config.contracts;
@@ -81,6 +84,6 @@ export async function integrationFromConfig(
     ...(o.apiAuth ? { apiAuth: o.apiAuth } : {}),
     ...(o.templateSyntax ? { templateSyntax: o.templateSyntax } : {}),
   });
-  const apiHook = createContractHook({ specs, mode: config.api.specMode, strictPaths: config.api.specStrict, recorder });
-  return { runtime, contracts: recorder, ...(apiHook ? { apiHook } : {}), specs };
+  const apiHook = createContractHook({ specs: specEntries, mode: config.api.specMode, strictPaths: config.api.specStrict, recorder });
+  return { runtime, contracts: recorder, ...(apiHook ? { apiHook } : {}), specs, specEntries };
 }

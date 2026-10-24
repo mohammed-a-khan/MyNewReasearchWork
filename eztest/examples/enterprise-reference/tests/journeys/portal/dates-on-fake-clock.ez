@@ -1,0 +1,37 @@
+Journey: Renewal reminders and claim deadlines follow the calendar (fake clock)
+Id: dates-on-fake-clock
+Tags: @portal @dates @clock @regression
+Role: policyholder
+Risk: 4
+Requirements: PORTAL-3, FNOL-4
+Clock: fixed 2026-12-20 10:00 Europe/London
+Description: The browser's clock is frozen on 20 December 2026, so the date rules are tested on the dates that matter, then moved on past the policy's end date.
+
+Log in
+Open /app/home
+  Expect the page contains "Today is 2026-12-20."
+# Expectations computed from the same (fake) today
+Set variable renewsIn to daysBetween(today(), "2026-12-31")
+Expect ${renewsIn} == 11
+Expect testid=renewal-POL-H-100231 has text "Policy POL-H-100231 renews in ${renewsIn} days (on 2026-12-31)."
+Expect the page does not contain "Policy POL-M-200455 renews"
+
+# Claim deadlines: 30 days from the incident, late after that, never in the future
+Click the "Make a claim" link
+  Expect the page contains "Make a claim"
+Select "POL-H-100231 - Home" from @ClaimForm.policy
+Set variable lateIncident to format(addDays(today(), -40), "YYYY-MM-DD")
+Fill @ClaimForm.incidentDate with ${lateIncident}
+  Expect @ClaimForm.dateNote has text "Late notification: this incident happened 40 days ago. Claims reported more than 30 days after the incident take longer to assess."
+Set variable recentIncident to format(addDays(today(), -5), "YYYY-MM-DD")
+Set variable deadline to format(addDays(recentIncident, 30), "YYYY-MM-DD")
+Fill @ClaimForm.incidentDate with ${recentIncident}
+  Expect @ClaimForm.dateNote has text "Reporting deadline: ${deadline} (25 days left)."
+Fill @ClaimForm.incidentDate with 2026-12-24
+  Expect @ClaimForm.dateNote has text "The incident date cannot be in the future."
+
+# Time moves on: after the end date the policy is shown as expired
+Set the clock to 2027-01-04 09:00
+Click the "Home" link
+  Expect the page contains "Today is 2027-01-04."
+Expect the page contains "Policy POL-H-100231 expired on 2026-12-31. Renew it to stay covered."

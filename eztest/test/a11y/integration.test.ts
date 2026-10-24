@@ -106,7 +106,7 @@ describe('accessibility in runs and release readiness', () => {
     const stored = JSON.parse(await readFile(join(runDir, ref.path), 'utf8')) as Array<{ details: { violations: unknown[]; rules: string[] } }>;
     expect(stored[0].details.violations).toEqual([]);
     expect(stored[0].details.rules).toEqual(expect.arrayContaining(['keyboard.trap', 'layout.reflow', 'text.spacing']));
-    expect(await a11yReadinessInputs(runDir, evidence)).toEqual({ a11y: [] });
+    expect(await a11yReadinessInputs(runDir, evidence)).toEqual({ a11y: [], a11yScans: [{ evidence: ref.id, journeyId: 'good-page' }] });
 
     const bad = await cli(dir, ['run', 'journeys/bad-step.ez', '--no-analyze']);
     expect(bad.exitCode).toBe(1);

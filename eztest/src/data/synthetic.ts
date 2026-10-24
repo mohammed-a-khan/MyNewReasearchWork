@@ -5,7 +5,7 @@
  * checksum-valid test values, not real accounts.
  */
 import { randomUUID } from 'node:crypto';
-import { EzTestError } from '../core/index.js';
+import { EzTestError, uniqueValue } from '../core/index.js';
 import { Prng } from './prng.js';
 
 const FIRST = ['Alice', 'Bob', 'Carol', 'David', 'Eve', 'Farah', 'Gustav', 'Hiro', 'Ines', 'Jamal', 'Kofi', 'Lena', 'Mateo', 'Nora', 'Oskar', 'Priya', 'Quentin', 'Rosa', 'Sven', 'Tariq', 'Uma', 'Viktor', 'Wen', 'Ximena', 'Yusuf', 'Zoe'];
@@ -234,7 +234,7 @@ export class Synthetic {
     return (Object.keys(EDGE_CASES) as EdgeCaseKind[]).flatMap((kind) => this.edgeCases(kind).map((value) => ({ kind, value })));
   }
 
-  /** Generate by name: "company", "email", "int:1:100", "date:2024-01-01:2024-12-31", "edge:sql", ... */
+  /** Generate by name: "company", "email", "int:1:100", "date:2024-01-01:2024-12-31", "edge:sql", "unique:C-", ... */
   byName(spec: string): unknown {
     const [name, a, b] = spec.split(':');
     switch (name) {
@@ -259,6 +259,8 @@ export class Synthetic {
       case 'uuid': return this.uuid();
       case 'bool': return this.bool();
       case 'edge': return this.edgeCase(a as EdgeCaseKind);
+      // Not seeded on purpose: unique across workers, processes, shards and runs ("unique:C-" -> "C-mh3k...-1").
+      case 'unique': return uniqueValue(a ?? '', b !== undefined ? Number(b) : undefined);
       default:
         throw new EzTestError(`Unknown synthetic generator "${spec}"`, 'DATA_SYNTHETIC');
     }

@@ -410,10 +410,28 @@ E.gridScan = async function (el, a) {
     columns: pubCols(cols), total: all.length, where: where.map(function (w) { return { column: w.column, op: w.op, value: w.value }; }),
     matches: a.countOnly ? [] : matches.map(function (r) { return pub(r, cols); }), matchCount: matches.length,
     truncated: truncated, steps: steps, gaps: gaps, virtualized: !!sc, ms: Math.round(performance.now() - t0),
+    declaredRows: declaredDataRows(g, d),
   };
   if (a.collect) res.rows = (where.length ? matches : all).map(function (r) { return pub(r, cols); });
   return res;
 };
+/**
+ * Data rows the grid says it has: aria-rowcount (all rows, header rows included) minus the
+ * header and filter rows in the DOM. Undefined when the grid does not say (or says -1, unknown).
+ */
+function declaredDataRows(g, d) {
+  var n = parseInt(g.getAttribute('aria-rowcount') || '', 10);
+  if (!isFinite(n) || n < 0) return undefined;
+  var data = dataRows(g, d);
+  // Rows above the first data row are header/filter rows, whether or not they are role=row in the
+  // DOM (libraries differ): with aria-rowindex on the data rows, that is the exact header count.
+  // (A first index far below the header rows means the grid is already scrolled: count those instead.)
+  var others = qa(g, d.row).filter(function (r) { return gridOwned(g, r, d) && data.indexOf(r) < 0; }).length;
+  var idx = data.map(function (r) { return parseInt(r.getAttribute('aria-rowindex') || '', 10); }).filter(function (i) { return isFinite(i) && i > 0; });
+  var above = idx.length ? Math.min.apply(null, idx) - 1 : -1;
+  var headers = above >= 0 && above <= others + 1 ? above : others;
+  return Math.max(0, n - headers);
+}
 /** Bring the row with this key into view (scrolling virtualized content) and mark the row and its cells. */
 E.gridReveal = async function (el, a) {
   var d = a.d, g = need(el, d, 'grid');

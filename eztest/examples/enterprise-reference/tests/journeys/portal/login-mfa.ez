@@ -1,0 +1,38 @@
+Journey: Sign-in with TOTP MFA refuses wrong credentials and codes, and a signed-out session is not reused
+Id: login-mfa
+Tags: @portal @identity @smoke @security
+Role: session-check
+Risk: 5
+Requirements: AUTH-1, AUTH-2, AUTH-3
+
+# Wrong password
+Open /login
+  Expect the page contains "Sign in to MyCover"
+Type "amelia.hart" into the Username field
+Type "not-the-password" into the Password field
+Click the "Sign in" button
+  Expect the page contains "Incorrect username or password."
+Expect the URL contains "/login"
+
+# Right password, wrong one-time code
+Type "amelia.hart" into the Username field
+Type "${AMELIA_PASSWORD}" into the Password field
+Click the "Sign in" button
+  Expect the page contains "Two-step verification"
+Type "000000" into the "Authentication code" field
+Click the "Verify" button
+  Expect the page contains "That code is not valid"
+Expect the URL does not contain "/app/home"
+
+# The Identity Vault signs in with the TOTP seed (secret://env/AMELIA_TOTP) and caches the session
+Clear the browser state
+Log in
+Open /app/home
+  Expect the page contains "Welcome, Amelia Hart"
+
+# After signing out the server session is gone: the vault must notice and sign in again, not reuse a dead cookie
+Click the "Sign out" link
+  Expect the URL contains "/login"
+Log in
+Open /app/home
+  Expect the page contains "Welcome, Amelia Hart"
