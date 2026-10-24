@@ -232,7 +232,8 @@ Journeys tagged `@library` are not run by `eztest run` on their own; other journ
 configVersion: 1                  # schema version; eztest upgrade-config migrates older files
 server:                           # results server (docs/server.md)
   url: https://eztest.example.com
-  token: secret://env/EZTEST_SERVER_TOKEN
+  # token: secret://env/SERVER_TOKEN   # optional; without it EZTEST_SERVER_TOKEN is read directly.
+  #                                   # secret://env/NAME goes through the env store (EZTEST_SECRET_NAME with prefix EZTEST_SECRET_)
   project: payments               # default: the selected project, else "default"
   sharedState: true               # pull heal decisions, quarantine, triage overrides before runs
   publish: false                  # publish every run (or use --publish)

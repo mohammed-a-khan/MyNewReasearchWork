@@ -497,7 +497,7 @@ export const VoiceSchema = z.discriminatedUnion('provider', [
 /** Results server (`eztest server`): publishing, shared team state and cross-machine locks. */
 export const ServerClientSchema = z.object({
   url: z.string().url(),
-  /** API token (a secret reference such as secret://env/EZTEST_SERVER_TOKEN). */
+  /** API token: a literal or a secret reference (secret://env/NAME reads the env store). Default: the EZTEST_SERVER_TOKEN environment variable. */
   token: z.string().min(1).optional(),
   /** Project on the server (default: the selected config project, else "default"). */
   project: z.string().min(1).optional(),

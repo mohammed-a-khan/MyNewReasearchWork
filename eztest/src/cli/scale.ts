@@ -16,7 +16,7 @@ import type { LoadedConfig } from '../config/index.js';
 import { identityVaultFromConfig } from '../identity/index.js';
 import { analyzeImpact, changedFilesFromGit, HistoryStore, loadImpactMapping, type ImpactResult, type RunHistoryEntry } from '../insights/index.js';
 import { loadJourneyFile } from '../intent/index.js';
-import { analyzeRun } from '../engine/index.js';
+import { analyzeRun, resolveServerToken } from '../engine/index.js';
 import type { ReportFormat } from '../report/index.js';
 import { recordIntegration, rerenderReports } from '../report/index.js';
 import { reportOptionsFromConfig } from '../engine/analyze.js';
@@ -57,8 +57,8 @@ export async function serverClientFor(loaded: LoadedConfig, cwd: string, o: { ur
   const s = loaded.config.server;
   const url = o.url ?? s?.url;
   if (!url) return undefined;
-  const tokenRef = s?.token ?? (process.env.EZTEST_SERVER_TOKEN ? 'secret://env/EZTEST_SERVER_TOKEN' : undefined);
-  const token = tokenRef ? await secretResolver(loaded, cwd)(tokenRef) : undefined;
+  const token = await resolveServerToken(s, secretResolver(loaded, cwd));
+  if (token) loaded.masker.add(token);
   return new ResultsClient({ url, token, project: o.project ?? s?.project ?? loaded.config.project ?? 'default', timeoutMs: s?.timeoutMs });
 }
 

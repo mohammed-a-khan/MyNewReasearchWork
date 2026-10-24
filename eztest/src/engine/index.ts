@@ -4,6 +4,7 @@
  * checks and the healer all become runner handlers. The CLI and programmatic
  * users both go through `runWithConfig`, so behaviour is identical.
  */
+import { resolveServerToken } from './server-token.js';
 import { ElementRepository } from '../elements/repository.js';
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -344,12 +345,8 @@ export function splitSetupJourneys(journeys: Journey[], configHooks?: RunHooks, 
 /** A results-server client from `server:` (token from server.token or EZTEST_SERVER_TOKEN), for the shared store. */
 async function engineServerClient(config: EzTestConfig, vault: IdentityVault, masker: { add(v: string): unknown }): Promise<ResultsClient> {
   const s = config.server!;
-  const ref = s.token ?? (process.env.EZTEST_SERVER_TOKEN ? 'secret://env/EZTEST_SERVER_TOKEN' : undefined);
-  let token: string | undefined;
-  if (ref) {
-    token = ref.startsWith('secret://') ? await vault.registry.resolve(ref) : ref;
-    masker.add(token);
-  }
+  const token = await resolveServerToken(s, (ref) => vault.registry.resolve(ref));
+  if (token) masker.add(token);
   return new ResultsClient({ url: s.url, token, project: s.project ?? config.project ?? 'default', timeoutMs: s.timeoutMs });
 }
 
@@ -615,3 +612,5 @@ export async function runWithConfig(loaded: LoadedConfig, journeys: Journey[], o
 }
 export * from './analyze.js';
 export { browserRunOptions, remoteConnectFromConfig } from './browsers.js';
+
+export { resolveServerToken } from './server-token.js';

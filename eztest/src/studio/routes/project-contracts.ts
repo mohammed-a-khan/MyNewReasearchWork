@@ -12,6 +12,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { apiSpecEntries, computeRunApiCoverage, isContractFile, isMessageExpectation, lintSpec, loadApiCoverage, loadApiSpec, readContractFile, CONTRACT_RESULTS_FILE } from '../../contracts/index.js';
 import { identityVaultFromConfig } from '../../identity/index.js';
+import { resolveServerToken } from '../../engine/server-token.js';
 import { readEvidenceManifest } from '../../insights/index.js';
 import { ResultsClient } from '../../server/client.js';
 import type { StudioApp } from '../app.js';
@@ -52,12 +53,8 @@ async function serverContracts(app: StudioApp): Promise<Record<string, unknown> 
   if (!s?.url) return undefined;
   const project = s.project ?? loaded.config.project ?? 'default';
   try {
-    const ref = s.token ?? (app.env.EZTEST_SERVER_TOKEN ? 'secret://env/EZTEST_SERVER_TOKEN' : undefined);
-    let token: string | undefined;
-    if (ref) {
-      token = ref.startsWith('secret://') ? await identityVaultFromConfig(loaded.config, { cwd: app.cwd, masker: loaded.masker, env: { ...app.env, ...loaded.variables } }).registry.resolve(ref) : ref;
-      loaded.masker.add(token);
-    }
+    const token = await resolveServerToken(s, (ref) => identityVaultFromConfig(loaded.config, { cwd: app.cwd, masker: loaded.masker, env: { ...app.env, ...loaded.variables } }).registry.resolve(ref), app.env);
+    if (token) loaded.masker.add(token);
     const client = new ResultsClient({ url: s.url, token, project, timeoutMs: Math.min(s.timeoutMs, 10_000) });
     const [contracts, verifications, releases] = await Promise.all([client.contracts({ contracts: 'false' }), client.verifications(), client.releases()]);
     return { url: s.url, project, contracts, verifications: verifications.slice(0, 200), releases };

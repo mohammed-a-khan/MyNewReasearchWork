@@ -321,7 +321,7 @@ Without `--consumer-branch` or `--environment`, `verify` fetches the latest cont
 ### Publishing, releases and can-release (EZTest results server)
 
 ```yaml
-server: { url: https://eztest.example.com, token: secret://env/EZTEST_SERVER_TOKEN, project: shop }
+server: { url: https://eztest.example.com, project: shop }   # token: EZTEST_SERVER_TOKEN, or server.token
 contracts:
   app: shop-web                    # this application on the results server
   branch: main

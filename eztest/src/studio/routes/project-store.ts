@@ -6,6 +6,7 @@
  * browser, only "****".
  */
 import { identityVaultFromConfig } from '../../identity/index.js';
+import { resolveServerToken } from '../../engine/server-token.js';
 import { MASK } from '../../config/masker.js';
 import { ResultsClient } from '../../server/client.js';
 import { storeFromConfig, parseTtl, isExpired, type SharedStore, type StoredEntry } from '../../store/index.js';
@@ -24,8 +25,9 @@ async function openStore(app: StudioApp): Promise<SharedStore> {
   };
   let client: ResultsClient | undefined;
   if (s?.url) {
-    const ref = s.token ?? (app.env.EZTEST_SERVER_TOKEN ? 'secret://env/EZTEST_SERVER_TOKEN' : undefined);
-    client = new ResultsClient({ url: s.url, token: ref ? await resolveSecret(ref) : undefined, project: s.project ?? loaded.config.project ?? 'default', timeoutMs: Math.min(s.timeoutMs, 10_000) });
+    const token = await resolveServerToken(s, resolveSecret, app.env);
+    if (token) loaded.masker.add(token);
+    client = new ResultsClient({ url: s.url, token, project: s.project ?? loaded.config.project ?? 'default', timeoutMs: Math.min(s.timeoutMs, 10_000) });
   }
   return storeFromConfig(loaded.config, { cwd: app.cwd, client, resolveSecret, addSecret: (v) => loaded.masker.add(v), env: { ...loaded.variables, ...app.env } });
 }
