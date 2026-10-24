@@ -4,6 +4,12 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### MySQL and MariaDB
+
+- **MySQL and MariaDB databases** (`driver: mysql` or `driver: mariadb` under `db.connections`) on EZTest's own implementation of the MySQL protocol: no driver package. Handshake v10, TLS with the certificate verified, `mysql_native_password`, `caching_sha2_password` (fast path; full authentication over TLS or with the server's RSA key, configured or fetched with `allowPublicKeyRetrieval`), `sha256_password`, auth switches; text protocol for SQL without values (several statements, several results), prepared statements in the binary protocol for SQL with values, cached per connection; DECIMAL, BIGINT, DATETIME(6), DATE, TIME, BLOB, BIT, JSON, utf8mb4 and NULL decoded the same way in both protocols; payloads over 16 MB; a pool per connection; read-only transactions; `queries check` by server-side prepare; `doctor`; the load test's database monitor; the results server's store. Proven against MariaDB 10.11 and MySQL 8.4 ([docs/databases.md](docs/databases.md#mysql-and-mariadb)).
+- The `${var}` binder and the query catalogue read MySQL SQL with MySQL's string rules: a backslash escapes the next character, so `'it\'s :x'` is one literal and holds no bind.
+- A failed dataset comparison names the first differing cells and the missing and extra keys (`[3] SALARY: expected "3000.00", found 3000.01 (numbers differ by 0.01)`) instead of only counting them.
+
 ### Fixed: record, then run
 
 - An expectation typed in Studio while the last field was still being typed was attached to the step before it; pending typing is now recorded first.

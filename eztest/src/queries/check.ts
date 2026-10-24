@@ -11,6 +11,7 @@
  */
 import type { DbClient } from '../surfaces/db.js';
 import type { OracleDbClient } from '../surfaces/db-oracle.js';
+import type { MysqlDbClient } from '../surfaces/db-mysql.js';
 import type { SqlDialect } from '../surfaces/db-sql.js';
 import { isPlsql } from '../surfaces/db-sql.js';
 import type { QueryCatalogue } from './catalogue.js';
@@ -83,6 +84,11 @@ async function checkOne(client: DbClient, dialect: SqlDialect, sql: string, para
         await tx.query(`EXPLAIN ${sql}`, params as never);
       });
       return { status: 'ok', method: 'EXPLAIN in a read-only transaction, rolled back' };
+    }
+    case 'mysql': {
+      // COM_STMT_PREPARE: the server checks syntax, tables and columns and executes nothing.
+      const d = await (client as MysqlDbClient).describe(sql);
+      return { status: 'ok', method: 'server-side prepare (nothing executed)', columns: d.columns };
     }
     case 'mssql': {
       if (kind !== 'read') return { status: 'skipped', method: 'not checked', message: 'SQL Server writes and procedure calls are not prepared by queries check' };

@@ -47,6 +47,19 @@ export interface CompareResult {
   summary: string;
 }
 
+/**
+ * The first differences of a failed comparison, for an error message a person can act on without opening the
+ * evidence: `[id=3] salary: expected "3000.00", found 3000.01 (numbers differ by 0.01)`, missing and extra keys.
+ */
+export function describeDifferences(r: CompareResult, max = 5, mask: (s: string) => string = (s) => s): string {
+  const show = (v: unknown): string => (v === undefined ? '(none)' : v instanceof Date ? v.toISOString() : typeof v === 'string' ? JSON.stringify(v) : JSON.stringify(v) ?? String(v));
+  const parts = r.mismatches.slice(0, max).map((m) => `[${m.key}] ${m.column}: expected ${show(m.expected)}, found ${show(m.actual)} (${m.reason})`);
+  if (r.mismatches.length > max) parts.push(`and ${r.mismatches.length - max} more cell(s)`);
+  if (r.missing.length) parts.push(`missing key(s): ${r.missing.slice(0, max).join(', ')}${r.missing.length > max ? ', ...' : ''}`);
+  if (r.extra.length) parts.push(`extra key(s): ${r.extra.slice(0, max).join(', ')}${r.extra.length > max ? ', ...' : ''}`);
+  return mask(parts.join('; '));
+}
+
 const NUMERIC_RE = /^\s*[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?\s*$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 

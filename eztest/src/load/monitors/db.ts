@@ -76,13 +76,22 @@ export class DbMonitor {
         () => this.q(`SELECT SUM(xact_commit + xact_rollback) AS counter FROM pg_stat_database`, errors),
         () => n ? this.q(`SELECT LEFT(query, 200) AS sql_text, calls AS executions, total_exec_time AS total_ms FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT ${n}`, []) : Promise.resolve([]),
       ]);
+    } else if (d === 'mysql') {
+      [sessions, waits, counter, top] = await seq([
+        () => this.q(`SELECT COUNT(*) AS total, SUM(CASE WHEN command NOT IN ('Sleep', 'Daemon', 'Binlog Dump') THEN 1 ELSE 0 END) AS active FROM information_schema.PROCESSLIST`, errors),
+        () => Promise.resolve([]),
+        // Statements the server ran (both MySQL and MariaDB; SHOW needs no extra privilege).
+        () => this.q(`SHOW GLOBAL STATUS WHERE Variable_name = 'Questions'`, errors).then((r) => r.map((x) => ({ counter: pick(x, 'Value') }))),
+        // performance_schema is on by default in MySQL and off in MariaDB: a missing view is not an error here.
+        () => n ? this.q(`SELECT LEFT(DIGEST_TEXT, 200) AS sql_text, COUNT_STAR AS executions, SUM_TIMER_WAIT / 1000000000 AS total_ms FROM performance_schema.events_statements_summary_by_digest ORDER BY SUM_TIMER_WAIT DESC LIMIT ${n}`, []) : Promise.resolve([]),
+      ]);
     } else {
       return { values: {}, topSql: [], errors: [`no database monitor for ${d}`] };
     }
     const values: Record<string, number> = {};
     // Every statistics view refused: name the privilege instead of returning an empty sample.
     if (errors.length && !sessions.length && !waits.length && !counter.length) {
-      const need = d === 'oracle' ? 'SELECT_CATALOG_ROLE (or SELECT ANY DICTIONARY) for the V$ views' : d === 'mssql' ? 'VIEW SERVER STATE' : 'the pg_monitor role';
+      const need = d === 'oracle' ? 'SELECT_CATALOG_ROLE (or SELECT ANY DICTIONARY) for the V$ views' : d === 'mssql' ? 'VIEW SERVER STATE' : d === 'mysql' ? 'the PROCESS privilege' : 'the pg_monitor role';
       errors.unshift(`the monitoring user cannot read the ${d} statistics views: grant it ${need}, or monitor with a user that has it`);
     }
     if (sessions[0]) {

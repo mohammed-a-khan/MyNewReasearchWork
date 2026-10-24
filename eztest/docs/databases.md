@@ -1,7 +1,7 @@
 # Databases
 
-EZTest talks to SQLite, PostgreSQL, SQL Server and Oracle through one client
-interface. Journeys query them inline or through a **named-query catalogue**.
+EZTest talks to SQLite, PostgreSQL, SQL Server, Oracle, MySQL and MariaDB
+through one client interface. Journeys query them inline or through a **named-query catalogue**.
 The query results compare with UI tables, API bodies and other databases by
 key, with typed and case-insensitive matching.
 
@@ -11,6 +11,7 @@ key, with typed and case-insensitive matching.
 - [Steps](#steps)
 - [The named-query catalogue](#the-named-query-catalogue)
 - [Oracle specifics](#oracle-specifics)
+- [MySQL and MariaDB](#mysql-and-mariadb)
 - [CLI: queries, validate, doctor](#cli-queries-validate-doctor)
 - [Studio workbench](#studio-workbench)
 - [Examples from a query](#examples-from-a-query)
@@ -41,10 +42,20 @@ db:
       # walletPassword: secret://vault/WALLET_PW
       # fetchAsString: [DATE, NUMBER]       # return these types as text
       # callTimeoutMs: 60000
+    hr:
+      driver: mariadb                # or mysql: the same client
+      host: hr-db.test
+      port: 3306                     # default 3306
+      database: orangehrm
+      user: qa_reader
+      password: secret://vault/HR_DB_PW
+      ssl: { ca: /secure/hr-ca.pem } # TLS with the certificate verified (ssl: true uses the system roots)
+      pool: { max: 4 }
+      # connectionString: "mysql://qa_reader:secret://vault/HR_DB_PW@hr-db.test:3306/orangehrm?ssl=true"
 ```
 
-`type:` and `driver:` are interchangeable. `postgresql` and `sqlserver` are
-accepted as aliases. Connections open lazily on first use and close at the end
+`type:` and `driver:` are interchangeable. `postgresql`, `sqlserver` and
+`mariadb` are accepted as aliases (`mariadb` is `mysql`). Connections open lazily on first use and close at the end
 of the run.
 
 | Dialect | Package | Install | Placeholders |
@@ -53,6 +64,7 @@ of the run.
 | PostgreSQL | `pg` | `npm install pg` | `$1..$n`, `:name` (rewritten to `$n`; `::` casts and literals are left alone) |
 | SQL Server | `mssql` | `npm install mssql` | `@p1..@pn`, `@name` |
 | Oracle | `oracledb` (Thin mode, pure JavaScript) | `npm install oracledb` | `:1..:n`, `:name` |
+| MySQL, MariaDB | built in (EZTest's own protocol client) | nothing | `?`, `:name` (rewritten to `?`) |
 
 The drivers are optional peer dependencies. EZTest loads a driver only when a
 connection uses it. When a driver is missing, the error names the command to
@@ -301,12 +313,84 @@ steps:
   raises ORA-00904/ORA-00942 for unknown columns and tables. DDL is neither
   parsed nor executed.
 
+## MySQL and MariaDB
+
+EZTest speaks the MySQL client/server protocol itself, so there is no driver
+package to install, and MySQL 5.7/8.x and MariaDB 10.x/11.x work the same way.
+
+- **Sign-in.** `mysql_native_password` (MariaDB's default),
+  `caching_sha2_password` (MySQL 8's default), `sha256_password`, and
+  `mysql_clear_password` over TLS only. A server's auth-switch request is
+  followed. caching_sha2_password signs in by its fast path when the server has
+  the user cached. Otherwise (the first sign-in after a restart or
+  `FLUSH PRIVILEGES`, or a wrong password) the server asks for the password
+  itself, which EZTest sends only over TLS or encrypted with the server's RSA
+  key: give `serverPublicKey` (PEM text or a file), or set
+  `allowPublicKeyRetrieval: true` to fetch it (a man in the middle could swap a
+  fetched key, so it is off by default). Without either, the error says so.
+- **TLS.** `ssl: true` verifies the certificate against the system roots and
+  the host name; `ssl: { ca, cert, key, servername, rejectUnauthorized }` takes
+  PEM text or file paths (`cert`/`key` for X.509 users). A host given as an IP
+  address is checked against the certificate's IP SANs. URL forms:
+  `?ssl=true`, `?ssl-mode=REQUIRED|VERIFY_IDENTITY|DISABLED`, `?ssl-ca=/path`.
+- **Statements.** SQL without values goes as a plain query (several statements
+  separated by `;` return several results). SQL with values is prepared on the
+  server and executed with the values bound in the binary protocol; prepared
+  statements are cached per connection (and prepared again after the table
+  changes). `LOAD DATA LOCAL INFILE` is never allowed.
+- **String rules.** MySQL string literals treat a backslash as an escape
+  (`'it\'s'`). The `${var}` binder and the catalogue read MySQL SQL with those
+  rules, so `'a\':b'` holds no bind. A catalogue query is read this way when its
+  `-- connection:` is a MySQL connection (or every connection is).
+- **Several results.** `MysqlDbClient.results(sql, params)` returns every result
+  set and OK of a call, for example a `CALL` of a procedure that selects twice.
+  `query()` returns the first result set; `Call procedure "raise" on hr with params '[1, 10.5]'`
+  sends `CALL raise(?, ?)`.
+- **Rows affected** count matched rows (as Connector/J reports them), so an
+  `UPDATE` that sets a value it already had still counts its row.
+- **Read-only**: `readOnly(fn)` runs fn in `START TRANSACTION READ ONLY` and
+  rolls back; writes fail with error 1792. The Studio console uses it.
+- **Statement check**: `describe(sql)` prepares a statement without running
+  it, so `queries check` reports unknown tables and columns (error 1146, 1054)
+  without executing anything, DML included.
+- **Health and load monitor**: `ping()` and `poolStatus()` (`doctor` shows
+  `MariaDB 10.11.x` or `MySQL 8.4.x (TLS)`); the load monitor reads sessions
+  from `information_schema.PROCESSLIST` (the PROCESS privilege shows every
+  session), statements from `Questions`, and top SQL from
+  `performance_schema` when it is on.
+
+| MySQL type | Value |
+|---|---|
+| `TINYINT` .. `INT`, `YEAR` | `number` |
+| `BIGINT` (signed and unsigned) | `number`; the exact digits as a `string` beyond 2^53 |
+| `DECIMAL` | `number` when a double holds every digit, else the exact text (`DECIMAL(30,10)`) |
+| `FLOAT`, `DOUBLE` | `number` (a FLOAT read through a prepared statement is rounded to its 7 significant digits, as the text protocol shows it) |
+| `DATETIME`, `TIMESTAMP` | `Date` in `timezone` (`local` by default, or `Z`, `+02:00`); `dateStrings: true` returns `'2026-03-01 14:05:00'` |
+| `DATE` | `'YYYY-MM-DD'` text: a calendar date is not an instant, so no time zone can shift it |
+| `TIME` | text (`'-838:59:59'`, `'12:00:00.250000'`) |
+| `CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `JSON` | `string` (utf8mb4) |
+| `BINARY`, `VARBINARY`, `BLOB`, `GEOMETRY` | `Buffer` |
+| `BIT(n)` | `number` (n <= 48), else `Buffer` |
+| `NULL` | `null` |
+| zero dates (`'0000-00-00'`) | the text as stored |
+
+Bound values: integers as `BIGINT`, other numbers as `DOUBLE`, booleans as
+`1`/`0`, `bigint` as signed or unsigned 64-bit, `Date` as `DATETIME(3)` in
+`timezone`, `Buffer`/`Uint8Array` as bytes, everything else as text.
+
+The live tests run against MariaDB 10.11 and MySQL 8.4:
+
+```bash
+test/acceptance/enterprise/env/mysql.sh up    # both servers, TLS from a private CA, the test users
+npm test -- test/integration/mysql-protocol.test.ts test/integration/mysql-journeys.test.ts
+```
+
 ## CLI: queries, validate, doctor
 
 | Command | What it does |
 |---|---|
 | `eztest queries list [--connection a] [--fragments] [--json]` | Name, connection, params with defaults, and description of each query |
-| `eztest queries check [NAME...] [--connection a] [--json]` | Checks each query statically (includes, declared and unused params, mixed bind styles), then prepares it against the live database **without executing writes**. Oracle: thin-mode parse (`getStatementInfo`). PostgreSQL: `EXPLAIN` in a READ ONLY transaction that is rolled back. SQL Server: `sp_describe_first_result_set` for reads, inside a rolled-back transaction. SQLite: `EXPLAIN`. DDL is reported as skipped. Exits 1 on any error |
+| `eztest queries check [NAME...] [--connection a] [--json]` | Checks each query statically (includes, declared and unused params, mixed bind styles), then prepares it against the live database **without executing writes**. Oracle: thin-mode parse (`getStatementInfo`). PostgreSQL: `EXPLAIN` in a READ ONLY transaction that is rolled back. SQL Server: `sp_describe_first_result_set` for reads, inside a rolled-back transaction. MySQL/MariaDB: a server-side prepare (`COM_STMT_PREPARE`), never executed. SQLite: `EXPLAIN`. DDL is reported as skipped. Exits 1 on any error |
 | `eztest validate` | Besides parsing, checks every catalogue step: the query exists, required params are supplied, no unknown params are passed, and the connection is configured |
 | `eztest doctor [--no-db]` | Connects to every configured database and reports the dialect, server version, latency and, for Oracle, Thin mode and the pool. Also loads the catalogue |
 
@@ -321,6 +405,7 @@ The SQL console works on every dialect. It is **read-only by default**:
    - PostgreSQL: `SET TRANSACTION READ ONLY`.
    - SQL Server: the statement runs in a transaction that is always rolled back.
    - Oracle: `SET TRANSACTION READ ONLY`, always rolled back.
+   - MySQL/MariaDB: `START TRANSACTION READ ONLY`, always rolled back.
 
 "Allow writes for this session" works as before: you enable it, and then each
 write asks for confirmation.
@@ -405,4 +490,6 @@ npm test -- test/surfaces/db-postgres.test.ts test/e2e/postgres-journey.test.ts 
 | `test/surfaces/db-cross-dialect.test.ts` | Oracle + SQL Server | the same rows compared across dialects, and one catalogue query run and checked on both |
 | `test/surfaces/db-postgres.test.ts` | PostgreSQL | pooling, `$n` and `:name` binds and injection, casts, pg types, transactions and SQLSTATE errors, the catalogue, `queries check` (EXPLAIN, read-only), Examples, the load test's database monitor |
 | `test/e2e/postgres-journey.test.ts` | PostgreSQL (+ Chromium) | `examples/postgres-project`: API and UI compared with the ledger cell by cell, one run per query row (`Examples: from query`), the CLI, and a missing table triaged as `db-schema-missing` |
+| `test/integration/mysql-protocol.test.ts` | MariaDB 10.11 + MySQL 8.4 (`env/mysql.sh up`) | the protocol client: TLS, every sign-in path, text and binary types, several results, >16 MB payloads, the pool, transactions, errors |
+| `test/integration/mysql-journeys.test.ts` | MariaDB 10.11 + MySQL 8.4 | `.ez` steps, the catalogue, `queries check`, `doctor` and `run` through the CLI |
 | `test/surfaces/db-mssql.test.ts` | nothing (+ SQL Server for the live part) | connection strings, every authentication mapping checked by the real tedious driver, Entra tokens from EZTest, live SQL login and NTLM |

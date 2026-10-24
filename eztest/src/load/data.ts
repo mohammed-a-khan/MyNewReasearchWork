@@ -86,10 +86,11 @@ export async function loadDatasetRows(name: string, spec: DatasetSpec, scenario:
   throw new EzTestError(`data.${name}: no source`, 'LOAD_DATA');
 }
 
-/** A connection spec from the scenario (`driver: sqlite|postgres|mssql|oracle`), sqlite paths resolved. */
+/** A connection spec from the scenario (`driver: sqlite|postgres|mssql|oracle|mysql`), sqlite paths resolved. */
 export function resolveConnection(c: Record<string, unknown>, baseDir: string): DbConnectionSpec {
-  const driver = String(c.driver ?? c.type ?? '');
-  if (!['sqlite', 'postgres', 'mssql', 'oracle'].includes(driver)) throw new EzTestError(`connection: driver must be sqlite, postgres, mssql or oracle (got "${driver}")`, 'LOAD_SCENARIO');
+  const given = String(c.driver ?? c.type ?? '');
+  const driver = given === 'mariadb' ? 'mysql' : given;
+  if (!['sqlite', 'postgres', 'mssql', 'oracle', 'mysql'].includes(driver)) throw new EzTestError(`connection: driver must be sqlite, postgres, mssql, oracle or mysql (got "${given}")`, 'LOAD_SCENARIO');
   const spec = { ...c, driver } as Record<string, unknown>;
   delete spec.type;
   if (driver === 'sqlite' && typeof spec.file === 'string' && spec.file !== ':memory:') spec.file = resolve(baseDir, spec.file);

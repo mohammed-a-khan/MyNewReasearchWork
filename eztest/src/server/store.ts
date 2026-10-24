@@ -14,7 +14,7 @@ export type { DbConnectionSpec };
 
 /** `?` -> `$n` (postgres) / `@pn` (mssql). Only used on this module's own SQL (no `?` inside literals). */
 export function dialectSql(sql: string, dialect: SqlDialect): string {
-  if (dialect === 'sqlite') return sql;
+  if (dialect === 'sqlite' || dialect === 'mysql') return sql;
   let n = 0;
   return sql.replace(/\?/g, () => (dialect === 'postgres' ? `$${++n}` : dialect === 'mssql' ? `@p${++n}` : `:${++n}`));
 }
@@ -24,6 +24,8 @@ const TYPES: Record<SqlDialect, { key: string; text: string; int: string; big: s
   postgres: { key: 'VARCHAR(300)', text: 'TEXT', int: 'INTEGER', big: 'BIGINT' },
   mssql: { key: 'NVARCHAR(300)', text: 'NVARCHAR(MAX)', int: 'INT', big: 'BIGINT' },
   oracle: { key: 'VARCHAR2(300)', text: 'CLOB', int: 'NUMBER(10)', big: 'NUMBER(19)' },
+  // InnoDB keys are at most 3072 bytes: four utf8mb4 key columns of 190 characters fit.
+  mysql: { key: 'VARCHAR(190)', text: 'LONGTEXT', int: 'INT', big: 'BIGINT' },
 };
 
 function ddl(d: SqlDialect): string[] {

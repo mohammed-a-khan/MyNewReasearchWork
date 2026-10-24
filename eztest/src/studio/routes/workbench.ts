@@ -36,6 +36,7 @@ import {
   type DbConnectionSpec,
   type RequestOptions,
   type OracleDbClient,
+  type MysqlDbClient,
   type SqlDialect,
   type SqlValue,
 } from '../../surfaces/index.js';
@@ -248,6 +249,7 @@ const ENFORCED: Record<string, string> = {
   postgres: 'READ ONLY transaction',
   mssql: 'transaction rolled back',
   oracle: 'READ ONLY transaction (rolled back)',
+  mysql: 'READ ONLY transaction (rolled back)',
 };
 
 async function openForSql(app: StudioApp, loaded: LoadedConfig, name: string, readOnly: boolean): Promise<{ client: DbClient; close(): Promise<void>; enforced: string }> {
@@ -302,6 +304,8 @@ export async function runSql(app: StudioApp, body: Record<string, unknown>): Pro
       });
     } else if (driver === 'oracle') {
       rows = await (conn.client as OracleDbClient).readOnly((tx) => tx.query(sql, params));
+    } else if (driver === 'mysql') {
+      rows = await (conn.client as MysqlDbClient).readOnly((tx) => tx.query(sql, params));
     } else if (driver === 'mssql') {
       try {
         await conn.client.transaction(async (tx) => {
@@ -329,7 +333,7 @@ export async function runSql(app: StudioApp, body: Record<string, unknown>): Pro
 
 async function catalogueFor(app: StudioApp, loaded: LoadedConfig): Promise<QueryCatalogue> {
   try {
-    return await QueryCatalogue.fromConfig(loaded.config.db.queries, app.cwd);
+    return await QueryCatalogue.fromConfig(loaded.config.db.queries, app.cwd, loaded.config.db.connections);
   } catch (e) {
     throw new HttpError(422, (e as Error).message);
   }

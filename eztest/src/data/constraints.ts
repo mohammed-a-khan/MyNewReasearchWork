@@ -119,7 +119,7 @@ const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export function quoteIdent(name: string, dialect: SqlDialect): string {
   const parts = name.split('.');
   for (const p of parts) if (!IDENT_RE.test(p)) throw new EzTestError(`Invalid SQL identifier "${name}"`, 'DATA_IDENTIFIER');
-  return parts.map((p) => (dialect === 'mssql' ? `[${p}]` : `"${p}"`)).join('.');
+  return parts.map((p) => (dialect === 'mssql' ? `[${p}]` : dialect === 'mysql' ? `\`${p}\`` : `"${p}"`)).join('.');
 }
 
 export function placeholder(dialect: SqlDialect, index: number): string {

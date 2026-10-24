@@ -13,4 +13,5 @@ export * from './db-sql.js';
 export * from './db-rows.js';
 export * from './db-oracle.js';
 export * from './db-mssql.js';
+export * from './db-mysql.js';
 export * from './compare.js';
