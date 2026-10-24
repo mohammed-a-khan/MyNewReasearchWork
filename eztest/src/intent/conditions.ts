@@ -41,6 +41,13 @@ export const CONDITION_RULES: CondRule[] = [
     build: (m, q) => ({ type: 'pageNotContainsText', value: val(m[1], q) }) },
   { name: 'screen-contains', re: /^(?:the\s+)?(?:terminal\s+|mainframe\s+|sap\s+|desktop\s+)?screen\s+(?:contains|shows|displays|includes|has)(?:\s+(?:the\s+)?text)?\s+(.+)$/i,
     build: (m, q) => ({ type: 'pageContainsText', value: val(m[1], q) }) },
+  // Where the user ended up, said the way testers write it: "user lands on the "Dashboard" screen", "I am on the Orders page",
+  // "user is redirected to Login". Checked as the page showing that name (a heading, title or label on the page).
+  { name: 'lands-on', re: /^(?:the\s+)?(?:user|users|i|we|customer|they)\s+(?:(?:is|am|are|was|were|should\s+be|gets?|got|has\s+been|have\s+been)\s+)?(?:(?:lands?|landed|navigated|navigates|redirected|taken|brought|reach(?:es|ed)?|arrives?|arrived|goes|went|moved?)\s+)?(?:on|to|at|onto|in)\s+(?:the\s+)?(.+?)(?:\s+(?:screen|page|view|module))?\s*[.!]?$/i,
+    build: (m, q) => ({ type: 'pageContainsText', value: val(m[1].trim(), q) }) },
+  // "the "Dashboard" screen is displayed", "Orders page is shown", "the Login page should be visible".
+  { name: 'screen-shown', re: /^(?!there\s)(?:the\s+)?(.+?)\s+(?:screen|page|view|module)\s+(?:is\s+|should\s+be\s+|gets\s+)?(?:shown|displayed|visible|opened|open|loaded|appears|presented)\s*[.!]?$/i,
+    build: (m, q) => ({ type: 'pageContainsText', value: val(m[1].trim(), q) }) },
   // API contract conformance ("response x conforms to OpenAPI ...").
   ...CONTRACT_CONDITION_RULES,
   // Accessible name/role, aria snapshots, negated text, title/page patterns (before the generic "has"/"contains" forms).
@@ -194,7 +201,7 @@ export function parseCondition(text: string): Condition {
   const c = tryParseCondition(text);
   if (!c) {
     throw new Error(
-      `Cannot understand the expectation "${text}". Try e.g. 'page contains "Saved"', 'URL contains "/dashboard"', ` +
+      `Cannot understand the expectation "${text}". Try e.g. 'user lands on "Dashboard" screen', 'page contains "Saved"', 'URL contains "/dashboard"', ` +
         `'the "Saved" message is visible', 'the Status field has value "Open"', 'there are 2 rows in the Orders table'.`,
     );
   }

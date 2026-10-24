@@ -106,6 +106,12 @@ function measuredCandidates(info: ElementInfo): LocatorCandidate[] {
 }
 
 /** Build the ordered description alternatives for an element. */
+function ordinal(n: number): string {
+  const t = n % 100;
+  const suffix = t >= 11 && t <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
+  return `${n}${suffix}`;
+}
+
 export function buildTarget(info: ElementInfo): RecordedTarget {
   const kind = kindOf(info);
   const c = info.counts;
@@ -156,6 +162,10 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
   if (kind === 'generic' && info.text && c.text === 1) {
     const q = tryQuote(info.text);
     if (q) descriptions.push(`the ${q} text`);
+  } else if (kind === 'generic' && info.text && c.text > 1 && info.textNth) {
+    // The same words appear elsewhere (a menu item and the page title): say which one, in words, before any CSS path.
+    const q = tryQuote(info.text);
+    if (q) descriptions.push(`the ${ordinal(info.textNth)} ${q} text`);
   }
   descriptions.push(`css=${info.css}`);
 

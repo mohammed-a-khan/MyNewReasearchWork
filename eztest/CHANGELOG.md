@@ -4,6 +4,14 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Fixed: record, then run
+
+- An expectation typed in Studio while the last field was still being typed was attached to the step before it; pending typing is now recorded first.
+- Expectations in the words testers use are understood: `user lands on "Dashboard" screen`, `I am on the Orders page`, `user is redirected to Login`, `the "Dashboard" screen is displayed`.
+- An empty "Add an expectation" box, or pressing Enter twice, no longer sends an empty expectation.
+- A click on a plain container around a heading or link is recorded as that element (`Click the "Dashboard" heading`), and a repeated text as `the 2nd "Dashboard" text`, instead of a CSS path.
+- Studio's left bar is wider (104 px) with larger labels.
+
 ### Documents, SOAP and AMQP 1.0
 
 - **Scanned PDFs are read by OCR** ([docs/documents.md](docs/documents.md)). `method: 'ocr'` renders every page with pdf.js on `@napi-rs/canvas` and reads it with tesseract.js, locally. `method: 'auto'` OCRs only the pages without a text layer. The words become positioned items with their confidence, so field and table templates work on scans; values say `method: "ocr"` and carry the recogniser's confidence. Numeric template values that OCR misread get a second, digits-only look. Measured on generated noisy scans: every field at 120 dpi and above, and 98-100% of amounts. Missing packages fail with the install command (`DOCS_CANVAS_MISSING`, `DOCS_OCR_MISSING`); `vision` is refused with an explanation.

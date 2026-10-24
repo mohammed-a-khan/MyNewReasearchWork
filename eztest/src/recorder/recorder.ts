@@ -139,11 +139,36 @@ export class Recorder {
    * `the page contains "Saved"` or `Expect the URL contains "/orders"`.
    * Throws if the text is not a valid expectation.
    */
-  addExpectation(text: string): void {
+  addExpectation(text: string): Promise<void> {
     if (this.stopped || this.stopping) throw new Error('addExpectation: the recording has stopped');
-    const body = text.trim().replace(/^(?:(?:then|and|also)\s+)?(?:expect|verify|assert|check)\s+(?:that\s+)?/i, '');
+    const body = text.trim().replace(/^(?:(?:then|and|also)\s+)?(?:expect|verify|assert|check|ensure|confirm)\s+(?:that\s+)?/i, '');
+    if (!body) throw new Error('addExpectation: type what to expect, e.g. page contains "Dashboard"');
     const condition = parseCondition(body);
-    this.enqueue({ kind: 'expect', condition, t: Date.now() });
+    // Typing still being settled in the page belongs before the expectation: flush it first, so the expectation
+    // attaches to the step the user just did and not to the one before it.
+    const done = (async () => {
+      await this.flushPendingTyping();
+      await Promise.all([...this.inflight].filter((p) => p !== done));
+      this.enqueue({ kind: 'expect', condition, t: Date.now() });
+    })();
+    this.inflight.add(done);
+    void done.finally(() => this.inflight.delete(done));
+    return done;
+  }
+
+  /** Ask every frame for typing it has not reported yet (without detaching the recorder). */
+  private async flushPendingTyping(): Promise<void> {
+    if (this.page.isClosed()) return;
+    for (const frame of this.page.frames()) {
+      try {
+        const evs = (await frame.evaluate(FLUSH_EXPR)) as PageEvent[];
+        const frames = frame === this.page.mainFrame() ? [] : await frameChain(frame);
+        for (const ev of evs) this.enqueue({ ...ev, ...(frames.length ? { frames } : {}) });
+      } catch {
+        // Frame detached or navigating: nothing pending there.
+      }
+    }
+    await sleep(SETTLE_MS);
   }
 
   /** Number of steps recorded so far (events still settling are not counted). */

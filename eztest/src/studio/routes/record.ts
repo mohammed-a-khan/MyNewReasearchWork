@@ -45,8 +45,8 @@ export const recordRoutes: StudioRoute[] = [
     method: 'POST',
     path: '/api/record/expect',
     summary: 'Add an expectation to the last recorded step',
-    handler({ res, app, body }) {
-      app.recorder.expect(str(body.text, 'text'));
+    async handler({ res, app, body }) {
+      await app.recorder.expect(str(body.text, 'text'));
       sendJson(res, 200, { ok: true });
     },
   },

@@ -483,13 +483,14 @@ These open a non-browser surface. While it is active, the ordinary phrasings (Cl
 
 On a device, the usual phrasings work natively: `Tap the "Log in" button`, `Type ... into ...`, `Go back`, `Press Enter`, `Open "shop://cart"` (a deep link) and `Expect the screen to contain "ORD-"`.
 
-## Expectations (72 phrasings)
+## Expectations (74 phrasings)
 
 | Checks | Examples |
 |---|---|
 | Screen text (any surface) | `the screen contains "ACCOUNT FOUND"` · `the screen does not contain "ERROR"` · `Expect the screen to contain "READY"` |
 | Captured values | `${mail.text} contains "approved"` · `${status} does not contain "Error"` |
 | Page text | `the page contains "Saved"` · `the page does not contain "Error"` · `I see "Welcome"` · `I do not see "Error"` · `the text "Saved" is visible` |
+| Where the user is | `user lands on "Dashboard" screen` · `I am on the Orders page` · `user is redirected to Login` · `the "Dashboard" screen is displayed` (checked as the page showing that name) |
 | URL and title | `the URL contains "/orders"` · `the URL does not contain "/login"` · `the URL matches "orders/\d+"` · `the URL is "/dashboard"` · `the title contains "Orders"` |
 | Elements | `the Save button is visible` · `the spinner is hidden` · `the Status field has value "Open"` · `the value of the Total field is "10.00"` · `the Heading has text "Orders"` · `the "Order created" toast contains "created"` |
 | States | `the Save button is enabled` · `the Save button is disabled` · `the Name field is editable` · `the Reference field is read-only` · `the Search field is focused` · `the Terms checkbox is checked` · `the Terms checkbox is not checked` · `the Footer section is in the viewport` · `the Notes field is empty` · `the Chart is stable` · `the Spinner is detached` |

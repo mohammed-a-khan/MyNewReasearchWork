@@ -102,9 +102,11 @@ describe('element description (in-page computation)', () => {
     expect(third.ambiguous).toBe(true);
     expect(third.descriptions[0]).toBe('testid=delete-3');
 
+    // The same words twice: say which one in words first, keep the CSS path as the fallback.
     const dup = await describeElement(page.locator('div.b span'));
-    expect(dup.descriptions).toEqual(['css=div.b span']);
+    expect(dup.descriptions).toEqual(['the 2nd "dup" text', 'css=div.b span']);
     await expectRoundTrip(page.locator('div.b span'), dup.descriptions[0]);
+    await expectRoundTrip(page.locator('div.b span'), dup.descriptions[1]);
   });
 
   it('never reads a password value', async () => {

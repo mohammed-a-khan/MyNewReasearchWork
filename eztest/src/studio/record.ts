@@ -110,10 +110,10 @@ export class RecordManager {
   }
 
   /** Expectation typed in the Studio, added to the last recorded step. */
-  expect(text: string): void {
+  async expect(text: string): Promise<void> {
     if (!this.recorder || this.session?.state !== 'recording') throw new HttpError(409, 'No recording in progress');
     try {
-      this.recorder.addExpectation(String(text));
+      await this.recorder.addExpectation(String(text));
     } catch (e) {
       throw new HttpError(400, (e as Error).message);
     }

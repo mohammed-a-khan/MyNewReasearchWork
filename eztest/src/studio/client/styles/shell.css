@@ -19,12 +19,12 @@
 .workbench { display: flex; min-height: 0; min-width: 0; }
 .activitybar { width: var(--activity-w); flex: none; background: var(--ab-bg); display: flex; flex-direction: column; justify-content: space-between; padding: 6px 0; overflow-y: auto; overflow-x: hidden; }
 .ab-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.ab-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px 7px; margin: 0 4px; border-radius: 8px; min-width: 0; color: var(--ab-fg); font-size: 10.5px; font-weight: 500; }
+.ab-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px 7px; margin: 0 6px; border-radius: 8px; min-width: 0; color: var(--ab-fg); font-size: 12px; font-weight: 500; }
 .ab-item:hover { background: var(--ab-hover); color: var(--ab-active-fg); text-decoration: none; }
 .ab-item[aria-current="page"] { color: var(--ab-active-fg); background: var(--ab-hover); }
 .ab-item[aria-current="page"]::before { content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--ab-indicator); }
 .ab-item:focus-visible { outline-color: var(--ab-indicator); }
-.ab-label { line-height: 1.15; text-align: center; max-width: 100%; overflow-wrap: anywhere; hyphens: auto; }
+.ab-label { line-height: 1.2; overflow-wrap: normal; word-break: normal; text-align: center; max-width: 100%; }
 .ab-section { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--ab-hover); }
 .ab-group-label { font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ab-fg); text-align: center; margin: 0 0 4px; }
 

@@ -67,6 +67,8 @@ export interface ElementInfo {
    * that picks it out (`in the row containing "<rowText>"`), measured on the page.
    */
   rowText?: string;
+  /** 1-based position among elements with the same text, when the text is not unique. */
+  textNth?: number;
 }
 
 /** Events the page sends to Node. */
@@ -374,7 +376,42 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       }
       return '';
     };
+    // A click on a plain container whose text is exactly one labelled control or heading inside it (a title bar
+    // div around an <h6>): describe that element instead, so the step reads "the "Dashboard" heading", not a CSS path.
+    var meaningful = function (el) {
+      if (roleOf(el)) return el;
+      var own = norm(el.innerText != null ? el.innerText : el.textContent);
+      if (!own || own.length > 80) return el;
+      var all = el.querySelectorAll('h1,h2,h3,h4,h5,h6,a[href],button,label,[role]');
+      var pick = null, n = 0;
+      for (var i = 0; i < all.length; i++) {
+        var c = all[i];
+        if (!roleOf(c) || isHidden(c)) continue;
+        if (norm(c.innerText != null ? c.innerText : c.textContent) === own) { pick = c; n++; }
+      }
+      return n === 1 ? pick : el;
+    };
+    // 1-based position of el among the elements countText counts, for "the 2nd "Dashboard" text".
+    var textNth = function (el, text) {
+      if (!text || !document.body) return 0;
+      var n = 0;
+      var all = document.body.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        var e = all[i];
+        var t = lower(e);
+        if (t === 'script' || t === 'style' || t === 'template') continue;
+        var raw = e.textContent || '';
+        if (raw.length < text.length || norm(raw) !== text) continue;
+        var childHas = false;
+        for (var j = 0; j < e.children.length; j++) if (norm(e.children[j].textContent) === text) { childHas = true; break; }
+        if (childHas) continue;
+        n++;
+        if (e === el || el.contains(e)) return n;
+      }
+      return 0;
+    };
     var info = function (el) {
+      el = meaningful(el);
       var tag = lower(el);
       var role = roleOf(el);
       var name = nameOf(el, role);
@@ -406,6 +443,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (label) out.label = label;
       if (placeholder) out.placeholder = placeholder;
       if (text) out.text = text;
+      if (text && !role && out.counts.text > 1) { var nth = textNth(el, text); if (nth) out.textNth = nth; }
       if (testId) out.testId = testId;
       if (el.id) out.id = el.id;
       var title = norm(el.getAttribute('title')); if (title) out.title = title;

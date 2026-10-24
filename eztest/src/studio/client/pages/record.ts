@@ -36,7 +36,7 @@ export function registerRecordPage(): void {
       const stopBtn = button('Stop recording', { icon: 'stop', disabled: true, onclick: () => void stop() });
       const status = h('p', { class: 'run-status', role: 'status', 'aria-live': 'polite', text: 'Not recording.' });
       const lines = h('ol', { class: 'code-list', 'aria-label': 'Recorded steps' });
-      const expectIn = h('input', { id: ids.expect, class: 'input mono', placeholder: 'the page contains "Saved"' });
+      const expectIn = h('input', { id: ids.expect, class: 'input mono', placeholder: 'e.g. user lands on "Dashboard" screen · page contains "Saved" · URL contains "/dashboard"' });
       const expectForm = h(
         'form',
         { class: 'row', hidden: true, onsubmit: (e: Event) => (e.preventDefault(), void addExpect()) },
@@ -134,12 +134,23 @@ export function registerRecordPage(): void {
           status.textContent = `Could not stop: ${(e as Error).message}`;
         }
       };
+      let addingExpect = false;
       const addExpect = async () => {
+        const text = expectIn.value.trim();
+        // An empty box (or a second Enter while the first is still being added) sends nothing.
+        if (!text) {
+          expectIn.focus();
+          return;
+        }
+        if (addingExpect) return;
+        addingExpect = true;
         try {
-          await api.post('/api/record/expect', { text: expectIn.value });
+          await api.post('/api/record/expect', { text });
           expectIn.value = '';
         } catch (e) {
           toastError((e as Error).message);
+        } finally {
+          addingExpect = false;
         }
       };
       const save = async () => {
