@@ -29,6 +29,7 @@ import {
 } from '../data/index.js';
 import { autoApplyHeals, collectHealProposals, createHealer, FingerprintStore, HealDecisions } from '../heal/index.js';
 import { extractPdf, reconcileThreeWay, renderHtml, type ThreeWayMapping } from '../docs/index.js';
+import { visualDocumentCheck } from '../docs/visual-step.js';
 import type { CompareDocumentHandler, DataHandler, DbHandler, Lens, RunHooks, RunOptions, StepContext } from '../runner/index.js';
 import { loadJourneyFile } from '../intent/index.js';
 import { SmtpSink, TwilioSmsProvider, TwilioVoiceProvider, loadTranscriptFixtures } from '../messaging/index.js';
@@ -245,6 +246,7 @@ export function documentCheckHandler(config: EzTestConfig, dbs: DbRegistry, cwd:
     return templates.get(abs);
   }
   return async (args, ctx) => {
+    if (args.mode === 'visual') return visualDocumentCheck(args, ctx, cwd);
     const docKey = String(args.document ?? '');
     const checkName = String(args.using ?? args.against ?? '');
     const check: DocumentCheckConfig | undefined = config.documents[checkName];

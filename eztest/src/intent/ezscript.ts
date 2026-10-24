@@ -28,6 +28,7 @@ import { isNamedQueryExpectation, queryStepToText } from './rules-queries.js';
 import { isDesktopExpectation } from './rules-desktop.js';
 import { isIntegrationExpectation } from '../integration/rules.js';
 import { isStoreExpectation } from '../store/rules.js';
+import { isDocumentLookExpectation } from './rules.js';
 import { isSpecialistExpectation } from './rules-specialist.js';
 import { dependsOnToText, parseDependsOn, parseRequires, requiresToText } from './requires.js';
 import { mobileStepToText } from './rules-mobile.js';
@@ -271,7 +272,7 @@ export function parseEzScript(text: string, opts: ParseEzOptions = {}): Journey 
     const e = SOFT.test(line) ? null : EXPECT.exec(line);
     const prev = list[list.length - 1];
     // Add-on phrasings such as "Expect D365 field ..." are steps of their own, not post-conditions.
-    if (e && prev && !matchesPluginRule(line) && !isStepExpectation(line) && !isNamedQueryExpectation(line) && !isVisualExpectation(line) && !isA11yExpectation(line) && !isComponentExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isKeyboardExpectation(line) && !isStoreExpectation(line)) {
+    if (e && prev && !matchesPluginRule(line) && !isStepExpectation(line) && !isNamedQueryExpectation(line) && !isVisualExpectation(line) && !isA11yExpectation(line) && !isComponentExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isKeyboardExpectation(line) && !isStoreExpectation(line) && !isDocumentLookExpectation(line)) {
       try {
         (prev.postconditions ??= []).push(parseCondition(e[1].replace(/[.;]+$/, '')));
       } catch (err) {
@@ -620,7 +621,11 @@ export function stepToText(s: Step): string {
       return `Use data ${a.entity} as ${a.as}${w ? ` where ${w}` : ''}`;
     }
     case 'compareDocument': {
-      const a = (s.args ?? {}) as { document?: string; against?: string; using?: string };
+      const a = (s.args ?? {}) as { document?: string; against?: string; using?: string; mode?: string; expected?: string; tolerancePercent?: number; maxDiffPixels?: number; masks?: string };
+      if (a.mode === 'visual') {
+        const tol = a.tolerancePercent !== undefined ? ` within ${a.tolerancePercent}%` : a.maxDiffPixels !== undefined ? ` within ${a.maxDiffPixels} pixels` : '';
+        return `Expect document ${a.document} to look like ${quoteText(String(a.expected))}${tol}${typeof a.masks === 'string' ? ` ignoring ${a.masks}` : ''}${s.captureAs ? ` and store as ${s.captureAs}` : ''}`;
+      }
       return `Compare document ${a.document} to ${quoteText(String(a.against))}${a.using ? ` using ${a.using}` : ''}${s.captureAs ? ` and store as ${s.captureAs}` : ''}`;
     }
     case 'custom': {

@@ -48,7 +48,9 @@ function columnsOf(spec: TableSpec): ColumnDef[] {
 function joinText(items: TextItem[]): string {
   let out = '';
   let prev: TextItem | undefined;
-  for (const it of [...items].sort((a, b) => a.y - b.y || a.x - b.x)) {
+  // Reading order by baseline (not top edge: OCR word boxes of one line have different tops).
+  const sameRow = (a: TextItem, b: TextItem) => Math.abs(a.baseline - b.baseline) < 0.5 * Math.min(a.fontSize, b.fontSize);
+  for (const it of [...items].sort((a, b) => (sameRow(a, b) ? a.x - b.x : b.baseline - a.baseline))) {
     if (prev) {
       const sameLine = Math.abs(prev.baseline - it.baseline) < 0.5 * it.fontSize;
       const gap = it.x - (prev.x + prev.width);

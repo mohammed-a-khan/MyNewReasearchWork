@@ -62,7 +62,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (366 phrasings)
+## Actions (367 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -82,7 +82,7 @@ Each phrasing accepts natural variants (articles, "I"/"the user", third person, 
 | API | `Call API "GET /api/orders" as manager and store as orders` · `Send a GET request to /api/orders and store as orders` · `GET /api/orders as manager and store as orders` |
 | Database | `Run query "SELECT * FROM orders" on shop as rows` · `Query shop with "SELECT COUNT(*) AS n FROM orders" as count` |
 | Test data | `Use data Customer as customer where region=EU` · `Given a Customer as buyer where region=EU` |
-| Documents | `Compare document invoice to the order using invoice-vs-order and store as invoiceCheck` |
+| Documents | `Compare document invoice to the order using invoice-vs-order and store as invoiceCheck` · `Expect document invoice to look like "baselines/invoice.pdf" within 0.5% ignoring page 1 400,40,150,20` (visual, see [documents.md](documents.md)) |
 | Assertions | `Verify the page contains "Welcome"` · `Check that the URL contains "/dashboard"` · `I should see "Order created"` · `The Orders table should have 2 rows` · `Soft expect the page contains "Welcome"` |
 | Relative targets | `Click the "Edit" button in the row containing "Acme"` · `Click the "Delete" button in the "Acme" row` · `Type "a@b.c" into the field below "Email"` · `Type "3" into the input right of the "Qty" label` · `Click the "Recalculate" button near "Total"` · `Type "Ann" into the "Name" field inside the "Billing" section` · `Click the 2nd "Delete" button` · `Click the last "Edit" button` (see [Relative and scoped targets](#relative-and-scoped-targets)) |
 | Shared elements | `Click the @Checkout.placeOrder button` · `Click @Checkout.placeOrder` · `Click the Checkout button` (an element's description or alias; see [elements.md](elements.md)) |

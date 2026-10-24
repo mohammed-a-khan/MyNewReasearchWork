@@ -51,9 +51,10 @@ describe('extractPdf: layout and metadata', () => {
     expect(doc.findings.map((f) => f.code)).toContain('NO_TEXT_LAYER');
   });
 
-  it('throws NotSupportedError for OCR/vision methods', async () => {
+  it('throws NotSupportedError for the vision method and unknown methods', async () => {
     const bytes = await makeInvoicePdf({ invoiceNo: 'X', customer: 'Y', date: '2024-01-01', lines: [], total: '0' });
-    await expect(extractPdf(bytes, { method: 'ocr' })).rejects.toBeInstanceOf(NotSupportedError);
+    await expect(extractPdf(bytes, { method: 'vision' })).rejects.toBeInstanceOf(NotSupportedError);
+    await expect(extractPdf(bytes, { method: 'magic' as never })).rejects.toBeInstanceOf(NotSupportedError);
   });
 });
 

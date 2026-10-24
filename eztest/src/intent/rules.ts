@@ -67,6 +67,11 @@ function assertStep(c: Condition): StepBody {
 }
 
 /** Parse "k=v, k2=v2" / "k = v and k2 = v2" into a record. */
+/** "Expect document A to look like B" is a visual document comparison step, never a post-condition. */
+export function isDocumentLookExpectation(line: string): boolean {
+  return /^(?:expect|verify|check|assert)\s+(?:that\s+)?(?:the\s+)?(?:document|pdf|file|invoice|report)\s+(?!to\s)\S+\s+(?:to\s+)?looks?\s+like\s/i.test(line.trim());
+}
+
 export function parseKeyValues(s: string, q: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of s.split(/\s*(?:,|\band\b)\s*/i)) {
@@ -205,6 +210,17 @@ export const INTENT_RULES: IntentRule[] = [
     build: (m, q) => dbBody(m[1], V(m[2], q), undefined, m[3]) },
 
   // ------------------------------------------------------------ documents
+  { name: 'document-looks-like', keywords: ['expect', 'verify', 'look'], example: 'Expect document invoice to look like "baselines/invoice.pdf" within 0.5% ignoring page 1 400,40,150,20',
+    re: new RegExp(String.raw`^(?:expect|verify|check|assert)\s+(?:that\s+)?(?:the\s+)?(?:document|pdf|file|invoice|report)\s+(?!to\s)(⟦\d+⟧|\S+)\s+(?:to\s+)?looks?\s+like\s+(?:the\s+)?(?:(?:document|pdf|file|baseline)\s+)?(⟦\d+⟧|\S+?)(?:\s+within\s+(\d+(?:\.\d+)?)\s*(%|pixels?|px))?(?:\s+(?:ignoring|masking)\s+(.+?))?(?:\s+(?:and\s+)?(?:store|save)\s+(?:it\s+|the\s+result\s+)?as\s+${KEY})?$`, 'i'),
+    build: (m, q) => ({
+      action: 'compareDocument',
+      args: {
+        mode: 'visual', document: V(m[1], q), expected: V(m[2], q),
+        ...(m[3] ? (m[4] === '%' ? { tolerancePercent: Number(m[3]) } : { maxDiffPixels: Number(m[3]) }) : {}),
+        ...(m[5] ? { masks: m[5] } : {}),
+      },
+      ...(m[6] ? { captureAs: m[6] } : {}),
+    }) },
   { name: 'compare-document', keywords: ['compare'], example: 'Compare document invoice to the order and store as invoiceCheck',
     re: new RegExp(String.raw`^compare\s+(?:the\s+)?(?:document|pdf|file|invoice|report)\s+(\S+)\s+(?:to|with|against)\s+(.+?)(?:\s+using\s+(\S+))?(?:\s+(?:and\s+)?(?:store|save)\s+(?:it\s+|the\s+result\s+)?as\s+${KEY})?$`, 'i'),
     build: (m, q) => ({ action: 'compareDocument', args: { document: V(m[1], q), against: V(m[2], q), ...(m[3] ? { using: V(m[3], q) } : {}) }, ...(m[4] ? { captureAs: m[4] } : {}) }) },

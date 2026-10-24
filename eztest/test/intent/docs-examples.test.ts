@@ -9,6 +9,7 @@ import { isIntegrationExpectation } from '../../src/integration/rules.js';
 import { isA11yExpectation } from '../../src/intent/rules-a11y.js';
 import { isSpecialistExpectation } from '../../src/intent/rules-specialist.js';
 import { isStoreExpectation } from '../../src/store/rules.js';
+import { isDocumentLookExpectation } from '../../src/intent/rules.js';
 
 const doc = readFileSync(new URL('../../docs/ez-language.md', import.meta.url), 'utf8');
 const actionsPart = doc.slice(doc.indexOf('## Actions ('), doc.indexOf('## Expectations ('));
@@ -39,7 +40,7 @@ describe('docs/ez-language.md examples', () => {
   it.each(actions)('action: %s', (line) => {
     const expectLine = /^Expect\s+(.+)$/i.exec(line);
     // "Expect query "NAME" ... returns N rows" (named-query catalogue) is a step of its own.
-    if (expectLine && !isNamedQueryExpectation(line) && !isStepExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isA11yExpectation(line) && !isStoreExpectation(line)) {
+    if (expectLine && !isNamedQueryExpectation(line) && !isStepExpectation(line) && !isDesktopExpectation(line) && !isIntegrationExpectation(line) && !isSpecialistExpectation(line) && !isA11yExpectation(line) && !isStoreExpectation(line) && !isDocumentLookExpectation(line)) {
       expect(() => parseCondition(expectLine[1])).not.toThrow();
       return;
     }

@@ -185,22 +185,57 @@ export function extractFields(
 export function autoFields(doc: CanonicalDocument, ctx: FieldContext = {}): DocField[] {
   const out: DocField[] = [];
   const seen = new Map<string, number>();
+  const add = (label: string, raw: string, page: number, bbox: DocValue['bbox'], confidence: number) => {
+    const base = label.trim();
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    const name = n === 1 ? base : `${base} #${n}`;
+    const value = makeValue(raw, 'text', page, bbox, confidence, ctx);
+    // Type is auto-detected so "1,200.00" and "1200.00" compare as the same number.
+    value.normalized = normalizeValue(raw, { locale: ctx.locale, dateFormats: ctx.dateFormats });
+    out.push({ name, label: base, type: 'text', value });
+  };
   for (const line of doc.pages.flatMap((p) => p.lines)) {
     line.segments.forEach((seg, si) => {
       const m = /^(.{1,40}?)\s*:$/.exec(seg.text);
       const next = line.segments[si + 1];
-      if (!m || !next || /:$/.test(next.text)) return;
-      const base = m[1].trim();
-      const n = (seen.get(base) ?? 0) + 1;
-      seen.set(base, n);
-      const name = n === 1 ? base : `${base} #${n}`;
-      const value = makeValue(next.text, 'text', line.page, next.bbox, 0.75, ctx);
-      // Type is auto-detected so "1,200.00" and "1200.00" compare as the same number.
-      value.normalized = normalizeValue(next.text, { locale: ctx.locale, dateFormats: ctx.dateFormats });
-      out.push({ name, label: base, type: 'text', value });
+      if (m) {
+        if (next && !/:$/.test(next.text)) add(m[1], next.text, line.page, next.bbox, 0.75);
+        return;
+      }
+      // "Label: value" printed as one text run (or one segment): split at the first ": ".
+      const inline = splitInlineLabel(seg.text);
+      if (inline) add(inline.label, inline.value, line.page, valueBBox(seg, inline.valueStart), 0.7);
     });
   }
   return out;
+}
+
+/**
+ * "Invoice No: INV-1001" -> label "Invoice No", value "INV-1001". The label must start with a letter
+ * and hold no digit-colon pattern, so times ("10:30"), URLs ("https://...") and ratios are not split.
+ */
+export function splitInlineLabel(text: string): { label: string; value: string; valueStart: number } | undefined {
+  const m = /^(\p{L}[\p{L}\p{N} .#/&()'-]{0,39}?)\s*:\s+(\S.*)$/u.exec(text);
+  if (!m) return undefined;
+  const label = m[1].trim();
+  if (/\d$/.test(label) && /^\d/.test(m[2])) return undefined;
+  if (/^\/\//.test(m[2])) return undefined;
+  return { label, value: m[2].trim(), valueStart: text.length - m[2].length };
+}
+
+/** Bounding box of the value part of a segment: the items after the label when the run was split, else proportional. */
+function valueBBox(seg: Segment, valueStart: number): DocValue['bbox'] {
+  let at = 0;
+  const after = seg.items.filter((it) => {
+    const start = seg.text.indexOf(it.text.trim(), at);
+    if (start >= 0) at = start + it.text.trim().length;
+    return start >= valueStart;
+  });
+  if (after.length && after.length < seg.items.length) return unionBBox(after);
+  const frac = Math.min(0.95, valueStart / Math.max(1, seg.text.length));
+  const x = seg.bbox.x + seg.bbox.width * frac;
+  return { x: Math.round(x * 100) / 100, y: seg.bbox.y, width: Math.round((seg.bbox.x + seg.bbox.width - x) * 100) / 100, height: seg.bbox.height };
 }
 
 /** Lookup helper: a field by name (exact, then case-insensitive). */

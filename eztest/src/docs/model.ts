@@ -1,6 +1,6 @@
 /**
- * Canonical Document Model: every document source (PDF text layer today;
- * layout/OCR/vision extractors later) is turned into the same shape:
+ * Canonical Document Model: every document source (PDF text layer, layout
+ * analysis or OCR of scanned pages) is turned into the same shape:
  * pages -> lines -> segments, plus named fields and typed tables. Every value
  * keeps where it came from (page, bbox), how it was read (method) and how
  * confident the reader is, so reports can always point back at the evidence.
@@ -33,6 +33,8 @@ export interface TextItem {
   fontName: string;
   fontFamily?: string;
   fontSize: number;
+  /** 0..1 recognition confidence (OCR words only; text-layer items are exact). */
+  confidence?: number;
 }
 
 /** Adjacent items on a line separated by less than a column gap. */
@@ -57,6 +59,19 @@ export interface PageModel {
   width: number;
   height: number;
   lines: Line[];
+  /** How the page text was read (absent: text-layer). */
+  method?: ExtractionMethod;
+  /** Ruling lines found on the page by the layout method (top-left origin, points). */
+  rulings?: Ruling[];
+}
+
+/** A horizontal or vertical ruling line (table border) drawn on the page. */
+export interface Ruling {
+  orientation: 'h' | 'v';
+  /** Start point and length, top-left origin, points. */
+  x: number;
+  y: number;
+  length: number;
 }
 
 export interface DocMetadata {
