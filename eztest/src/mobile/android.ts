@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { NotSupportedError, sleep } from '../core/index.js';
 import { AdbClient, AdbError, shellQuote, type ShellStream } from './adb.js';
-import { AgentClient, waitForAgent, type AgentCommandLog, type AgentStatus } from './agent.js';
+import { AgentClient, newAgentToken, waitForAgent, type AgentCommandLog, type AgentStatus } from './agent.js';
 import { DeviceError, type DeviceSession, type FindStrategy, type Gesture, type Rect, type WebViewInfo, type WebViewSession } from './session.js';
 import { CdpWebView } from './webview.js';
 
@@ -44,6 +44,8 @@ export interface AndroidConnectOptions {
   agentTimeoutMs?: number;
   /** Do not install or start the agent (it is already running and forwarded), e.g. in tests or CI images. */
   agentUrl?: string;
+  /** Session token of an agent started by hand (with agentUrl). An agent EZTest starts gets a fresh random one. */
+  agentToken?: string;
   onCommand?: (e: AgentCommandLog) => void;
 }
 
@@ -81,7 +83,7 @@ export class AndroidDevice implements DeviceSession {
   static async connect(o: AndroidConnectOptions): Promise<AndroidDevice> {
     const serial = await pickAndroidDevice(o.adb, o.serial);
     if (o.agentUrl) {
-      const agent = new AgentClient({ url: o.agentUrl, onCommand: o.onCommand });
+      const agent = new AgentClient({ url: o.agentUrl, onCommand: o.onCommand, ...(o.agentToken ? { token: o.agentToken } : {}) });
       return new AndroidDevice(o.adb, serial, agent, async () => undefined, await waitForAgent(agent, o.agentTimeoutMs ?? 30_000));
     }
     const remotePort = o.agentPort ?? ANDROID_AGENT_PORT;
@@ -92,11 +94,13 @@ export class AndroidDevice implements DeviceSession {
       }
       await o.adb.install(serial, await readFile(o.agentApk), 'eztest-agent.apk');
     }
-    // The instrumentation hosts the agent's HTTP server until it is stopped.
-    const stream: ShellStream = await o.adb.shellStream(serial, `am instrument -w -e port ${remotePort} ${ANDROID_AGENT_INSTRUMENTATION}`);
+    // The instrumentation hosts the agent's HTTP server (device loopback) until it is stopped; it
+    // answers only requests that carry this session's random token.
+    const token = newAgentToken();
+    const stream: ShellStream = await o.adb.shellStream(serial, `am instrument -w -e port ${remotePort} -e token ${token} ${ANDROID_AGENT_INSTRUMENTATION}`);
     const local = await freePort();
     await o.adb.forward(serial, `tcp:${local}`, `tcp:${remotePort}`);
-    const agent = new AgentClient({ url: `http://127.0.0.1:${local}`, onCommand: o.onCommand });
+    const agent = new AgentClient({ url: `http://127.0.0.1:${local}`, token, onCommand: o.onCommand });
     const cleanup = async () => {
       await agent.call('POST', '/shutdown', {}, 3000).catch(() => undefined);
       stream.kill();

@@ -3,7 +3,10 @@
 An instrumentation APK (`io.eztest.agent`) that serves the EZTest agent protocol
 (see `docs/mobile.md`, "Agent protocol") on the device loopback, using Google's
 `androidx.test.uiautomator` and `UiAutomation`. EZTest installs it with its own ADB
-client, starts it with `am instrument`, forwards its port and talks to it.
+client, starts it with `am instrument -e port <port> -e token <random>`, forwards its
+port and talks to it. The agent answers only requests carrying that session token
+(`X-EZTest-Agent-Token`); for an agent you start yourself, set the same token as
+`mobile.android.agentToken`.
 
 - `app/src/main/java/io/eztest/agent/core/`: the protocol (router, finders over the
   hierarchy XML with XPath, HTTP server, JSON). Plain Java: tested on the JVM.

@@ -26,6 +26,7 @@ const SHOP_REGRESSED = SHOP_V2.replace(' ez-alert="Signed in as {username}"', ''
 
 let adb: FakeAdbServer;
 let sim: AgentSimulator;
+let sim2: AgentSimulator | undefined;
 let shellLog: string[];
 const tmp = () => mkdtempSync(join(tmpdir(), 'ez-android-'));
 
@@ -36,7 +37,13 @@ beforeEach(async () => {
   adb.shell = (_serial, cmd) => {
     shellLog.push(cmd);
     if (cmd.startsWith('pm path io.eztest.agent')) return 'package:/data/app/io.eztest.agent/base.apk\n';
-    if (cmd.startsWith('am instrument')) return { stream: true, output: 'INSTRUMENTATION_STATUS: eztest=started\n' };
+    if (cmd.startsWith('am instrument')) {
+      // Like the real agent: it answers only requests carrying the token it was started with.
+      const token = /-e token (\S+)/.exec(cmd)?.[1];
+      if (_serial === 'emulator-5556' && sim2) sim2.token = token;
+      else sim.token = token;
+      return { stream: true, output: 'INSTRUMENTATION_STATUS: eztest=started\n' };
+    }
     if (cmd.startsWith('monkey')) return 'Events injected: 1\n';
     return '';
   };
@@ -68,7 +75,13 @@ describe('Android journeys on the EZTest agent', () => {
     expect(jr.browser).toBe('android (Simulated Pixel)');
     expect(jr.ledger.firstOrder).toBe('ORD-1001 Shipped');
     // The agent was started by instrumentation over adb, reached through a forward, and the app launched by adb.
-    expect(shellLog).toContain('am instrument -w -e port 6790 io.eztest.agent/.AgentInstrumentation');
+    expect(shellLog.find((c) => c.startsWith('am instrument'))).toMatch(/^am instrument -w -e port 6790 -e token [0-9a-f]{48} io\.eztest\.agent\/\.AgentInstrumentation$/);
+    // Every request carried the session token; one without it is refused.
+    expect(sim.token).toMatch(/^[0-9a-f]{48}$/);
+    expect(sim.refused).toBe(0);
+    const anon = await fetch(`http://127.0.0.1:${sim.port}/status`);
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toMatchObject({ error: { code: 'unauthorized' } });
     expect(adb.services.some((s) => /^host-serial:emulator-5554:forward:tcp:\d+;tcp:6790$/.test(s))).toBe(true);
     expect(shellLog).toContain("am force-stop 'com.shop.app'");
     expect(shellLog).toContain("monkey -p 'com.shop.app' -c android.intent.category.LAUNCHER 1");
@@ -328,7 +341,7 @@ describe('Android setup and failure paths', () => {
   });
 
   it('spreads concurrent journeys over a device pool, one agent per device', async () => {
-    const sim2 = new AgentSimulator(SHOP);
+    sim2 = new AgentSimulator(SHOP);
     adb.devices.push({ serial: 'emulator-5556', state: 'device' });
     adb.targets.set('emulator-5556|tcp:6790', await sim2.start());
     try {
@@ -340,8 +353,14 @@ describe('Android setup and failure paths', () => {
       expect(sim.requests.some((q) => q.path === '/find')).toBe(true);
       expect(sim2.requests.some((q) => q.path === '/find')).toBe(true);
       expect(adb.services.filter((s) => s.startsWith('shell:am instrument'))).toHaveLength(2);
+      // One random token per agent session.
+      expect(sim.token).toMatch(/^[0-9a-f]{48}$/);
+      expect(sim2.token).toMatch(/^[0-9a-f]{48}$/);
+      expect(sim2.token).not.toBe(sim.token);
+      expect(sim.refused + sim2.refused).toBe(0);
     } finally {
       await sim2.stop();
+      sim2 = undefined;
     }
   });
 

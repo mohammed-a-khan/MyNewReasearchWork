@@ -8,21 +8,36 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * A minimal HTTP/1.1 server for the agent protocol: one request per
  * connection, JSON bodies with Content-Length, loopback only (the host
  * reaches it through `adb forward` / usbmuxd, never over the network).
+ *
+ * Every request must carry the session token the agent was started with in
+ * the X-EZTest-Agent-Token header; anything else is answered 401
+ * "unauthorized" without reaching the router. An agent started without a
+ * token answers nothing.
  */
 public final class HttpServer {
     private static final int MAX_BODY = 8 * 1024 * 1024;
+    static final String TOKEN_HEADER = "x-eztest-agent-token";
 
     private final Router router;
     private final ServerSocket socket;
+    private final byte[] token;
 
-    public HttpServer(Router router, int port) throws IOException {
+    public HttpServer(Router router, int port, String token) throws IOException {
         this.router = router;
+        this.token = token == null || token.isEmpty() ? null : token.getBytes(StandardCharsets.UTF_8);
         this.socket = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+    }
+
+    /** Constant-time comparison of the presented token with the session token. */
+    boolean authorized(String presented) {
+        if (token == null || presented == null) return false;
+        return MessageDigest.isEqual(token, presented.getBytes(StandardCharsets.UTF_8));
     }
 
     public int port() {
@@ -76,10 +91,19 @@ public final class HttpServer {
             return;
         }
         int length = 0;
+        String presented = null;
         String line;
         while ((line = readLine(in)) != null && !line.isEmpty()) {
             int colon = line.indexOf(':');
-            if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("content-length")) length = Integer.parseInt(line.substring(colon + 1).trim());
+            if (colon <= 0) continue;
+            String name = line.substring(0, colon).trim();
+            if (name.equalsIgnoreCase("content-length")) length = Integer.parseInt(line.substring(colon + 1).trim());
+            else if (name.equalsIgnoreCase(TOKEN_HEADER)) presented = line.substring(colon + 1).trim();
+        }
+        if (!authorized(presented)) {
+            String why = token == null ? "the agent was started without a session token (-e token <secret>)" : "missing or wrong session token";
+            write(client.getOutputStream(), new Router.Response(401, Json.parse("{\"error\":{\"code\":\"unauthorized\",\"message\":\"" + why + "\"}}")));
+            return;
         }
         if (length < 0 || length > MAX_BODY) throw new IOException("body too large");
         byte[] body = new byte[length];

@@ -19,6 +19,7 @@ let tools: string[][];
 beforeEach(async () => {
   sim = new AgentSimulator(readFileSync(resolve(__dirname, 'fixtures/shop-ios.xml'), 'utf8'));
   sim.platform = 'ios';
+  sim.token = 'ios-agent-session-token-0123456789';
   await sim.start();
   tools = [];
 });
@@ -50,9 +51,10 @@ Turn off wifi
 `);
   const r = await runJourneys([j], {
     outputDir: out, fingerprintStore: join(out, 'fp.json'), healer: createHealer(), locateTimeoutMs: 300,
-    platformDrivers: [createMobileDriver({ ios: { simulator: true, agentPort: sim.port, run }, launchSettleMs: 0 })],
+    platformDrivers: [createMobileDriver({ ios: { simulator: true, agentPort: sim.port, agentToken: sim.token, run }, launchSettleMs: 0 })],
   });
   const steps = r.journeys[0].steps.map((s) => `${s.status}${s.error ? ` ${s.error.message}` : ''}`);
+  expect(sim.refused).toBe(0);
   expect(steps.slice(0, -1)).toEqual(j.steps.slice(0, -1).map(() => 'passed'));
   expect(steps.at(-1)).toMatch(/^failed Not supported: changing network connectivity/);
   expect(r.journeys[0].browser).toBe('ios (Simulated Pixel)');
@@ -67,4 +69,19 @@ Turn off wifi
     ['xcrun', 'simctl', 'privacy', 'SIM-1234', 'grant', 'photos', 'com.shop.ios'],
     ['xcrun', 'simctl', 'location', 'SIM-1234', 'set', '52.52,13.405'],
   ]);
+});
+
+it('an agent that is not given its session token refuses the session, with how to fix it', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'ez-ios-'));
+  const j = parseEzScript('Journey: iOS no token\nPlatform: ios\nApp: "com.shop.ios"\nTap the "Log in" button\n');
+  for (const agentToken of [undefined, 'not-the-session-token-0000000000']) {
+    const r = await runJourneys([j], {
+      outputDir: out, fingerprintStore: join(out, 'fp.json'), healer: createHealer(), locateTimeoutMs: 300,
+      platformDrivers: [createMobileDriver({ ios: { simulator: true, agentPort: sim.port, ...(agentToken ? { agentToken } : {}), run }, launchSettleMs: 0 })],
+    });
+    expect(r.journeys[0].status).toBe('error');
+    expect(JSON.stringify(r.journeys[0])).toMatch(agentToken ? /its session token does not match.*mobile\.<platform>\.agentToken/ : /no session token was sent.*mobile\.<platform>\.agentToken/);
+  }
+  expect(sim.refused).toBeGreaterThan(0);
+  expect(sim.requests.filter((q) => q.path === '/find')).toEqual([]);
 });

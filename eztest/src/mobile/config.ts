@@ -18,6 +18,8 @@ export const MobileConfigSchema = z.object({
     agentApk: z.string().min(1).optional(),
     agentPort: z.number().int().min(1).max(65535).default(6790),
     agentUrl: z.string().url().optional(),
+    /** Session token of an agent started by hand (with agentUrl); agents EZTest starts get a random one. */
+    agentToken: z.string().min(16).optional(),
     clearData: z.boolean().default(false),
   }).strict().prefault({}),
   ios: z.object({
@@ -25,6 +27,8 @@ export const MobileConfigSchema = z.object({
     simulator: z.boolean().optional(),
     agentUrl: z.string().url().optional(),
     agentPort: z.number().int().min(1).max(65535).default(8790),
+    /** Session token of an agent started by hand; an agent EZTest starts (xctestrun) gets a random one. */
+    agentToken: z.string().min(16).optional(),
     xctestrun: z.string().min(1).optional(),
     usbmux: z.object({ path: z.string().optional(), host: z.string().optional(), port: z.number().int().optional() }).optional(),
   }).strict().prefault({}),

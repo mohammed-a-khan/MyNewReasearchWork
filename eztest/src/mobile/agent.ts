@@ -18,9 +18,24 @@
  *
  * Errors are non-2xx responses with `{ error: { code, message } }`; codes:
  * "no such element", "stale element", "invalid argument", "not supported",
- * "unknown command", "timeout", "internal".
+ * "unknown command", "timeout", "internal", "unauthorized".
+ *
+ * Every request carries the session token in the `X-EZTest-Agent-Token`
+ * header. The agents listen on the device loopback only and answer nothing
+ * (HTTP 401, "unauthorized") without the token they were started with: a
+ * random one EZTest generates for each agent it starts, or
+ * `mobile.<platform>.agentToken` for an agent started by hand.
  */
+import { randomBytes } from 'node:crypto';
 import { DeviceError, type FindStrategy, type Gesture, type Rect } from './session.js';
+
+/** The header that carries the agent session token. */
+export const AGENT_TOKEN_HEADER = 'x-eztest-agent-token';
+
+/** A fresh random session token for an agent EZTest starts. */
+export function newAgentToken(): string {
+  return randomBytes(24).toString('hex');
+}
 
 export const AGENT_PROTOCOL_VERSION = 1;
 
@@ -37,6 +52,8 @@ export interface AgentClientOptions {
   /** e.g. http://127.0.0.1:41234 (a local port forwarded to the agent). */
   url: string;
   timeoutMs?: number;
+  /** The agent's session token (sent with every request). */
+  token?: string;
   /** Called after every request (command log evidence). */
   onCommand?: (e: AgentCommandLog) => void;
 }
@@ -62,7 +79,7 @@ export class AgentClient {
     let res: Response;
     try {
       res = await fetch(`${this.url}${path}`, {
-        method, headers: body !== undefined ? { 'content-type': 'application/json' } : {},
+        method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(this.options.token ? { [AGENT_TOKEN_HEADER]: this.options.token } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeout),
       });
     } catch (e) {
@@ -79,6 +96,10 @@ export class AgentClient {
       throw new DeviceError(`device agent ${method} ${path} returned non-JSON (HTTP ${res.status})`, 'internal', res.status);
     }
     const err = json.error as { code?: string; message?: string } | undefined;
+    if (res.status === 401) {
+      this.options.onCommand?.({ method, path, status: 401, durationMs: Date.now() - t0, error: 'unauthorized' });
+      throw new DeviceError(`the device agent refused ${method} ${path}: ${this.options.token ? 'its session token does not match (the agent was started by another session?)' : 'no session token was sent'}${err?.message ? ` (${err.message})` : ''}. For an agent started by hand, set mobile.<platform>.agentToken to the token it was started with.`, 'unauthorized', 401);
+    }
     if (!res.ok || err) {
       const code = err?.code ?? (res.status === 404 ? 'unknown command' : 'internal');
       this.options.onCommand?.({ method, path, status: res.status, durationMs: Date.now() - t0, error: code });
@@ -144,6 +165,8 @@ export async function waitForAgent(client: AgentClient, timeoutMs: number): Prom
       if (s.ready) return s;
       last = new Error('agent not ready');
     } catch (e) {
+      // A refused token does not get better by waiting.
+      if ((e as DeviceError).code === 'unauthorized') throw e;
       last = e;
     }
     if (Date.now() >= deadline) throw new DeviceError(`the EZTest device agent did not answer within ${timeoutMs} ms (${(last as Error).message})`, 'agent not ready');

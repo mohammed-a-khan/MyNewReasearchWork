@@ -37,22 +37,66 @@ describe.skipIf(!hasJava)('EZTest Android agent core on the JVM', () => {
     expect(out).toMatch(/AGENT_CORE_CHECKS_PASSED \d+/);
   });
 
+  /** Start the real agent (fixture device) with a session token; resolves with its port. */
+  function startAgent(token: string | undefined, port = 0): { proc: ChildProcess; port: Promise<number> } {
+    const proc = spawn('java', ['-cp', classes, 'io.eztest.agent.core.FixtureAgentMain', FIXTURE, String(port), ...(token ? [token] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
+    return {
+      proc,
+      port: new Promise<number>((res, rej) => {
+        let buf = '';
+        const t = setTimeout(() => rej(new Error(`agent did not start: ${buf}`)), 20_000);
+        proc.stdout!.on('data', (d: Buffer) => {
+          buf += d.toString();
+          const m = /EZTEST_AGENT_LISTENING (\d+)/.exec(buf);
+          if (m) {
+            clearTimeout(t);
+            res(Number(m[1]));
+          }
+        });
+      }),
+    };
+  }
+
+  it('answers only requests with its session token (constant-time check, before any route)', async () => {
+    for (const token of ['s3ss10n-t0ken-for-this-test-only', undefined]) {
+      const a = startAgent(token);
+      try {
+        const port = await a.port;
+        const anon = await fetch(`http://127.0.0.1:${port}/status`);
+        expect(anon.status).toBe(401);
+        expect(await anon.json()).toMatchObject({ error: { code: 'unauthorized', message: token ? 'missing or wrong session token' : expect.stringMatching(/started without a session token/) } });
+        const wrong = await fetch(`http://127.0.0.1:${port}/source`, { headers: { 'x-eztest-agent-token': 'guess' } });
+        expect(wrong.status).toBe(401);
+        const right = await fetch(`http://127.0.0.1:${port}/status`, { headers: { 'x-eztest-agent-token': token ?? '' } });
+        expect(right.status).toBe(token ? 200 : 401);
+      } finally {
+        a.proc.kill();
+      }
+    }
+  });
+
   it('serves a journey run by EZTest through adb forward', async () => {
-    const agent: ChildProcess = spawn('java', ['-cp', classes, 'io.eztest.agent.core.FixtureAgentMain', FIXTURE, '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const port = await new Promise<number>((res, rej) => {
-      let buf = '';
-      const t = setTimeout(() => rej(new Error(`agent did not start: ${buf}`)), 20_000);
-      agent.stdout!.on('data', (d: Buffer) => {
-        buf += d.toString();
-        const m = /EZTEST_AGENT_LISTENING (\d+)/.exec(buf);
-        if (m) {
-          clearTimeout(t);
-          res(Number(m[1]));
-        }
+    // A free local port for the agent, which EZTest's `am instrument` starts with a fresh token.
+    const { createServer } = await import('node:net');
+    const port = await new Promise<number>((res) => {
+      const s = createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const p = (s.address() as { port: number }).port;
+        s.close(() => res(p));
       });
     });
+    let agent: ChildProcess | undefined;
+    let token: string | undefined;
     const adb = new FakeAdbServer();
-    adb.shell = (_s, cmd) => (cmd.startsWith('pm path') ? 'package:/x\n' : cmd.startsWith('am instrument') ? { stream: true } : cmd.startsWith('monkey') ? 'Events injected: 1\n' : '');
+    adb.shell = (_s, cmd) => {
+      if (cmd.startsWith('pm path')) return 'package:/x\n';
+      if (cmd.startsWith('am instrument')) {
+        token = /-e token (\S+)/.exec(cmd)?.[1];
+        agent = startAgent(token, port).proc;
+        return { stream: true };
+      }
+      return cmd.startsWith('monkey') ? 'Events injected: 1\n' : '';
+    };
     await adb.start();
     adb.targets.set('tcp:6790', port);
     const out = mkdtempSync(join(tmpdir(), 'ez-agent-jvm-'));
@@ -75,8 +119,9 @@ Press the device back button
       const r = await runJourneys([j], { outputDir: out, fingerprintStore: join(out, 'fp.json'), healer: createHealer(), locateTimeoutMs: 500, platformDrivers: [createMobileDriver({ android: { adb: { port: adb.port } }, launchSettleMs: 0 })] });
       expect(r.journeys[0].steps.map((s) => `${s.status}${s.error ? ` ${s.error.message}` : ''}`)).toEqual(j.steps.map(() => 'passed'));
       expect(r.journeys[0].browser).toBe('android (JVM fixture)');
+      expect(token).toMatch(/^[0-9a-f]{48}$/);
     } finally {
-      agent.kill();
+      agent?.kill();
       await adb.stop();
       rmSync(out, { recursive: true, force: true });
     }
