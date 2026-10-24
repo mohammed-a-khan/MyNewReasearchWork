@@ -107,8 +107,9 @@ describe.skipIf(!ONLINE)('demoqa.com', () => {
       });
       expectPlainEnglish(r);
       const lines = bodyOf(r);
-      expect(lines).toContain('Type "Grace" into the "First Name" field');
-      expect(lines).toContain('Type "grace@example.com" into the "name@example.com" field');
+      // The labels sit next to the fields without for=: the fields are named by them, not by their placeholders.
+      expect(lines).toContain('Type "Grace" into the First Name field');
+      expect(lines).toContain('Type "grace@example.com" into the Email field');
       expect(lines).toContain('Click the "Submit" button');
       expectPassed(await replay(r));
     }, 300_000);
