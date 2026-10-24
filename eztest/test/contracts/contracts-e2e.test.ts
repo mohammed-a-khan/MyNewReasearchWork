@@ -108,6 +108,13 @@ describe('OpenAPI import, spec conformance and API coverage (G11)', () => {
     const orders = await readFile(join(dir, 'journeys', 'api', 'ez-shop-api-orders.ez'), 'utf8');
     expect(orders).toContain('Call API "GET /api/orders/1" as manager and store as getOrder');
     expect(orders).toContain('Expect response getOrder conforms to OpenAPI "specs/shop.yaml"');
+    // The spec's example client secret is a credential: the journey gets a variable, the config a secret reference.
+    const auth = await readFile(join(dir, 'journeys', 'api', 'ez-shop-api-auth.ez'), 'utf8');
+    expect(auth).toContain('client_secret="${CLIENT_SECRET}"');
+    expect(auth).not.toContain('ez-client-secret');
+    expect(await readFile(join(dir, 'journeys', 'api', 'import-report.md'), 'utf8')).toContain('  CLIENT_SECRET: secret://env/CLIENT_SECRET');
+    const cfg = await readFile(join(dir, 'eztest.config.yaml'), 'utf8');
+    await writeFile(join(dir, 'eztest.config.yaml'), `${cfg}vars:\n  CLIENT_SECRET: secret://env/API_CLIENT_SECRET\n`);
     const run = await cli(dir, ['run', 'journeys/api', '--no-analyze']);
     expect(run.exitCode, run.out + run.err).toBe(0);
     const runDir = await newestRun(dir);

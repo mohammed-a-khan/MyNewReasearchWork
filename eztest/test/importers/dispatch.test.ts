@@ -49,14 +49,20 @@ describe('importFiles / writeImported', () => {
     expect(w.ezFiles).toHaveLength(report.journeys.length);
     expect(w.unconvertedFiles.map((f) => f.replace(/^.*[\\/]/, ''))).toEqual(['tc-003.unconverted.txt']);
     expect(await readFile(w.unconvertedFiles[0], 'utf8')).toContain('# TODO (not converted): Do the thing');
-    // every written .ez loads back with the standard journey loader
+    // every written .ez loads back with the standard journey loader: the imported journey, with the
+    // password literal of the sources ("Builder#2") replaced by the PASSWORD variable
     for (const f of w.ezFiles) {
       const j = await loadJourneyFile(f);
-      expect(report.journeys.find((x) => x.id === j.id)).toEqual(j);
+      expect(await readFile(f, 'utf8')).not.toContain('Builder#2');
+      const imported = report.journeys.find((x) => x.id === j.id)!;
+      // (the step id, made from the step text, no longer carries the password either)
+      expect(JSON.parse(JSON.stringify(imported).split('Builder#2').join('${PASSWORD}').split('type-builder-2-').join('type-password-'))).toEqual(j);
     }
     const json = JSON.parse(await readFile(w.reportJson, 'utf8'));
     expect(json.coverage).toEqual(report.coverage);
     expect(json.todo).toHaveLength(report.todo.length);
+    expect(JSON.stringify(json)).not.toContain('Builder#2');
+    expect([...new Set(json.credentials.map((c: { variable: string }) => c.variable))]).toEqual(['PASSWORD']);
     expect(json.journeys.every((j: { verified: boolean }) => j.verified === false)).toBe(true);
     expect(json.equivalence.journeys.every((j: { status: string }) => j.status === 'not-run' || j.status === 'not-converted')).toBe(true);
     const md = await readFile(w.reportMd, 'utf8');

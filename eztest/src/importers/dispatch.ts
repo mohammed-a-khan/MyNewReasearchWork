@@ -14,6 +14,7 @@ import { BUILTIN_IMPORT_KINDS, type ImportKind, type ImportReport, type Importer
 import { registries } from '../plugins/registry.js';
 import { importApiFile, isApiSpecPath } from './api-files.js';
 import { coverageEquivalence, verifiedRunOf, type ImportVerification } from './verify.js';
+import { credentialsMarkdown, scrubJourney, scrubText, type CredentialFinding } from './credentials.js';
 
 export interface ImportFilesOptions {
   /** Force one format for every file (default: detect per file). A plugin importer's name works too. */
@@ -224,9 +225,26 @@ export async function writeImportAssets(report: ImportReport, outDir: string): P
   return out;
 }
 
-/** Write `<id>.ez` per journey, plus `import-report.json` and `import-report.md`. */
-export async function writeImported(report: ImportReport, outDir: string, verification?: ImportVerification): Promise<WrittenImport> {
+/**
+ * Write `<id>.ez` per journey, plus `import-report.json` and `import-report.md`. Credential-like literals of the
+ * source never reach these files: they become `${NAME}` variables, listed in the report (`credentials`) with a
+ * secret:// hint (src/importers/credentials.ts). Verification (`verifyImported`) runs before this, on the source values.
+ */
+export async function writeImported(source: ImportReport, outDir: string, verification?: ImportVerification): Promise<WrittenImport> {
   await mkdir(outDir, { recursive: true });
+  const names = new Map<string, string>();
+  const credentials: CredentialFinding[] = [];
+  const converted = source.converted.map((c) => {
+    const s = scrubJourney(c, names);
+    credentials.push(...s.findings);
+    return { ...c, ez: s.ez, todo: s.todo };
+  });
+  const report: ImportReport = {
+    ...source, converted,
+    todo: source.todo.map((t) => ({ ...t, original: scrubText(t.original, names) })),
+    warnings: source.warnings.map((w) => scrubText(w, names)),
+    ...(credentials.length ? { markdown: [...(source.markdown ?? []), ...credentialsMarkdown(credentials)] } : {}),
+  };
   const ezFiles: string[] = [];
   const unconvertedFiles: string[] = [];
   for (const c of report.converted) {
@@ -250,6 +268,7 @@ export async function writeImported(report: ImportReport, outDir: string, verifi
       verified: verifiedRunOf(c.id, !!(c.journey?.examples?.length || c.journey?.examplesFrom), verification)?.verified ?? false,
     })),
     todo: report.todo,
+    ...(credentials.length ? { credentials } : {}),
     warnings: report.warnings,
     ...(verification ? { verification: { runId: verification.runId, summary: verification.summary, journeys: verification.journeys } } : {}),
   };

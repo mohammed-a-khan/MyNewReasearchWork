@@ -290,6 +290,27 @@ export function documentCheckHandler(config: EzTestConfig, dbs: DbRegistry, cwd:
   };
 }
 
+/**
+ * `vars:` values that are secret references (`secret://env/NAME`, e.g. a credential an importer replaced by
+ * ${NAME}) are resolved through the secret stores when the engine starts, and masked like every secret.
+ */
+export async function resolveVarSecrets(vars: Record<string, string>, resolveSecret: (ref: string) => Promise<string>, mask: (v: string) => void): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    if (typeof v !== 'string' || !v.startsWith('secret://')) {
+      out[k] = v;
+      continue;
+    }
+    try {
+      out[k] = await resolveSecret(v);
+    } catch (e) {
+      throw new EzTestError(`vars.${k}: ${v} could not be resolved: ${(e as Error).message}`, 'SECRET_UNRESOLVED');
+    }
+    mask(out[k]);
+  }
+  return out;
+}
+
 /** The files written by healing.autoApply, in the run folder. */
 export const HEAL_APPLIED_FILES = { json: 'heal-applied.json', diff: 'heal-applied.diff' } as const;
 
@@ -513,7 +534,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     ...(config.templates.syntax !== 'dollar' ? { templateSyntax: config.templates.syntax } : {}),
     queriesDir: resolvePath(cwd, config.db.queries?.dir ?? 'queries'),
     ...(await loadElementRepository(cwd, config.elements, logger)),
-    ...(Object.keys(config.vars).length ? { variables: { ...config.vars } } : {}),
+    ...(Object.keys(config.vars).length ? { variables: await resolveVarSecrets(config.vars, (ref) => vault.registry.resolve(ref), (v) => loaded.masker.add(v)) } : {}),
     outputDir,
     concurrency: config.concurrency,
     retries: config.retries,

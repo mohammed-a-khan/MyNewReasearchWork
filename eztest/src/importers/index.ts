@@ -37,3 +37,4 @@ export {
 export { importOpenApi, looksLikeOpenApi, type OpenApiImportOptions } from './openapi.js';
 export { importPostman, looksLikePostman, postmanVars, type PostmanImportOptions } from './postman.js';
 export { detectApiKind } from './api-files.js';
+export { scrubJourney, scrubText, credentialsMarkdown, CREDENTIAL_NAME, type CredentialFinding, type ScrubbedJourney } from './credentials.js';
