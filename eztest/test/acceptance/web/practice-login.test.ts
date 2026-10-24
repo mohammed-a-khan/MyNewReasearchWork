@@ -34,6 +34,7 @@ describe.skipIf(!ONLINE)('practicetestautomation.com login', () => {
       await rec.addExpectation('I see "Your username is invalid!"');
       await click(page, page.getByLabel('Username'));
       await page.keyboard.press('Control+A');
+      await page.keyboard.press('Backspace');
       await page.keyboard.type('student', { delay: 35 });
       await click(page, page.getByRole('button', { name: 'Submit' }));
       await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('logged-in-successfully');

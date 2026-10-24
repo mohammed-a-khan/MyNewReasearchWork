@@ -179,6 +179,11 @@ export function buildTarget(info: ElementInfo): RecordedTarget {
       note = undefined;
     }
   }
+  // An unnamed control alone in a named group: `the dropdown inside the "Dropdown Example" section`.
+  if (!human && info.group && !info.name && !info.label && KIND_WORD[kind] && (kind === 'textbox' || kind === 'combobox' || kind === 'checkbox' || kind === 'radio' || kind === 'slider')) {
+    const q = tryQuote(info.group);
+    if (q) human = `the ${KIND_WORD[kind]} inside the ${q} section`;
+  }
   if (human) descriptions.push(human);
   if (info.testId && c.testId === 1 && SAFE_TESTID.test(info.testId)) descriptions.push(`testid=${info.testId}`);
   if (info.id && c.id === 1 && SAFE_ID.test(info.id) && !generatedId(info.id)) descriptions.push(`#${info.id}`);

@@ -45,7 +45,7 @@ describe.skipIf(!ONLINE)('automationexercise.com', () => {
     const lines = bodyOf(r);
     // The menu link has a cart icon glyph before its text; it is still "the Products link".
     expect(lines).toContain('Click the "Products" link');
-    expect(lines).toContain('Type "jeans" into the Search Product field');
+    expect(lines).toContain('Type "jeans" into the "Search Product" field');
     expect(lines).toContain('Click the "View Product" link in the row containing "Soft Stretch Jeans"');
     expect(lines).toContain('Click the "Add to cart" button');
     expect(lines).toContain('Click the "View Cart" link');

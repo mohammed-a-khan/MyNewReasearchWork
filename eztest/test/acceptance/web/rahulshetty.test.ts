@@ -48,8 +48,9 @@ describe.skipIf(!ONLINE)('rahulshettyacademy.com practice page', () => {
     expectPlainEnglish(r);
     const lines = bodyOf(r);
     expect(lines).toContain('Check the Radio2 radio button');
-    expect(lines).toContain('Type "ind" into the Type to Select Countries field');
-    expect(lines).toContain('Click the "India" text');
+    expect(lines).toContain('Type "ind" into the "Type to Select Countries" field');
+    expect(lines.some((l) => /^Click the (?:1st )?"India" text$/.test(l))).toBe(true);
+    expect(lines).toContain('Select "Option2" from the dropdown inside the "Dropdown Example" section');
     expect(lines).toContain('Check the Option3 checkbox');
     expect(lines).toContain('Hover over the "Mouse Hover" button');
     expect(lines).toContain('Click the "Top" link');

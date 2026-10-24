@@ -20,8 +20,14 @@ function needSite(ctx: { skip(note?: string): never }): void {
   }
 }
 
-/** The "Click me" button on the row of a label (demoqa has four buttons named "Click me"). */
-const clickMe = (page: Page, label: string) => page.locator('.row', { hasText: label }).getByRole('button', { name: 'Click me' });
+/** The "Click me" button next to a label (demoqa has four buttons named "Click me"). */
+const BUTTONS: Record<string, string> = {
+  'Click Button to see alert': '#alertButton',
+  'alert will appear after 5 seconds': '#timerAlertButton',
+  'confirm box will appear': '#confirmButton',
+  'prompt box will appear': '#promtButton',
+};
+const clickMe = (page: Page, label: string) => page.locator(BUTTONS[label]);
 
 describe.skipIf(!ONLINE)('demoqa.com', () => {
   beforeAll(async () => {
@@ -101,8 +107,8 @@ describe.skipIf(!ONLINE)('demoqa.com', () => {
       });
       expectPlainEnglish(r);
       const lines = bodyOf(r);
-      expect(lines).toContain('Type "Grace" into the First Name field');
-      expect(lines).toContain('Type "grace@example.com" into the name@example.com field');
+      expect(lines).toContain('Type "Grace" into the "First Name" field');
+      expect(lines).toContain('Type "grace@example.com" into the "name@example.com" field');
       expect(lines).toContain('Click the "Submit" button');
       expectPassed(await replay(r));
     }, 300_000);

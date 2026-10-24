@@ -71,6 +71,8 @@ export interface ElementInfo {
   textNth?: number;
   /** With rowText: the container (`#table1`) the row is looked up in, when the text repeats in another one. */
   rowWithin?: string;
+  /** For an unnamed control: the named group (fieldset legend) it is the only one of its kind in. */
+  group?: string;
   /** A named landmark around the element in which its name is unique (`the "Main" navigation`). */
   landmark?: { role: string; name: string; word: string };
   /** 1-based position among the visible elements with the same role and name, when the name is not unique. */
@@ -583,7 +585,9 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         for (var j = 0; j < c.children.length; j++) if (visibleText(c.children[j])) { inner = true; break; }
         if (!inner) out.push(t);
       }
-      return out;
+      // A name ("Soft Stretch Jeans") tells a person which row before a price or a number does ("Rs. 799").
+      var wordy = function (t) { return /[A-Za-z\u00C0-\u024F]{3,}/.test(t) && (t.replace(/[^0-9]/g, '').length * 3 < t.length) ? 0 : 1; };
+      return out.map(function (t, i) { return { t: t, i: i }; }).sort(function (a, b) { return wordy(a.t) - wordy(b.t) || a.i - b.i; }).map(function (x) { return x.t; });
     };
     // The rows the runner's row= engine finds for a text: from each innermost element whose text contains it, the
     // first row-like element at or above it (inside "within" when given).
@@ -630,6 +634,22 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (p.id && /^[A-Za-z][\w-]*$/.test(p.id) && uniqueSel('#' + p.id, p)) return p;
       }
       return null;
+    };
+    // The named group around an unnamed control, when it is the only one of its kind there (a fieldset whose legend
+    // says "Dropdown Example" around one select): "the dropdown inside the "Dropdown Example" section".
+    var groupOf = function (el, role) {
+      for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        var gname = '';
+        if (lower(p) === 'fieldset') { var lg = p.querySelector('legend'); gname = lg ? norm(textOf(lg, true)) : ''; }
+        else if (p.getAttribute('aria-label')) gname = norm(p.getAttribute('aria-label'));
+        if (!gname) continue;
+        if (gname.length > 60) return '';
+        var q = ROLE_QUERY[role] || ('[role="' + role + '"]');
+        var inside = p.querySelectorAll(q), n = 0;
+        for (var i = 0; i < inside.length; i++) if (roleOf(inside[i]) === role && !isHidden(inside[i])) n++;
+        return n === 1 ? gname : '';
+      }
+      return '';
     };
     // A named landmark around the element in which its role and name are unique ("the "Main" navigation").
     var LANDMARK_WORDS = { navigation: 'navigation', region: 'section', form: 'form', dialog: 'dialog', alertdialog: 'dialog' };
@@ -716,6 +736,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         var rn = roleNth(el, role, name); if (rn) out.roleNth = rn;
       }
       if (role && !name && (role === 'checkbox' || role === 'radio')) { var kn = roleNth(el, role, null); if (kn) out.kindNth = kn; }
+      if (role && !name && !label && !placeholder) { var gr = groupOf(el, role); if (gr) out.group = gr; }
       if (el.isContentEditable) out.editable = true;
       if (role) out.role = role;
       if (name) out.name = name;

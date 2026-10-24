@@ -71,6 +71,9 @@ function key(step: Step, fallback?: string): string {
   return k;
 }
 
+/** Ads, analytics and tag managers: their requests say nothing about whether a click did anything. */
+const THIRD_PARTY = /doubleclick\.net|googlesyndication|google-analytics|googletagmanager|googleadservices|\/gtag\/|\/collect\b|analytics|optimizely|hotjar|segment\.(?:io|com)|facebook\.(?:net|com)\/tr|clarity\.ms|newrelic|nr-data\.net|sentry\.io/i;
+
 /** How long a click may take to show any effect before it is taken for a click the page did not see yet. */
 const DEAD_CLICK_MS = 2000;
 
@@ -101,15 +104,19 @@ async function watchEffects(target: Locator, ctx: StepContext): Promise<{ change
   if (!ready) return undefined;
   let other = false;
   const onAny = () => { other = true; };
+  // A request counts when the page's own site makes it: ad and analytics scripts send requests all the time.
+  const site = (u: string) => { try { return new URL(u).hostname.split('.').slice(-2).join('.'); } catch { return ''; } };
+  const own = site(page.url());
+  const onRequest = (r: { url(): string }) => { if (site(r.url()) === own && !THIRD_PARTY.test(r.url())) other = true; };
   const onNav = (f: { parentFrame(): unknown }) => { if (!f.parentFrame()) other = true; };
   const url = page.url();
   const pages = ctx.session?.pages.lastNumber;
-  page.on('request', onAny);
+  page.on('request', onRequest);
   page.on('dialog', onAny);
   page.on('download', onAny);
   page.on('framenavigated', onNav);
   const stop = () => {
-    page.off('request', onAny);
+    page.off('request', onRequest);
     page.off('dialog', onAny);
     page.off('download', onAny);
     page.off('framenavigated', onNav);

@@ -178,6 +178,26 @@ describe('FINDING (automationexercise.com): a full-screen Google ad after a link
   });
 });
 
+describe('FINDING (rahulshettyacademy.com, automationexercise.com): how the recorder names unlabelled controls and cards', () => {
+  it('names a select alone in a fieldset by its legend, and a product card by its name rather than its price', async () => {
+    await page.setContent(`<!doctype html>
+      <fieldset><legend>Dropdown Example</legend><select id="dropdown-class-example"><option>Select</option><option>Option2</option></select></fieldset>
+      <div class="list">
+        <div class="card"><h2>Rs. 500</h2><p>Blue Top</p><a href="#1">View Product</a></div>
+        <div class="card"><h2>Rs. 799</h2><p>Soft Stretch Jeans</p><a href="#2">View Product</a></div>
+      </div>`);
+    const select = await describeElement(page.locator('select'));
+    expect(select.descriptions[0]).toBe('the dropdown inside the "Dropdown Example" section');
+    const link = await describeElement(page.getByRole('link').nth(1));
+    expect(link.descriptions[0]).toBe('the "View Product" link in the row containing "Soft Stretch Jeans"');
+    for (const [d, want] of [[select.descriptions[0], 'dropdown-class-example'], [link.descriptions[0], '#2']] as const) {
+      const r = await resolveTarget(page, describeTarget(d), {}, 500);
+      expect(r.locator, `${d}: ${r.notes.join('; ')}`).toBeDefined();
+      expect(await r.locator!.evaluate((e) => e.id || e.getAttribute('href'))).toBe(want);
+    }
+  });
+});
+
 describe('FINDING (the-internet nested frames): a frame named "frame-top" was taken for a CSS selector', () => {
   it('looks a frame name up as a name; selectors still work', () => {
     expect(frameSelectorCandidates('frame-top')[0]).toBe('iframe[name="frame-top"]');

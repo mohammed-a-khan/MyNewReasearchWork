@@ -58,6 +58,22 @@ export async function click(page: Page, el: Locator, opts: { button?: 'left' | '
   const b = (await el.boundingBox())!;
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, opts.button ? { button: opts.button } : {});
+  await closeAdIfShown(page);
+}
+
+/** A full-screen Google ad after a link click (#google_vignette): a person clicks its "Close" button. */
+export async function closeAdIfShown(page: Page): Promise<void> {
+  await settle(400);
+  if (!page.url().includes('#google_vignette')) return;
+  for (const frame of page.frames()) {
+    const close = frame.locator('#dismiss-button');
+    if ((await close.count().catch(() => 0)) !== 1) continue;
+    const b = await close.boundingBox().catch(() => null);
+    if (!b) continue;
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    await settle(800);
+    return;
+  }
 }
 
 /** One key at a time, with a short pause between keys. */
@@ -103,6 +119,9 @@ export function settle(ms = 700): Promise<void> {
 export async function record(url: string, act: (page: Page, rec: Recorder) => Promise<void>, opts: { name?: string } = {}): Promise<RecordingResult> {
   const rec = await startRecording({ url, headless: false, viewport: { width: 1280, height: 900 }, project: {}, ...(opts.name ? { name: opts.name } : {}) });
   try {
+    // A person looks at the page before using it: it has loaded and its scripts have started.
+    await rec.page.waitForLoadState('load', { timeout: 60_000 }).catch(() => undefined);
+    await settle(2500);
     await act(rec.page, rec);
     await settle(800);
   } catch (e) {

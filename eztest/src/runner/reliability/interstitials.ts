@@ -24,7 +24,8 @@ async function look(page: Page): Promise<Seen | undefined> {
         const s = getComputedStyle(el);
         return s.display !== 'none' && s.visibility !== 'hidden' && r.width >= innerWidth * 0.5 && r.height >= innerHeight * 0.5;
       };
-      const vignette = Array.from(document.querySelectorAll('ins.adsbygoogle[data-vignette-loaded="true"]')).some(big);
+      const vignette = Array.from(document.querySelectorAll('ins.adsbygoogle[data-vignette-loaded="true"]')).some(big) ||
+        (location.hash === '#google_vignette' && Array.from(document.querySelectorAll('ins.adsbygoogle')).some(big));
       const consent = big(document.querySelector('.fc-consent-root .fc-dialog-container')) || big(document.querySelector('.fc-consent-root'));
       return { vignette, consent };
     })
@@ -62,7 +63,10 @@ export async function dismissInterstitials(page: Page, logger?: Logger): Promise
     const consent = page.locator('.fc-consent-root button.fc-cta-consent, .fc-consent-root button.fc-primary-button').first();
     if (await consent.click({ timeout: 3000 }).then(() => true).catch(() => false)) closed = closed ? `${closed} and a consent dialog` : 'a consent dialog (Google Funding Choices)';
   }
-  if (!closed) return undefined;
+  if (!closed) {
+    logger?.warn(`a full-screen ad or consent dialog covers the page and has no close button EZTest can reach (frames: ${page.frames().map((f) => f.url().slice(0, 80)).join(', ')})`);
+    return undefined;
+  }
   for (let i = 0; i < 20; i++) {
     const now = await look(page);
     if (!now || (!now.vignette && !now.consent)) break;
