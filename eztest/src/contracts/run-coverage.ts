@@ -23,7 +23,8 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
   const calls: ApiCall[] = [];
   const covered = new Set<string>();
   for (const e of evidence) {
-    if (e.kind !== 'data' || !e.path.startsWith('contracts/')) continue;
+    // Paths are run-relative; a merged run's are under shards/<shard run>/.
+    if (e.kind !== 'data' || !/^(?:shards\/[^/]+\/)?contracts\//.test(e.path)) continue;
     try {
       const c = JSON.parse(await readFile(join(runDir, e.path), 'utf8')) as ContractEvidence;
       calls.push({ method: c.method, url: c.url, status: c.status, ...(e.journeyId ? { journeyId: e.journeyId } : {}), ...(e.stepId ? { stepId: e.stepId } : {}), evidenceId: e.id, headerNames: c.headerNames, violations: c.violations.length, hasBody: c.hasBody });
@@ -33,7 +34,7 @@ export async function apiCallsOfRun(runDir: string): Promise<ApiCall[]> {
     }
   }
   for (const e of evidence) {
-    if (e.kind !== 'network' || !e.path.startsWith('api/') || covered.has(`${e.journeyId}|${e.stepId}`)) continue;
+    if (e.kind !== 'network' || !/^(?:shards\/[^/]+\/)?api\//.test(e.path) || covered.has(`${e.journeyId}|${e.stepId}`)) continue;
     try {
       const raw = JSON.parse(await readFile(join(runDir, e.path), 'utf8')) as { entries?: Array<Record<string, unknown>> };
       calls.push(...callsFromNetworkLogs([{ evidenceId: e.id, journeyId: e.journeyId, stepId: e.stepId, entries: (raw.entries ?? []) as never }]));

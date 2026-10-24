@@ -9,7 +9,7 @@ import type { DocsGateInput } from '../insights/readiness.js';
 
 /** Evidence written by a "Compare document" step (runner/actions.ts): compare/<journey>/<step>.json. */
 export function isDocumentCheckEvidence(e: EvidenceRef): boolean {
-  return e.kind === 'data' && e.description === 'document comparison' && /^compare\//.test(e.path);
+  return e.kind === 'data' && e.description === 'document comparison' && /(?:^|\/)compare\//.test(e.path);
 }
 
 interface StoredCheck {

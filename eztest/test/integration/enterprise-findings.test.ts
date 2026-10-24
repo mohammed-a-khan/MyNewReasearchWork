@@ -23,6 +23,12 @@ import { docsReadinessInputs } from '../../src/docs/readiness.js';
 import { a11yReadinessInputs } from '../../src/a11y/readiness.js';
 import { evaluateReadiness, parseReadinessPolicy } from '../../src/insights/index.js';
 import { failureLines, libraryWith } from '../../src/cli/program.js';
+import { isGoneBidiError } from '../../src/browser/firefox/connection.js';
+import { triageJourney } from '../../src/insights/triage.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { stringify as toYaml } from 'yaml';
+import { buildProgram, type CliIO } from '../../src/cli/index.js';
 
 const step = (line: string) => parseIntent(line);
 
@@ -267,4 +273,58 @@ describe('FINDING: a Lenses: header turns a lens on for that journey only', () =
     // Expanding Examples keeps the header
     expect(expandExamples([journey])[0].lenses).toEqual(['security:warn']);
   });
+});
+
+describe('FINDING: on Firefox, an action under a re-render failed with "realm is null" instead of retrying', () => {
+  it('the remote agent\'s "realm is null" error means the realm is gone (retryable), like "no such frame"', () => {
+    expect(isGoneBidiError({ error: 'unknown error', message: 'TypeError: can\'t access property "context", realm is null' })).toBe(true);
+    expect(isGoneBidiError({ error: 'no such frame', message: '' })).toBe(true);
+    expect(isGoneBidiError({ error: 'unknown error', message: 'TypeError: x is null' })).toBe(false);
+  });
+});
+
+describe('FINDING: a wrong premium (captured value vs expected) was triaged "unknown, needs human"', () => {
+  it('a failed value post-condition is a suspected product bug', () => {
+    const msg = 'post-condition failed: ledgerEquals: premium.tax is "189", expected "160.65"; ledgerEquals: premium.totalPremium is "1527.75", expected "1499.4"';
+    const step = { stepId: 'rate', intent: 'Run journey "expected-premium"', status: 'failed', durationMs: 1, conditions: [], evidence: ['E-1'], error: { message: msg } };
+    const j = { journeyId: 'quote', name: 'Quote', status: 'failed', startedAt: '', durationMs: 1, steps: [step], tags: [], requirements: [], attempt: 1, ledger: {}, evidence: [] };
+    const v = triageJourney(j as never, { run: { journeys: [j] } as never, evidence: [{ id: 'E-1', kind: 'screenshot', path: 'shots/rate.png', sha256: 'x', journeyId: 'quote', stepId: 'rate' }] as never });
+    expect(v.category).toBe('product-bug');
+    expect(v.winner?.rule).toBe('value-mismatch');
+  });
+});
+
+describe('FINDING: eztest load run ignored the suite\'s .env, so ${env.SECRET} in a scenario was empty', () => {
+  it('reads .env (and .env.<name> with -e) without overriding the real environment; baseUrl may come from it', async () => {
+    const srv = createServer((req, res) => {
+      res.statusCode = req.headers['x-secret'] === 'from-dotenv-uat' ? 200 : 401;
+      res.end('ok');
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'ez-load-env-'));
+      const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+      await writeFile(join(dir, '.env'), 'EZ_FINDING_LOAD_SECRET=from-dotenv\n');
+      await writeFile(join(dir, '.env.uat'), `EZ_FINDING_LOAD_SECRET=from-dotenv-uat\nEZ_FINDING_LOAD_BASE=${base}\n`);
+      await writeFile(join(dir, 'l.yaml'), toYaml({
+        version: 1, name: 'env secret', baseUrl: '${env.EZ_FINDING_LOAD_BASE}', profile: { type: 'constant', vus: 1, duration: '1s' },
+        userPaths: { u: { actions: [{ request: { name: 'GET /', method: 'GET', url: '/', headers: { 'x-secret': '${env.EZ_FINDING_LOAD_SECRET}' }, assert: [{ status: 200 }] } }], thinkTime: '50ms' } },
+        sla: [{ name: 'no errors', match: '*', kind: 'request', errorRate: { fail: 0 } }],
+      }));
+      delete process.env.EZ_FINDING_LOAD_SECRET;
+      const out: string[] = [];
+      const io: CliIO = { out: (x) => out.push(x), err: (x) => out.push(x), cwd: dir, env: { ...process.env } };
+      process.exitCode = 0;
+      // .env.uat is read after .env and wins over it
+      await buildProgram(io).parseAsync(['node', 'eztest', 'load', 'run', 'l.yaml', '-e', 'uat', '-o', 'results', '-q'], { from: 'node' });
+      expect(out.join('\n')).toMatch(/env secret: PASS/);
+      expect(Number(process.exitCode ?? 0)).toBe(0);
+    } finally {
+      process.exitCode = 0;
+      delete process.env.EZ_FINDING_LOAD_SECRET;
+      delete process.env.EZ_FINDING_LOAD_BASE;
+      srv.closeAllConnections();
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  }, 60_000);
 });

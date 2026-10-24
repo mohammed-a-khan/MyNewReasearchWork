@@ -99,5 +99,7 @@ export class BidiConnection extends EventEmitter {
 export function isGoneBidiError(e: unknown): boolean {
   const err = e as BidiError;
   if (err?.error && /^(no such frame|no such node|no such handle|no such user context|no such script)$/.test(err.error)) return true;
-  return /no such frame|Realm with id .* not found|context was discarded|has been discarded|BrowsingContext .* does not exist|Browsing context with id .* not found/i.test(err?.message ?? '');
+  // "realm is null": the remote agent's own TypeError (an "unknown error") for an argument node whose
+  // document went away under a running action (a re-render or navigation): retry with a fresh element.
+  return /no such frame|Realm with id .* not found|context was discarded|has been discarded|BrowsingContext .* does not exist|Browsing context with id .* not found|\brealm is null\b/i.test(err?.message ?? '');
 }

@@ -604,6 +604,8 @@ export const ReliabilitySchema = z.object({
   }).optional(),
   /** Reuse one browser context per worker, reset between journeys (opt-in, for speed). */
   reuseContext: z.boolean().default(false),
+  /** Start a fresh browser after this many journeys (0: never). Default: 15 on Firefox, never on Chromium. */
+  recycleBrowserAfter: z.number().int().min(0).optional(),
   /** Propose verified, more robust locators in the heal inbox. */
   suggestLocators: z.boolean().default(true),
   /** Remove orphaned test data left by crashed runs at the start of a run. */

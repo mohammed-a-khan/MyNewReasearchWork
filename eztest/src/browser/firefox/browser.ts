@@ -549,6 +549,15 @@ export class FfBrowserContext extends CrBrowserContext {
     this.closed = true;
     const pages = [...this.pages_] as FfPage[];
     const videos = pages.map((p) => p.video()).filter((v): v is NonNullable<typeof v> => !!v);
+    // What this context registered in the browser goes first, while the user context still exists:
+    // a data collector (it holds every response body it collected) or preload script left behind by
+    // a removed user context is never freed, and a long run grows the browser by tens of MB per context.
+    const collector = this.collector;
+    this.collector = undefined;
+    await Promise.all([
+      ...(collector ? [this.bidi.send('network.removeDataCollector', { collector }).catch(() => undefined)] : []),
+      ...this.preloadScripts.splice(0).map((script) => this.bidi.send('script.removePreloadScript', { script }).catch(() => undefined)),
+    ]);
     if (this.userContext !== 'default') {
       await this.bidi.send('browser.removeUserContext', { userContext: this.userContext }).catch(() => undefined);
     } else {
@@ -558,7 +567,6 @@ export class FfBrowserContext extends CrBrowserContext {
     while (pages.some((p) => !p.isClosed()) && Date.now() < deadline) await sleep(20);
     for (const p of pages) p.markClosed();
     await Promise.all(videos.map((v) => v.finished().catch(() => undefined)));
-    if (this.collector) void this.bidi.send('network.removeDataCollector', { collector: this.collector }).catch(() => undefined);
     this.ffBrowser_.contextClosed(this);
     this.emitEvent('close', this);
   }

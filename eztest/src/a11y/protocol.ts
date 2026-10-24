@@ -77,6 +77,11 @@ export interface FocusStop {
   order: number;
   /** The last tab stop of the document (Tab from it leaves the page). */
   last: boolean;
+  /**
+   * The document had focus when probed. Focus styles (:focus, :focus-visible) apply only in the focused
+   * window (Firefox), so visibility and indicator are judged only when this is true.
+   */
+  focused?: boolean;
 }
 
 export interface ReflowResult {

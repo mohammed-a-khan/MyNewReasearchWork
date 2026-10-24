@@ -450,6 +450,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     circuitBreaker: rel.circuitBreaker,
     ...(rel.sessionExpiry ? { sessionExpiry: { ...rel.sessionExpiry, urls: [...rel.sessionExpiry.urls, ...loginPaths] } } : {}),
     ...(rel.reuseContext ? { reuseContext: true } : {}),
+    ...(rel.recycleBrowserAfter !== undefined ? { recycleBrowserAfter: rel.recycleBrowserAfter } : {}),
     suggestLocators: rel.suggestLocators,
     ...(config.healthChecks.length ? { healthChecks: config.healthChecks } : {}),
     ...(config.timezone ? { timezone: config.timezone } : {}),

@@ -244,7 +244,9 @@ export function kbProbe(root: Document): FocusStop {
     }
   }
   const before = st.looks.get(shown);
-  const indicator = opaque ? null : before === undefined ? null : before !== look(shown);
+  // Focus styles only apply in a focused document (Firefox): without focus the indicator cannot be judged.
+  const focused = root.hasFocus();
+  const indicator = opaque || !focused ? null : before === undefined ? null : before !== look(shown);
   let obscured = false;
   if (visible && !opaque && el.ownerDocument === root) {
     const pts = [
@@ -271,7 +273,7 @@ export function kbProbe(root: Document): FocusStop {
     }
   })());
   return {
-    key, target: node.target, html: startTag(el), label: describeShort(el), box, inOpaqueFrame: opaque, visible: visibleNow, indicator, obscured, inModal,
+    key, target: node.target, html: startTag(el), label: describeShort(el), box, inOpaqueFrame: opaque, visible: visibleNow, indicator, obscured, inModal, focused,
     order: st.order.get(el) ?? -1,
     last: el === st.lastTabbable,
   };

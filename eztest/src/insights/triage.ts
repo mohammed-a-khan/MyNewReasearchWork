@@ -98,6 +98,8 @@ const ERROR_PATTERNS: Pattern[] = [
   { re: /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element(?:s)? (?:matches|found)|element (?:is )?not found|strict mode violation|locator\.\w+: Timeout|not attached to the DOM/i, category: 'test-issue', confidence: 0.65, rule: 'locator-not-found', reason: 'the target element could not be located' },
   { re: /Unknown variable|ZodError|Invalid journey|is not a function|Cannot read propert(?:y|ies) of undefined/i, category: 'test-issue', confidence: 0.7, rule: 'test-code-error', reason: 'error in the test definition or test code' },
   { re: /expect\(|assert(?:ion)?(?:Error)? |expected .* (?:to|but)|toEqual|toBe|mismatch/i, category: 'product-bug', confidence: 0.55, rule: 'assertion-failed', reason: 'an assertion on application behaviour failed' },
+  // A post-condition comparing a captured value: "ledgerEquals: premium.tax is "189", expected "160.65"".
+  { re: /post-condition failed: \w+: [^\n]* is "[^"]*", expected "[^"]*"/i, category: 'product-bug', confidence: 0.55, rule: 'value-mismatch', reason: 'a value the application produced differs from the expected value' },
 ];
 
 const LOCATOR_FAILURE = /waiting for (?:locator|selector|getBy)|resolved to 0 elements|no element|not found|strict mode violation|locator\.\w+: Timeout/i;

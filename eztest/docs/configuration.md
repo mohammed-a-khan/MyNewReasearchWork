@@ -312,6 +312,7 @@ reliability:
   circuitBreaker: { enabled: true, threshold: 3 }
   sessionExpiry: { text: ["Your session has expired"] }   # off unless set; role login pages are added
   reuseContext: false          # one browser context per worker, reset between journeys
+  recycleBrowserAfter: 15      # fresh browser after N journeys (default 15 on Firefox, off on Chromium; 0 = never)
   suggestLocators: true        # verified, more robust locators proposed in the heal inbox
   orphanSweep: true            # delete test data left by crashed runs
 healthChecks:                  # pre-flight; a failure stops the run as an environment problem

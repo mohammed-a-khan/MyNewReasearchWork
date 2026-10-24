@@ -335,7 +335,7 @@ export class VirtualUser {
   }
 
   private async browser(spec: Extract<Action, { kind: 'browser' }>['spec']): Promise<void> {
-    if (!this.browserUser) this.browserUser = await this.rt.browsers.newUser(this.pop.spec.network, this.rt.scenario.baseUrl);
+    if (!this.browserUser) this.browserUser = await this.rt.browsers.newUser(this.pop.spec.network, this.rt.scenario.baseUrl ? render(this.rt.scenario.baseUrl, this.scope) : undefined);
     const name = spec.name ?? (spec.goto !== undefined ? `open ${spec.goto}` : spec.click !== undefined ? `click ${spec.click}` : spec.fill !== undefined ? `fill ${spec.fill}` : 'browser step');
     const t0 = performance.now();
     const from = this.takeIntended(t0);
@@ -355,7 +355,8 @@ export class VirtualUser {
   private buildUrl(raw: string): string {
     const u = render(raw, this.scope);
     if (isAbsolute(u)) return u;
-    const base = this.rt.scenario.baseUrl;
+    // baseUrl is a template too ("${env.API_URL}"), so one scenario follows the environment.
+    const base = this.rt.scenario.baseUrl ? render(this.rt.scenario.baseUrl, this.scope) : undefined;
     if (!base) throw new TemplateError(`relative URL "${u}" but the scenario has no baseUrl`);
     return new URL(u, base.endsWith('/') ? base : `${base}/`).href.replace(/([^:])\/\/+/g, '$1/');
   }

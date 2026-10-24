@@ -183,6 +183,69 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     if (b) envs.set(t.id, { ...env, browser: b, browserName: t.id, contextPool: poolFor(b) });
   }
   const envOf = (j: Journey): JourneyRunEnv => envs.get(j.browser ?? primaryBrowser.id) ?? { ...env, browserName: j.browser ?? env.browserName };
+  /**
+   * The browser a web journey starts on. Two cases replace it mid-run:
+   * - it died (crash, out-of-memory kill): it is launched again for the journeys still to run, and the
+   *   journeys it took down are environment failures, not product failures; the run goes on instead
+   *   of aborting without results;
+   * - it ran `recycleBrowserAfter` journeys (default 15 on Firefox, whose parent process keeps ~30 MB
+   *   per closed window and was killed out of memory after ~45 journeys): new journeys start on a
+   *   fresh browser and the old one closes when its last journey ends.
+   */
+  const replacing = new Map<string, Promise<Error | undefined>>();
+  const startedOn = new Map<Browser, number>();
+  const inflight = new Map<Browser, number>();
+  const retired = new Set<Browser>();
+  const recycleAfter = (t: ResolvedBrowser) => (t.connect ? 0 : options.recycleBrowserAfter ?? (t.engine === 'firefox' ? 15 : 0));
+  const closeIfDrained = (b: Browser) => {
+    if (retired.has(b) && !(inflight.get(b) ?? 0)) {
+      retired.delete(b);
+      void b.close().catch(() => undefined);
+    }
+  };
+  const replaceBrowser = (id: string, why: 'crashed' | 'recycle'): Promise<Error | undefined> => {
+    let p = replacing.get(id);
+    if (!p) {
+      p = (async () => {
+        const t = targets.find((x) => x.id === id);
+        if (!t) return new Error(`browser ${id} disconnected`);
+        const old = browsers.get(id);
+        if (why === 'crashed') logger.error('browser disconnected mid-run, launching it again', { browser: id });
+        else logger.info('recycling the browser', { browser: id, journeys: old ? startedOn.get(old) : 0 });
+        try {
+          const nb = await openBrowser(t, options);
+          browsers.set(id, nb);
+          const e = envs.get(id) as { browser: Browser; contextPool?: ContextPool } | undefined;
+          if (e) {
+            e.browser = nb;
+            e.contextPool = poolFor(nb);
+          }
+          if (old && why === 'recycle') {
+            retired.add(old);
+            closeIfDrained(old);
+          }
+          return undefined;
+        } catch (err) {
+          return err as Error;
+        } finally {
+          replacing.delete(id);
+        }
+      })();
+      replacing.set(id, p);
+    }
+    return p;
+  };
+  /** The browser for the next journey on `id` (relaunched or recycled first when needed). */
+  const browserFor = async (id: string): Promise<Browser | Error | undefined> => {
+    await replacing.get(id);
+    const b = browsers.get(id);
+    if (!b) return undefined;
+    const t = targets.find((x) => x.id === id);
+    if (!b.isConnected()) return (await replaceBrowser(id, 'crashed')) ?? browsers.get(id);
+    const limit = t ? recycleAfter(t) : 0;
+    if (limit > 0 && (startedOn.get(b) ?? 0) >= limit) return (await replaceBrowser(id, 'recycle')) ?? browsers.get(id);
+    return b;
+  };
   // Web journeys run in browser contexts; others go to their platform driver (locks and retries apply to both).
   /**
    * One attempt on the journey's platform. `seed` holds the ledger values handed over by `Depends on:`
@@ -192,9 +255,34 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   const runAttempt = async (j: Journey, attempt: number, seed?: Record<string, unknown>): Promise<JourneyResult> => {
     const platform = platformOf(j, options);
     if (platform === 'web') {
-      const failedLaunch = launchErrors.get(j.browser ?? primaryBrowser.id);
-      if (failedLaunch) return browserDown(j, attempt, j.browser ?? primaryBrowser.id, failedLaunch);
-      return runJourneyAttempt(j, attempt, envOf(j), seed);
+      const id = j.browser ?? primaryBrowser.id;
+      const failedLaunch = launchErrors.get(id);
+      if (failedLaunch) return browserDown(j, attempt, id, failedLaunch);
+      const b = await browserFor(id);
+      if (b instanceof Error) return browserDown(j, attempt, id, b);
+      const base = envOf(j);
+      // The journey stays on the browser it started on, even when the run moves on to a new one.
+      const attemptEnv = b && base.browser !== b ? { ...base, browser: b } : base;
+      if (b) {
+        startedOn.set(b, (startedOn.get(b) ?? 0) + 1);
+        inflight.set(b, (inflight.get(b) ?? 0) + 1);
+      }
+      let r: JourneyResult;
+      try {
+        r = await runJourneyAttempt(j, attempt, attemptEnv, seed);
+      } catch (e) {
+        if (!b || b.isConnected()) throw e;
+        r = browserCrashed(j, attempt, id, e as Error);
+      } finally {
+        if (b) {
+          inflight.set(b, (inflight.get(b) ?? 1) - 1);
+          closeIfDrained(b);
+        }
+      }
+      if ((r.status === 'failed' || r.status === 'error') && b && !b.isConnected() && !r.reliability?.environment) {
+        (r.reliability ??= {}).environment = { reason: `browser ${id} crashed during the journey`, evidence: [...r.evidence] };
+      }
+      return r;
     }
     const driver = driverFor(platform, options);
     if (!driver) return noDriverJourney(j, platform, attempt);
@@ -346,7 +434,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     for (const e of envs.values()) await e.contextPool?.closeAll();
     for (const d of usedDrivers) await d.close?.().catch((e: unknown) => logger.warn('platform driver close failed', { driver: d.name, message: (e as Error).message }));
     // Launched browsers are closed; attached (remote) ones only lose the contexts this run created.
-    for (const b of browsers.values()) await b.close().catch(() => undefined);
+    for (const b of [...browsers.values(), ...retired]) await b.close().catch(() => undefined);
     extensions?.close();
     options.signal?.removeEventListener('abort', disarm);
   }
@@ -393,6 +481,17 @@ function browserSummaries(results: JourneyResult[], wanted: ResolvedBrowser[], b
     out[t.id] = { ...summarize(results.filter((r) => r.browser === t.id && !r.tags.includes('hook'))), ...(v ? { version: v } : {}) };
   }
   return out;
+}
+
+/** The result of a unit whose browser died under it (the run launches it again for the next ones). */
+function browserCrashed(j: Journey, attempt: number, browser: string, e: Error): JourneyResult {
+  const message = `browser ${browser} crashed: ${e.message.split('\n')[0]}`;
+  return {
+    journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, `not run: ${message}`)),
+    tags: j.tags, requirements: j.requirements, risk: j.risk, attempt, browser, ledger: {}, evidence: [],
+    status: 'error', error: { message, name: 'BrowserCrashed' },
+    reliability: { environment: { reason: message, evidence: [] } },
+  };
 }
 
 /** The result of a unit whose browser could not be launched or attached to. */

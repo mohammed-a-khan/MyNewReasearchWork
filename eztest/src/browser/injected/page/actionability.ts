@@ -102,10 +102,18 @@ function actionPoint(el: Element, options?: ActionabilityOptions): { x: number; 
   return null;
 }
 
-/** Is the element's box entirely inside the viewport and inside every scrolling ancestor's visible area? */
+/**
+ * Is the element's box entirely inside the viewport and inside every scrolling ancestor's visible
+ * area, up through the (same-origin) frames that host it? An element can be fully in view inside an
+ * iframe whose own box is scrolled out of the top-level viewport.
+ */
 function fullyInView(el: Element): boolean {
   const r = el.getBoundingClientRect();
   if (r.width === 0 && r.height === 0) return false;
+  return boxInView(el, { left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+}
+
+function boxInView(el: Element, r: { left: number; top: number; right: number; bottom: number }): boolean {
   const win = el.ownerDocument.defaultView as Window;
   if (r.left < 0 || r.top < 0 || r.right > win.innerWidth || r.bottom > win.innerHeight) return false;
   for (let p = el.parentElement; p; p = p.parentElement) {
@@ -116,7 +124,18 @@ function fullyInView(el: Element): boolean {
     const top = c.top + p.clientTop;
     if (r.left < left || r.top < top || r.right > left + p.clientWidth || r.bottom > top + p.clientHeight) return false;
   }
-  return true;
+  let host: Element | null = null;
+  try {
+    host = win.frameElement;
+  } catch {
+    host = null; // cross-origin parent: nothing more can be checked from here
+  }
+  if (!host) return true;
+  const f = host.getBoundingClientRect();
+  const fs = style(host);
+  const dx = f.left + (host as HTMLElement).clientLeft + parseFloat(fs.paddingLeft || '0');
+  const dy = f.top + (host as HTMLElement).clientTop + parseFloat(fs.paddingTop || '0');
+  return boxInView(host, { left: r.left + dx, top: r.top + dy, right: r.right + dx, bottom: r.bottom + dy });
 }
 
 /**
