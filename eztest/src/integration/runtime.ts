@@ -47,6 +47,8 @@ export interface IntegrationRuntimeOptions {
   templateSyntax?: 'dollar' | 'mustache';
   /** How far back file waits look at modification times (default 10 minutes). */
   fileLookbackMs?: number;
+  /** Cleanup problems (a consumer group the broker kept, ...). Default: a process warning. */
+  onWarning?: (message: string) => void;
 }
 
 interface JourneyState {
@@ -584,7 +586,11 @@ export class Integration implements IntegrationRuntime {
   async close(): Promise<void> {
     for (const s of this.openSubs) await s.close().catch(() => undefined);
     this.openSubs.clear();
-    for (const d of this.drivers.values()) await d.close().catch(() => undefined);
+    const warn = this.opts.onWarning ?? ((m: string) => process.emitWarning(m, 'EZTestMessaging'));
+    for (const d of this.drivers.values()) {
+      await d.close().catch((e: Error) => warn(`closing ${d.kind} broker "${d.name}" failed: ${e.message}`));
+      for (const w of (d as { closeWarnings?: string[] }).closeWarnings?.splice(0) ?? []) warn(w);
+    }
     for (const s of this.ssh.values()) s.close();
     for (const c of this.grpcClients.values()) c.close();
     this.drivers.clear();

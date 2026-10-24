@@ -60,13 +60,17 @@ export interface SubscribeOptions {
 /** Buffered messages of one subscription, with waiters for the next match. */
 export class BusSubscription {
   readonly messages: BusMessage[] = [];
-  private waiters: Array<{ pred: (m: BusMessage) => boolean; resolve: (m: BusMessage | undefined) => void; timer: NodeJS.Timeout }> = [];
+  private waiters: Array<{ pred: (m: BusMessage) => boolean; resolve: (m: BusMessage | undefined) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }> = [];
   /** Indexes of messages already handed out by `next` (each message matches one wait at most). */
   private readonly taken = new Set<number>();
   closed = false;
   onClose?: () => Promise<void>;
-  /** Called when a wait takes a message (AMQP acks it). */
-  onTake?: (m: BusMessage) => void;
+  /**
+   * Called when a wait takes a message (AMQP acks it, IBM MQ consumes exactly that message). A
+   * returned promise is awaited before the wait resolves, so the next step sees it consumed; a
+   * rejection fails the wait.
+   */
+  onTake?: (m: BusMessage) => void | Promise<void>;
   error?: Error;
 
   constructor(readonly destination: BusDestination) {}
@@ -80,10 +84,13 @@ export class BusSubscription {
         this.taken.add(idx);
         clearTimeout(w.timer);
         this.waiters = this.waiters.filter((x) => x !== w);
-        this.onTake?.(m);
-        w.resolve(m);
+        this.take(m).then(() => w.resolve(m), (e: Error) => w.reject(e));
       }
     }
+  }
+
+  private async take(m: BusMessage): Promise<void> {
+    await this.onTake?.(m);
   }
 
   fail(e: Error): void {
@@ -101,13 +108,13 @@ export class BusSubscription {
       if (this.taken.has(i)) continue;
       if (pred(this.messages[i])) {
         this.taken.add(i);
-        this.onTake?.(this.messages[i]);
-        return Promise.resolve(this.messages[i]);
+        const m = this.messages[i];
+        return this.take(m).then(() => m);
       }
     }
     if (this.error) return Promise.reject(this.error);
-    return new Promise((resolve) => {
-      const w = { pred, resolve, timer: setTimeout(() => {
+    return new Promise((resolve, reject) => {
+      const w = { pred, resolve, reject, timer: setTimeout(() => {
         this.waiters = this.waiters.filter((x) => x !== w);
         resolve(undefined);
       }, Math.max(0, timeoutMs)) };

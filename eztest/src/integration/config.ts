@@ -34,8 +34,16 @@ export const BrokerSchema = z.discriminatedUnion('type', [
     ssl: z.boolean().optional(),
     sasl: z.object({ mechanism: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']), username: z.string().min(1), password: secret }).optional(),
     groupPrefix: z.string().optional(),
+    /** Create missing topics (default false: publishing to or waiting on a missing topic is an error). */
+    createTopics: z.boolean().optional(),
   }),
-  z.object({ type: z.literal('amqp'), url: z.string().min(1), exchangeType: z.enum(['topic', 'direct', 'fanout', 'headers']).optional(), assertQueues: z.boolean().optional() }),
+  z.object({
+    type: z.literal('amqp'), url: z.string().min(1), exchangeType: z.enum(['topic', 'direct', 'fanout', 'headers']).optional(),
+    /** Declare missing queues (durable) before using them (default false: a missing queue is an error). */
+    declare: z.boolean().optional(),
+    /** Older name of `declare`. */
+    assertQueues: z.boolean().optional(),
+  }),
   z.object({
     type: z.literal('mqtt'), url: z.string().min(1), username: z.string().optional(), password: secret.optional(), clientId: z.string().optional(),
     protocolVersion: z.union([z.literal(4), z.literal(5)]).optional(), qos: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),

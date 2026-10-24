@@ -5,10 +5,10 @@
  * API's put and destructive get); correlation ids are carried as the MQMD
  * CorrelId (24 bytes, hex on the wire).
  *
- * Waiting with a JSONPath filter reads messages destructively; messages that
- * do not match are put back on the queue when the subscription closes (their
- * order and message ids change). A correlation id filter is pushed down to MQ
- * as a selector, so nothing else is touched.
+ * Waits never take other consumers' messages: they browse the queue (the
+ * REST "messagelist" and browse-by-message-id, IBM MQ 9.1.5+) and consume
+ * only the message a wait matched, by its message id. Nothing is held, put
+ * back or reordered. A REST API without browse fails with BUS_NO_BROWSE.
  */
 import { readFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
@@ -112,52 +112,106 @@ export class IbmMqBusDriver implements BusDriver {
     return { messageId: r.headers['ibm-mq-md-messageid'] };
   }
 
-  /** One destructive get; undefined when the queue stayed empty for `waitMs`. */
+  /** One destructive get (purge); undefined when the queue stayed empty for `waitMs`. */
   async get(dest: BusDestination, opts: { waitMs?: number; correlationId?: string } = {}): Promise<BusMessage | undefined> {
     const q = new URLSearchParams({ wait: String(opts.waitMs ?? this.opts.waitMs ?? 1000) });
     if (opts.correlationId) q.set('correlationId', toCorrelId(opts.correlationId));
     const r = await this.call('DELETE', `${this.queuePath(dest)}?${q}`);
     if (r.status === 204) return undefined;
     if (r.status !== 200) throw this.explain(r, `get from ${dest.name}`);
+    return this.toMessage(dest, r);
+  }
+
+  private messageListPath(dest: BusDestination): string {
+    return this.queuePath(dest).replace(/\/message$/, '/messagelist');
+  }
+
+  /**
+   * The messages on a queue, without reading them (MQ REST "messagelist", a browse). Fails with
+   * BUS_NO_BROWSE when this REST API has no browse: EZTest never falls back to destructive gets.
+   */
+  async browseList(dest: BusDestination, limit = 500): Promise<Array<{ messageId: string; correlationId?: string }>> {
+    const r = await this.call('GET', `${this.messageListPath(dest)}?limit=${limit}`);
+    if (r.status === 404 || r.status === 405 || (r.status === 400 && /MQWB0116E|does not correspond to an existing REST interface/.test(r.body.toString('utf8')))) {
+      throw new BusError(
+        `IBM MQ: the REST messaging API at ${this.base} cannot browse queues (no messagelist resource; it needs IBM MQ 9.1.5 or later). ` +
+          "Waiting for a message with a filter would mean taking other consumers' messages off the queue, so EZTest does not do it. Use a newer mqweb (REST API v2 or later) for this queue manager.",
+        'BUS_NO_BROWSE',
+      );
+    }
+    if (r.status !== 200) throw this.explain(r, `browse of ${dest.name}`);
+    const j = JSON.parse(r.body.toString('utf8') || '{}') as { messages?: Array<{ messageId?: string; correlationId?: string }> };
+    return (j.messages ?? []).filter((m) => m.messageId).map((m) => ({ messageId: String(m.messageId).toLowerCase(), ...(m.correlationId ? { correlationId: String(m.correlationId).toLowerCase() } : {}) }));
+  }
+
+  /** Read one message without removing it (browse by message id); undefined when it is gone. */
+  async browseMessage(dest: BusDestination, messageId: string): Promise<BusMessage | undefined> {
+    const r = await this.call('GET', `${this.queuePath(dest)}?${new URLSearchParams({ messageId })}`);
+    if (r.status === 204 || r.status === 404) return undefined;
+    if (r.status !== 200) throw this.explain(r, `browse of message ${messageId} on ${dest.name}`);
+    return this.toMessage(dest, r);
+  }
+
+  /** Remove exactly this message (destructive get by message id). False when it was already gone. */
+  async consume(dest: BusDestination, messageId: string): Promise<boolean> {
+    const r = await this.call('DELETE', `${this.queuePath(dest)}?${new URLSearchParams({ messageId, wait: '0' })}`);
+    if (r.status === 204) return false;
+    if (r.status !== 200) throw this.explain(r, `consume of message ${messageId} on ${dest.name}`);
+    return true;
+  }
+
+  private toMessage(dest: BusDestination, r: HttpResult): BusMessage {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(r.headers)) if (k.startsWith('ibm-mq-usr-')) headers[k.slice('ibm-mq-usr-'.length)] = v;
     const corr = r.headers['ibm-mq-md-correlationid'];
     return {
       destination: dest.name, ...decodePayload(r.body), headers, timestamp: Date.now(),
-      ...(r.headers['ibm-mq-md-messageid'] ? { messageId: r.headers['ibm-mq-md-messageid'] } : {}),
+      ...(r.headers['ibm-mq-md-messageid'] ? { messageId: r.headers['ibm-mq-md-messageid'].toLowerCase() } : {}),
       ...(corr ? { correlationId: fromCorrelId(corr) } : {}),
     };
   }
 
+  /**
+   * Waits browse the queue (nothing is taken, held or reordered): each message is read once,
+   * without removing it, and only a message a wait matches is consumed, by its message id. A
+   * correlation id narrows the browse to that id.
+   */
   async subscribe(dest: BusDestination, opts: SubscribeOptions & { correlationId?: string } = {}): Promise<BusSubscription> {
     this.queuePath(dest);
+    await this.browseList(dest, 1); // fails at once (BUS_NO_BROWSE) when the REST API cannot browse
     const sub = new BusSubscription(dest);
-    const taken = new Set<BusMessage>();
     this.polls.add(sub);
-    sub.onTake = (m) => taken.add(m);
+    const corr = opts.correlationId ? toCorrelId(opts.correlationId) : undefined;
+    if (opts.consumeMatched) {
+      sub.onTake = async (m) => {
+        if (m.messageId) await this.consume(dest, m.messageId);
+      };
+    }
+    const seen = new Set<string>();
+    const pollMs = Math.max(50, Math.min(this.opts.waitMs ?? 1000, 250));
     const loop = async () => {
       while (!sub.closed) {
         try {
-          const m = await this.get(dest, { waitMs: this.opts.waitMs ?? 1000, ...(opts.correlationId ? { correlationId: opts.correlationId } : {}) });
-          if (m && !sub.closed) sub.push(m);
-          else if (m) await this.restore(dest, m);
+          for (const e of await this.browseList(dest)) {
+            if (sub.closed) return;
+            if (seen.has(e.messageId)) continue;
+            seen.add(e.messageId);
+            if (corr && e.correlationId !== corr) continue;
+            const m = await this.browseMessage(dest, e.messageId);
+            if (m && !sub.closed) sub.push(m);
+          }
         } catch (e) {
           if (!sub.closed) sub.fail(e as Error);
           return;
         }
+        await new Promise((r) => setTimeout(r, pollMs));
       }
     };
     void loop();
     sub.onClose = async () => {
       this.polls.delete(sub);
-      for (const m of sub.messages) if (!taken.has(m)) await this.restore(dest, m).catch(() => undefined);
     };
     return sub;
-  }
-
-  /** Put a message back (unmatched messages read by a filtered wait). */
-  private async restore(dest: BusDestination, m: BusMessage): Promise<void> {
-    await this.publish(dest, { payload: m.binary ? Buffer.from(m.payload, 'base64') : m.payload, headers: m.headers, ...(m.correlationId ? { correlationId: m.correlationId } : {}) });
   }
 
   async purge(dest: BusDestination): Promise<number> {

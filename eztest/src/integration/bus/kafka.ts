@@ -1,8 +1,18 @@
 /**
- * Kafka driver on kafkajs (MIT, optional peer). Each subscription is its own
- * consumer group (unique per run and subscription, so runs never steal each
- * other's messages) and seeks every partition to the subscription's start
- * time, so an event emitted between the UI action and the wait is found.
+ * Kafka driver on kafkajs (MIT, optional peer).
+ *
+ * - Topics are never created behind the user's back: publishing to or
+ *   waiting on a missing topic fails with KAFKA_TOPIC_MISSING, unless the
+ *   broker config says `createTopics: true` (then EZTest creates it and a
+ *   failure to do so is an error, not ignored).
+ * - Consumers use one consumer group per driver (one per run: never shared
+ *   with another run or the application, so nothing is stolen), with a
+ *   numbered sibling only when two subscriptions read the same topic at once.
+ *   Offsets are never committed, and the groups are deleted when the run
+ *   ends (where the broker allows it).
+ * - Every subscription seeks each partition to its start time, so an event
+ *   emitted between the UI action and the wait is found. A consumer that does
+ *   not join its group in time fails the wait instead of reading nothing.
  */
 import { randomUUID } from 'node:crypto';
 import { BusError, BusSubscription, decodePayload, loadClient, payloadText, type BusDestination, type BusDriver, type OutgoingMessage, type PublishReceipt, type SubscribeOptions } from './types.js';
@@ -14,6 +24,10 @@ export interface KafkaOptions {
   sasl?: { mechanism: 'plain' | 'scram-sha-256' | 'scram-sha-512'; username: string; password: string };
   /** Group id prefix for test consumers (default "eztest"). */
   groupPrefix?: string;
+  /** Create missing topics (default false: a missing topic is an error). */
+  createTopics?: boolean;
+  /** How long a consumer may take to join its group (default 15000 ms). */
+  joinTimeoutMs?: number;
   connectionTimeoutMs?: number;
   /** Library to use instead of importing "kafkajs" (tests, bundlers). */
   client?: unknown;
@@ -27,9 +41,52 @@ export class KafkaBusDriver implements BusDriver {
   private producer?: Any;
   private admin?: Any;
   private readonly consumers = new Set<Any>();
+  /** This run's consumer group, and the topics each of its (numbered) groups is reading right now. */
+  readonly groupId: string;
+  private readonly groupsInUse = new Map<string, Set<string>>();
+  private readonly groupsUsed = new Set<string>();
+  private readonly knownTopics = new Set<string>();
+  /** Problems met while cleaning up (e.g. a group the broker would not delete). */
+  readonly closeWarnings: string[] = [];
 
   constructor(readonly name: string, readonly opts: KafkaOptions) {
     if (!opts.brokers?.length) throw new BusError(`messaging.brokers.${name}: kafka needs "brokers"`, 'CONFIG');
+    this.groupId = `${opts.groupPrefix ?? 'eztest'}-${randomUUID()}`;
+  }
+
+  /** Make sure the topic exists: an error when it does not (or, with createTopics, create it). */
+  private async ensureTopic(topic: string): Promise<void> {
+    if (this.knownTopics.has(topic)) return;
+    const admin = await this.adm();
+    const topics = (await admin.listTopics()) as string[];
+    if (!topics.includes(topic)) {
+      if (!this.opts.createTopics) {
+        throw new BusError(`Kafka topic "${topic}" does not exist on broker "${this.name}" (${this.opts.brokers.join(', ')}). Create it, or set createTopics: true on messaging.brokers.${this.name} to let EZTest create it.`, 'KAFKA_TOPIC_MISSING', { topic });
+      }
+      try {
+        await admin.createTopics({ topics: [{ topic }], waitForLeaders: true });
+      } catch (e) {
+        throw new BusError(`Creating Kafka topic "${topic}" on broker "${this.name}" failed: ${(e as Error).message}`, 'KAFKA_TOPIC_CREATE', { topic });
+      }
+    }
+    this.knownTopics.add(topic);
+  }
+
+  /** The run's group for a new subscription on `topic` (a numbered sibling when the run's group already reads it). */
+  private takeGroup(topic: string): string {
+    for (let n = 0; ; n++) {
+      const g = n === 0 ? this.groupId : `${this.groupId}-${n + 1}`;
+      const topics = this.groupsInUse.get(g) ?? new Set<string>();
+      if (topics.has(topic)) continue;
+      topics.add(topic);
+      this.groupsInUse.set(g, topics);
+      this.groupsUsed.add(g);
+      return g;
+    }
+  }
+
+  private releaseGroup(g: string, topic: string): void {
+    this.groupsInUse.get(g)?.delete(topic);
   }
 
   private async lib(): Promise<Any> {
@@ -49,7 +106,7 @@ export class KafkaBusDriver implements BusDriver {
 
   private async prod(): Promise<Any> {
     if (this.producer) return this.producer;
-    const p = (await this.lib()).producer({ allowAutoTopicCreation: true });
+    const p = (await this.lib()).producer({ allowAutoTopicCreation: !!this.opts.createTopics });
     await p.connect();
     this.producer = p;
     return p;
@@ -67,6 +124,7 @@ export class KafkaBusDriver implements BusDriver {
     const headers: Record<string, string> = { ...(msg.headers ?? {}) };
     if (msg.correlationId) headers['correlation-id'] = msg.correlationId;
     if (msg.contentType) headers['content-type'] = msg.contentType;
+    await this.ensureTopic(dest.name);
     const [r] = (await (await this.prod()).send({
       topic: dest.name,
       messages: [{ ...(msg.key !== undefined ? { key: msg.key } : {}), value: typeof msg.payload === 'string' ? msg.payload : Buffer.from(msg.payload), headers }],
@@ -78,19 +136,29 @@ export class KafkaBusDriver implements BusDriver {
     const kafka = await this.lib();
     const sub = new BusSubscription(dest);
     const from = opts.fromTimestamp ?? Date.now();
-    // Make sure the topic exists so offsets-by-time can be looked up (auto-created topics may lag).
+    await this.ensureTopic(dest.name);
     const admin = await this.adm();
-    const topics = (await admin.listTopics()) as string[];
-    if (!topics.includes(dest.name)) await admin.createTopics({ topics: [{ topic: dest.name }], waitForLeaders: true }).catch(() => undefined);
     const offsets = (await admin.fetchTopicOffsetsByTimestamp(dest.name, from)) as Array<{ partition: number; offset: string }>;
-    const consumer = kafka.consumer({ groupId: `${this.opts.groupPrefix ?? 'eztest'}-${randomUUID()}`, sessionTimeout: 10_000, heartbeatInterval: 1000, retry: { retries: 3 } });
+    const groupId = this.takeGroup(dest.name);
+    // Short fetch waits: the seek to the start time (below) applies once the fetch in flight returns.
+    const consumer = kafka.consumer({ groupId, sessionTimeout: 10_000, heartbeatInterval: 1000, maxWaitTimeInMs: 250, retry: { retries: 3 } });
     this.consumers.add(consumer);
-    await consumer.connect();
-    await consumer.subscribe({ topic: dest.name, fromBeginning: false });
+    const drop = async () => {
+      this.consumers.delete(consumer);
+      this.releaseGroup(groupId, dest.name);
+      await consumer.disconnect().catch(() => undefined);
+    };
     let seeked = false;
     const joined = new Promise<void>((resolve) => {
       consumer.on(consumer.events.GROUP_JOIN, () => resolve());
     });
+    try {
+      await consumer.connect();
+      await consumer.subscribe({ topic: dest.name, fromBeginning: false });
+    } catch (e) {
+      await drop();
+      throw new BusError(`Kafka consumer for topic "${dest.name}" on broker "${this.name}" could not start: ${(e as Error).message}`, 'BUS_CONNECT');
+    }
     await consumer.run({
       autoCommit: false,
       eachMessage: async ({ topic, partition, message }: Any) => {
@@ -106,19 +174,39 @@ export class KafkaBusDriver implements BusDriver {
         });
       },
     });
-    await Promise.race([joined, new Promise((r) => setTimeout(r, 15_000))]);
+    const joinMs = this.opts.joinTimeoutMs ?? 15_000;
+    let timer: NodeJS.Timeout | undefined;
+    const ok = await Promise.race([joined.then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), joinMs); })]);
+    clearTimeout(timer);
+    if (!ok) {
+      await drop();
+      throw new BusError(`Kafka consumer for topic "${dest.name}" did not join consumer group "${groupId}" within ${joinMs} ms (is the group coordinator of broker "${this.name}" reachable?); no message could be read`, 'KAFKA_JOIN_TIMEOUT', { topic: dest.name, groupId });
+    }
     for (const o of offsets) consumer.seek({ topic: dest.name, partition: o.partition, offset: o.offset });
     seeked = true;
-    sub.onClose = async () => {
-      this.consumers.delete(consumer);
-      await consumer.disconnect().catch(() => undefined);
-    };
+    sub.onClose = drop;
     return sub;
+  }
+
+  /** The consumer groups this driver created (deleted on close). */
+  consumerGroups(): string[] {
+    return [...this.groupsUsed];
   }
 
   async close(): Promise<void> {
     for (const c of this.consumers) await c.disconnect().catch(() => undefined);
     this.consumers.clear();
+    // The run's consumer groups go with it (they never committed offsets, but the broker keeps them listed).
+    if (this.groupsUsed.size) {
+      try {
+        await (await this.adm()).deleteGroups([...this.groupsUsed]);
+        this.groupsUsed.clear();
+      } catch (e) {
+        const groups = ((e as { groups?: Array<{ groupId: string; errorCode?: number; error?: { message?: string } }> }).groups ?? []);
+        const left = groups.filter((g) => g.errorCode && g.errorCode !== 69 /* GROUP_ID_NOT_FOUND */);
+        if (left.length || !groups.length) this.closeWarnings.push(`Kafka broker "${this.name}" did not delete consumer group(s) ${[...this.groupsUsed].join(', ')}: ${(e as Error).message}`);
+      }
+    }
     await this.producer?.disconnect().catch(() => undefined);
     await this.admin?.disconnect().catch(() => undefined);
     this.producer = undefined;
