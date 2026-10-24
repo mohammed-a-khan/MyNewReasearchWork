@@ -10,6 +10,7 @@ import {
 } from './dialects.js';
 import { ComponentError, engine } from './engine.js';
 import type { AdapterFixture, BaseDialect, ComponentAdapter, WidgetKind } from './types.js';
+import { noteLocalRegistration } from '../workers/local.js';
 
 /** A dialect-driven adapter: detection runs the shared engine with this adapter's root selector. */
 export class DialectAdapter<D extends BaseDialect = BaseDialect> implements ComponentAdapter<D> {
@@ -51,9 +52,11 @@ const CUSTOM: ComponentAdapter[] = [];
  */
 export function registerComponentAdapter(adapter: ComponentAdapter): () => void {
   CUSTOM.unshift(adapter);
+  const forget = noteLocalRegistration('a custom component adapter');
   return () => {
     const i = CUSTOM.indexOf(adapter);
     if (i >= 0) CUSTOM.splice(i, 1);
+    forget();
   };
 }
 

@@ -158,7 +158,7 @@ export interface RunOptions {
    * Where parallel journeys run (docs/scale.md, "Process workers"): `inline` (default for library and
    * Studio use) runs them as async tasks of this process; `process` runs each in one of `concurrency`
    * worker processes with their own browser, so a crash or a CPU-bound journey affects only itself.
-   * `eztest run` uses `process` when concurrency > 1. EZTEST_WORKERS=process|inline overrides it.
+   * `eztest run` uses `process` when concurrency > 1. EZTEST_WORKERS=process|inline applies when this is not set.
    * A run that needs handlers a worker cannot rebuild (no `workerSetup`) stays inline, with a note.
    */
   workers?: 'inline' | 'process';

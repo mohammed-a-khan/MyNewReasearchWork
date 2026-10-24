@@ -26,7 +26,7 @@ or burns a CPU affects only itself.
 | `--workers N` / `concurrency: N` | N journeys at a time |
 | `--worker-mode process` / `workers: process` | worker processes (the default of `eztest run` when N > 1) |
 | `--worker-mode inline` / `workers: inline` | async tasks of one process, as before |
-| `EZTEST_WORKERS=process` or `inline` | overrides both, for every run of the process (library runs too) |
+| `EZTEST_WORKERS=process` or `inline` | the mode of every run that does not choose one (CLI runs without `--worker-mode`, library runs without `workers`) |
 | `RunOptions.workers` | library runs; `inline` is the default there and in the Studio |
 
 **What stays with the run.** The queue, resource locks, `Depends on:` handoff, `Setup:` run-wide

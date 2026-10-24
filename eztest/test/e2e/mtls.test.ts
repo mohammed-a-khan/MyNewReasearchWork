@@ -70,7 +70,8 @@ describe.skipIf(!hasOpenssl())('mTLS client certificates', () => {
   async function engineFor(certs: string): Promise<Awaited<ReturnType<typeof createEngine>>> {
     writeFileSync(join(dir, 'eztest.config.yaml'), `outputDir: results\nheadless: true\nscreenshots: on-failure\nhealing: { enabled: false }\n${certs}`);
     const loaded = await loadConfig({ cwd: dir, environment: { CERT_PASS: PASS }, masker: new SecretMasker() });
-    return createEngine(loaded, { cwd: dir, runOptions: { stepTimeoutMs: 6000, conditionTimeoutMs: 2000, screenshots: 'on-failure' } });
+    // inline: the test CA is added to this process's trust store (tls.setDefaultCACertificates), which a worker process would not have.
+    return createEngine(loaded, { cwd: dir, runOptions: { stepTimeoutMs: 6000, conditionTimeoutMs: 2000, screenshots: 'on-failure', workers: 'inline' } });
   }
 
   it('presents the certificate from API steps (by origin and by name) and from the browser', async () => {

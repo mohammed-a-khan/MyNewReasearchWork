@@ -101,6 +101,12 @@ export function exitCodeFor(run: RunResult, quarantined: Iterable<string> = []):
   return exitCodeWithQuarantine(run, quarantined);
 }
 
+/** EZTEST_WORKERS=process|inline: the worker mode for every run of this environment (docs/scale.md). */
+function envWorkers(env: Record<string, string | undefined>): 'process' | 'inline' | undefined {
+  const v = env.EZTEST_WORKERS?.trim().toLowerCase();
+  return v === 'process' || v === 'inline' ? v : undefined;
+}
+
 export function buildProgram(io: CliIO = defaultIO): Command {
   const program = new Command();
   program
@@ -310,7 +316,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const builtinFormats = reporterNames.filter((r: string) => ['html', 'json', 'junit', 'csv', 'summary'].includes(r)) as ReportFormat[];
       const pluginReporters = reporterNames.filter((r: string) => !['html', 'json', 'junit', 'csv', 'summary', 'console'].includes(r));
       // Parallel journeys run in worker processes (crash and CPU isolation) unless asked otherwise; manual prompts need this terminal.
-      const workerMode: 'process' | 'inline' = o.manual === 'prompt' || cfg.email?.provider === 'sink' ? 'inline' : o.workerMode ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');
+      const workerMode: 'process' | 'inline' = o.manual === 'prompt' || cfg.email?.provider === 'sink' ? 'inline' : o.workerMode ?? envWorkers(io.env) ?? cfg.workers ?? (cfg.concurrency > 1 ? 'process' : 'inline');
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         addons,

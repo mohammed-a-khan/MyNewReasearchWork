@@ -46,6 +46,15 @@ const forwardLogger: Logger = {
   error: (msg, data) => send({ type: 'log', level: 'error', msg, ...(data ? { data: cloneable(data) } : {}) }),
 };
 
+/** Buffers arrive as plain Uint8Arrays over IPC (client certificates, keys): make them Buffers again. */
+function asBuffers(v: unknown, seen = new Set<unknown>()): unknown {
+  if (v instanceof Uint8Array) return Buffer.isBuffer(v) ? v : Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  if (!v || typeof v !== 'object' || seen.has(v) || v instanceof Date || v instanceof RegExp || v instanceof Map || v instanceof Set) return v;
+  seen.add(v);
+  if (Array.isArray(v)) return v.map((x) => asBuffers(x, seen));
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, asBuffers(x, seen)]));
+}
+
 async function rebuild(r: WorkerRecipe): Promise<unknown> {
   const mod = (await import(r.module)) as Record<string, unknown>;
   const fn = mod[r.export ?? 'default'];
@@ -84,7 +93,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>): Promise<void> {
   for (const [k, r] of Object.entries(m.recipes)) rebuilt[k] = await rebuild(r);
   const events = new EventBus();
   events.on((event) => send({ type: 'event', event: cloneable(event) }));
-  const o = { ...(setup?.options ?? {}), ...m.data, ...rebuilt, events, logger: forwardLogger, signal: controller.signal } as RunOptions;
+  const o = { ...(setup?.options ?? {}), ...asBuffers(m.data) as Record<string, unknown>, ...rebuilt, events, logger: forwardLogger, signal: controller.signal } as RunOptions;
   for (const k of ['locks', 'debug', 'workers', 'workerSetup', 'healthChecks', 'manual'] as const) delete (o as unknown as Record<string, unknown>)[k];
   options = o;
   store = await FingerprintStore.open(m.fingerprintStore);

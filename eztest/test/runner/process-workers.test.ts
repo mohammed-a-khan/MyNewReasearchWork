@@ -14,7 +14,7 @@ import { verifyEvidence, flattenStepResults, type Journey, type JourneyResult, t
 import { loadConfig } from '../../src/config/index.js';
 import { createEngine } from '../../src/engine/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
-import { loadCodeJourneys, runJourneys } from '../../src/runner/index.js';
+import { loadCodeJourneys, registerPlatformDriver, runJourneys } from '../../src/runner/index.js';
 import { planTransfer } from '../../src/runner/workers/protocol.js';
 import { FileStoreBackend, SharedStore } from '../../src/store/index.js';
 import { startDemoApp, type DemoServer } from '../../examples/demo-app/server.js';
@@ -69,6 +69,16 @@ describe('process workers (real Chromium, demo app)', () => {
     expect(run.environment.workers).toBeUndefined();
     expect(warnings.join('\n')).toMatch(/process workers not used, journeys run inline: these run options cannot be rebuilt in a worker process: customSteps/);
     expect(planTransfer({ outputDir: 'x', baseUrl: 'y', concurrency: 2, events: undefined, customSteps: {} }).blocked).toEqual([]);
+    // Something registered in this process by code (a platform driver) would be missing in a worker: inline too.
+    const off = registerPlatformDriver({ name: 'test-only', platforms: ['android'], runAttempt: async () => { throw new Error('unused'); } } as never);
+    try {
+      warnings.length = 0;
+      const again = await runJourneys([bob(10)], { ...FAST, baseUrl: server.url, outputDir: out, workers: 'process', logger });
+      expect(again.environment.workers).toBeUndefined();
+      expect(warnings.join('\n')).toMatch(/a registered platform driver registered in this process/);
+    } finally {
+      off();
+    }
   }, 60_000);
 });
 

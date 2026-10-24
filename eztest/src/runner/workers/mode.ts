@@ -5,14 +5,15 @@
 import type { Logger } from '../../core/index.js';
 import type { RunOptions } from '../types.js';
 import { planTransfer, type TransferPlan } from './protocol.js';
+import { localRegistrations } from './local.js';
 
 export type WorkerModeChoice = { kind: 'inline'; reason?: string } | { kind: 'process'; plan: TransferPlan };
 
-/** The mode asked for: EZTEST_WORKERS (process | inline) wins over RunOptions.workers; default inline. */
+/** The mode asked for: RunOptions.workers, else EZTEST_WORKERS (process | inline), else inline. */
 export function requestedWorkerMode(options: Pick<RunOptions, 'workers'>, env: Record<string, string | undefined> = process.env): 'inline' | 'process' {
+  if (options.workers) return options.workers;
   const e = env.EZTEST_WORKERS?.trim().toLowerCase();
-  if (e === 'process' || e === 'inline') return e;
-  return options.workers ?? 'inline';
+  return e === 'process' || e === 'inline' ? e : 'inline';
 }
 
 export function workerMode(options: RunOptions, _concurrency: number, logger: Logger): WorkerModeChoice {
@@ -25,6 +26,8 @@ export function workerMode(options: RunOptions, _concurrency: number, logger: Lo
   if (options.debug) return inline('the debugger drives the journeys in this process');
   if (options.manual) return inline('manual steps ask for verdicts in this process');
   const plan = planTransfer(options);
+  const local = localRegistrations();
+  if (local.length && !options.workerSetup) return inline(`${local.join(', ')} registered in this process (a worker would not have it; give RunOptions.workerSetup)`);
   if (plan.blocked.length && !options.workerSetup) {
     return inline(`these run options cannot be rebuilt in a worker process: ${plan.blocked.join(', ')} (give RunOptions.workerSetup, see docs/scale.md)`);
   }
