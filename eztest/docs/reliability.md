@@ -412,6 +412,7 @@ the other suites sharing it (load average 15 to 35): `test/browser`, `test/runne
 |---|---|---|
 | Before (fixed deadlines) | 377 | 5 (Studio UI: a 1 s poll for the first page, then the tests that depend on it) |
 | After (adaptive deadlines) | 387 (10 new) | 0 |
+| After, second run (load average about 30) | 381 | 7, all passing when run again: the two new process-worker cancel tests (their wait for two workers to start was then raised), four Studio UI tests, and one 50 ms query-speed check |
 
 ## Measurements
 
