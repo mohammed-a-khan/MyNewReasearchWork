@@ -101,7 +101,7 @@ function buildUi(ctx: PageContext) {
   const filter = h('input', { type: 'search', class: 'input input-sm', placeholder: 'Filter by name, tag, requirement', 'aria-label': 'Filter journeys', autocomplete: 'off' });
   const tagSel = h('select', { class: 'input input-sm', 'aria-label': 'Filter by tag' }, h('option', { value: '', text: 'All tags' }));
   const count = h('p', { class: 'explorer-count', role: 'status', 'aria-live': 'polite' });
-  const tree = createTree<JourneyEntry>({ label: 'Journey files', onActivate: (n) => n.data && void openFile(n.data.path) });
+  const tree = createTree<JourneyEntry>({ label: 'Journey files', onActivate: (n) => n.data && void openFile(n.data.path), onDelete: (n) => n.data && void deleteJourney(n.data.path) });
   const explorer = h(
     'aside',
     { class: 'explorer', 'aria-label': 'Journey explorer' },
@@ -109,7 +109,7 @@ function buildUi(ctx: PageContext) {
       'div',
       { class: 'pane-head' },
       h('h2', { class: 'pane-title', text: 'Explorer' }),
-      h('div', { class: 'pane-actions' }, iconButton('New journey', 'plus', () => void newJourney()), iconButton('Refresh', 'refresh', () => void refreshJourneys()), iconButton('Collapse folders', 'collapse', () => tree.expandAll(false))),
+      h('div', { class: 'pane-actions' }, iconButton('New journey', 'plus', () => void newJourney()), iconButton('Refresh', 'refresh', () => void refreshJourneys()), iconButton('Delete the selected journey (Delete key)', 'trash', () => { const n = tree.selectedNode(); if (n?.data) void deleteJourney(n.data.path); else toast('Select a journey file first', { timeout: 2000 }); }), iconButton('Collapse folders', 'collapse', () => tree.expandAll(false))),
     ),
     h('div', { class: 'explorer-filters' }, filter, tagSel),
     count,
@@ -130,6 +130,9 @@ function buildUi(ctx: PageContext) {
     button('Format', { icon: 'format', small: true, onclick: () => void format(), title: 'Format (Shift+Alt+F)' }),
     button('Convert…', { icon: 'convert', small: true, onclick: () => void convert() }),
     button('Run', { icon: 'run', small: true, onclick: () => void runActive(), title: 'Run this journey (Ctrl+Enter)' }),
+    h('span', { class: 'tb-sep', 'aria-hidden': 'true' }),
+    button('Rename…', { icon: 'edit', small: true, id: 'btn-rename', onclick: () => void renameActive(), title: 'Rename or move this journey file' }),
+    button('Delete…', { icon: 'trash', small: true, kind: 'danger', id: 'btn-delete', onclick: () => void deleteActive(), title: 'Delete this journey file from disk' }),
     h('span', { class: 'tb-spacer' }),
     outlineBtn,
   );
@@ -706,14 +709,18 @@ async function renameActive(): Promise<void> {
 }
 
 async function deleteActive(): Promise<void> {
-  if (!active) return;
-  const t = active;
-  if (!(await confirmDialog({ title: 'Delete journey file?', message: `Delete ${t.path} from disk? This cannot be undone from the Studio.`, confirm: 'Delete', danger: true }))) return;
+  if (active) await deleteJourney(active.path);
+}
+
+/** Delete a journey file (asks first); closes its tab if it is open. */
+async function deleteJourney(path: string): Promise<void> {
+  if (!(await confirmDialog({ title: 'Delete journey file?', message: `Delete ${path} from disk? This cannot be undone from the Studio (Source Control can still restore a committed file).`, confirm: 'Delete', danger: true }))) return;
   try {
-    await api.del('/api/file', { path: t.path });
-    await closeTab(t, true);
+    await api.del('/api/file', { path });
+    const t = tabs.find((x) => x.path === path);
+    if (t) await closeTab(t, true);
     await refreshJourneys();
-    toast(`Deleted ${t.path}`, { timeout: 2500 });
+    toast(`Deleted ${path}`, { timeout: 2500 });
   } catch (e) {
     toastError((e as Error).message);
   }

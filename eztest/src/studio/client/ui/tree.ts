@@ -26,6 +26,8 @@ export interface TreeOptions<D> {
   label: string;
   onActivate?(node: TreeNode<D>): void;
   onSelect?(node: TreeNode<D>): void;
+  /** The Delete key on a (non-folder) item; the page asks before deleting anything. */
+  onDelete?(node: TreeNode<D>): void;
   /** Expanded folder ids; default: all expanded. */
   expanded?: Set<string>;
   class?: string;
@@ -37,6 +39,8 @@ export interface TreeHandle<D> {
   select(id: string | undefined, focus?: boolean): void;
   expandAll(open: boolean): void;
   focus(): void;
+  /** The selected item, if any. */
+  selectedNode(): TreeNode<D> | undefined;
 }
 
 interface Flat<D> {
@@ -165,6 +169,10 @@ export function createTree<D>(o: TreeOptions<D>): TreeHandle<D> {
         if (isFolder) toggle(f.node.id);
         else activate(f.node);
         break;
+      case 'Delete':
+        if (!isFolder && o.onDelete) o.onDelete(f.node);
+        else handled = false;
+        break;
       default:
         if (e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
           const ch = e.key.toLowerCase();
@@ -213,6 +221,9 @@ export function createTree<D>(o: TreeOptions<D>): TreeHandle<D> {
     },
     focus() {
       focusItem(focusId ?? flat[0]?.node.id);
+    },
+    selectedNode() {
+      return flat.find((f) => f.node.id === (selected ?? focusId))?.node;
     },
   };
 }
