@@ -4,7 +4,7 @@
  * straight into the database for states the API cannot reach (an approved or accepted settlement).
  * Every seeded claim can be removed again with removeClaim (afterEach-style cleanup).
  */
-import { codeStep } from 'eztest/sdk';
+import { codeStep } from '@mohammed-a-khan/eztest/sdk';
 import { expectedPayout, isoDaysFrom, testRef } from '../lib/larkspur.ts';
 
 interface ClaimBody {

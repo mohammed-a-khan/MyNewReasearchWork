@@ -1,4 +1,5 @@
 # EZTest on Bitbucket Pipelines (written by eztest init --ci bitbucket; docs/pipelines.md).
+# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   pull requests    -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   custom: nightly  -> 4 parallel shards (EZTest balances them) merged into one verified run.

@@ -1,10 +1,10 @@
 /**
  * EZTest public API. One package, everything included:
  *
- *   import { runEzTest, parseEzScript, docs, insights } from 'eztest';
+ *   import { runEzTest, parseEzScript, docs, insights } from '@mohammed-a-khan/eztest';
  *
  * Commonly used functions are exported at the top level; every module is
- * also available as a namespace (and as a subpath, e.g. 'eztest/docs').
+ * also available as a namespace (and as a subpath, e.g. '@mohammed-a-khan/eztest/docs').
  */
 import { loadConfig, type LoadConfigOptions } from './config/index.js';
 import { createEngine, analyzeRun, type AnalyzeResult } from './engine/index.js';

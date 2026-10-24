@@ -353,7 +353,7 @@ gates:
 
 ## Programmatic API
 
-The `eztest/contracts` subpath exports these functions:
+The `@mohammed-a-khan/eztest/contracts` subpath exports these functions:
 
 | Area | Functions |
 |---|---|
@@ -362,7 +362,7 @@ The `eztest/contracts` subpath exports these functions:
 | Mocks | `createOpenApiMock`, `mockStoreFromSpec` |
 | Contract files | `parseContract`, `readContractFile`, `contractToJson`, `contractHash`, `inferMatchers`, `compareResponse` |
 | Verification | `verifyContract`, `stateHandlersFromConfig`, `messageProducersFromConfig`, `compareMessage` |
-| Releases | `evaluateCanRelease`; the results-server client (`ResultsClient` from `eztest/server`): `publishContract`, `contracts`, `recordVerification`, `recordRelease`, `canRelease` |
+| Releases | `evaluateCanRelease`; the results-server client (`ResultsClient` from `@mohammed-a-khan/eztest/server`): `publishContract`, `contracts`, `recordVerification`, `recordRelease`, `canRelease` |
 
 ## Limits
 

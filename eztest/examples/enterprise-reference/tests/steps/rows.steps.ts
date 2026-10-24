@@ -1,5 +1,5 @@
 /** Generic row helpers for .ez journeys (code steps receive strings; captured rows are read from the variables). */
-import { codeStep } from 'eztest/sdk';
+import { codeStep } from '@mohammed-a-khan/eztest/sdk';
 
 type Row = Record<string, unknown>;
 

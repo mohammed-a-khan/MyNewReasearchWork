@@ -16,6 +16,9 @@ const { spawn } = require('node:child_process');
 const { existsSync, readdirSync, readFileSync, statSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
+/** The npm package the "package" install mode installs. */
+const PACKAGE = '@mohammed-a-khan/eztest';
+
 function input(env, name, def) {
   const v = env[`INPUT_${name.replace(/ /g, '_').toUpperCase()}`];
   return v === undefined || v === '' ? def : v;
@@ -144,8 +147,9 @@ async function main(env = process.env, deps = {}) {
     } else if (install === 'package') {
       const v = input(env, 'eztestVersion', 'latest');
       if (!/^[\w.^~<>=*-]+$/.test(v)) return finish(log, 'Failed', `invalid eztestVersion ${v}`);
-      const r = await exec([process.platform === 'win32' ? 'npm.cmd' : 'npm', 'install', '--no-save', '--no-audit', '--no-fund', `eztest@${v}`], { cwd, env: childEnv });
-      if (r.code !== 0) return finish(log, 'Failed', `npm install eztest@${v} failed`);
+      // The npm package is @mohammed-a-khan/eztest (the unscoped "eztest" is an unrelated package); it installs the eztest command.
+      const r = await exec([process.platform === 'win32' ? 'npm.cmd' : 'npm', 'install', '--no-save', '--no-audit', '--no-fund', `${PACKAGE}@${v}`], { cwd, env: childEnv });
+      if (r.code !== 0) return finish(log, 'Failed', `npm install ${PACKAGE}@${v} failed`);
     }
     const setup = splitArgv(input(env, 'setupCommand', ''));
     if (setup.length) {

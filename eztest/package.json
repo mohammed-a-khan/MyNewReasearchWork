@@ -1,5 +1,5 @@
 {
-  "name": "eztest",
+  "name": "@mohammed-a-khan/eztest",
   "version": "0.1.0",
   "description": "EZTest - one-stop, verified test automation: web, API, DB, documents, identity, data, performance, accessibility, visual, security and release readiness in a single package.",
   "type": "module",
@@ -376,5 +376,14 @@
   },
   "overrides": {
     "uuid": "^11.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohammed-a-khan/MyNewReasearchWork.git",
+    "directory": "eztest"
+  },
+  "homepage": "https://github.com/mohammed-a-khan/MyNewReasearchWork/tree/main/eztest#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }

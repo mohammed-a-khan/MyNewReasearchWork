@@ -65,7 +65,7 @@ Plain-English strings work as well (`- Save ${orderId} to the shared store as "p
 ### Code journeys (SDK)
 
 ```ts
-import { journey, store } from 'eztest/sdk';
+import { journey, store } from '@mohammed-a-khan/eztest/sdk';
 
 journey('Approve a policy', async ({ ui }) => {
   const policy = await store.claim<{ policyNo: string }>('approvable-policies');  // released if the journey fails

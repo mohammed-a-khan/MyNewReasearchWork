@@ -76,6 +76,6 @@ The regression tests are in `test/integration/enterprise-findings.test.ts` (26) 
 5. No readiness gate for the passive security lens; `security:warn` lists only "high" findings.
 6. Firefox still leaks about 30 MB per closed window (a Firefox issue). Recycling contains it but does not remove it.
 7. The in-memory message broker works in-process only.
-8. A plugin `.mjs` inside the repo can't `import 'eztest'`.
+8. A plugin `.mjs` inside the repo can't `import '@mohammed-a-khan/eztest'`.
 9. `EZTEST_*` environment variables that are not settings produce "unknown key" config warnings.
 10. Examples placeholders don't fit numeric slots in some phrasings; the parse hint makes this discoverable, not seamless.

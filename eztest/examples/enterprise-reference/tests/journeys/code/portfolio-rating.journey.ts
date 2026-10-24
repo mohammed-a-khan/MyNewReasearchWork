@@ -4,7 +4,7 @@
  * on the product, derived risk factors (driver age from a date of birth), soft checks that collect
  * every mismatch, and a CSV report for the pricing team.
  */
-import { journey, run, step } from 'eztest/sdk';
+import { journey, run, step } from '@mohammed-a-khan/eztest/sdk';
 import { expectedPremium, type Product, type Region } from '../../lib/larkspur.ts';
 
 interface PolicyRow {

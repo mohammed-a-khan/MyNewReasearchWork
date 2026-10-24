@@ -3,7 +3,7 @@
  * claim type, try/catch around a refusal the system must give, a retry-until on the queue, and the
  * database as the referee. Seeding reuses the .ez suite's code steps; cleanup runs in finally.
  */
-import { journey, step } from 'eztest/sdk';
+import { journey, step } from '@mohammed-a-khan/eztest/sdk';
 import { decisionLevel, expectedPayout, money } from '../../lib/larkspur.ts';
 import { ClaimDesk } from '../../screens/claimdesk.ts';
 import { removeClaim, seedClaim } from '../../steps/claims.steps.ts';

@@ -4,6 +4,9 @@
     "noEmit": true,
     "rootDir": ".",
     "paths": {
+      "@mohammed-a-khan/eztest": ["./src/index.ts"],
+      "@mohammed-a-khan/eztest/components": ["./src/runner/components/index.ts"],
+      "@mohammed-a-khan/eztest/*": ["./src/*/index.ts"],
       "eztest/sdk": ["./src/sdk/index.ts"],
       "eztest/bdd": ["./src/bdd/index.ts"],
       "eztest/browser": ["./src/browser/index.ts"]

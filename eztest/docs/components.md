@@ -2,7 +2,7 @@
 
 Enterprise apps are built from component libraries whose widgets defeat naive automation: virtualized data grids (only the visible rows exist in the DOM, columns reorder, pin and virtualize too), combo boxes whose options appear in a popup at the end of `<body>` after an async search, date pickers with locale formats, trees that load children lazily, modals stacked over modals, toasts that are gone before anyone looks, editors inside iframes, canvas charts. Teams end up writing a helper class per widget per library.
 
-EZTest's component layer (`src/runner/components/`, exported as `eztest/components`) does that work once. A plain-English sentence names a widget and what to do with it:
+EZTest's component layer (`src/runner/components/`, exported as `@mohammed-a-khan/eztest/components`) does that work once. A plain-English sentence names a widget and what to do with it:
 
 ```text
 In the Orders grid, click the row where Customer is "Contoso" and Status is "Open"
@@ -83,7 +83,7 @@ Licenses: only MIT and Apache-2.0 libraries are installed, as devDependencies us
 
 ## Using it from code
 
-In a code journey (`eztest/sdk`), `ui.component(widget, name, op, args)` runs a component step on the runner path, with the same lookup, verification, healing and evidence as the `.ez` phrasing:
+In a code journey (`@mohammed-a-khan/eztest/sdk`), `ui.component(widget, name, op, args)` runs a component step on the runner path, with the same lookup, verification, healing and evidence as the `.ez` phrasing:
 
 ```ts
 journey('Adjust an order', async ({ ui }) => {
@@ -100,10 +100,10 @@ The `op` names and arguments are the step's `args` (table above; `where` takes `
 
 Outside a journey,
 
-`eztest/components` exports plain functions over `eztest/browser` locators, for a code journey or a custom step (these are not runner steps: no healing or evidence vault).
+`@mohammed-a-khan/eztest/components` exports plain functions over `@mohammed-a-khan/eztest/browser` locators, for a code journey or a custom step (these are not runner steps: no healing or evidence vault).
 
 ```ts
-import { locateWidget, clickGridRow, editGridCell, readGridRows, chooseOptions, pickDate, parseDateText, treeAction, treePath } from 'eztest/components';
+import { locateWidget, clickGridRow, editGridCell, readGridRows, chooseOptions, pickDate, parseDateText, treeAction, treePath } from '@mohammed-a-khan/eztest/components';
 
 const orders = await locateWidget(page, 'the Orders grid', 'grid');     // strict, like a .ez step
 await clickGridRow(orders, { Customer: 'Contoso', Status: 'Open' });
@@ -121,7 +121,7 @@ Grids: `openGrid`, `gridColumns`, `findGridRow`, `clickGridRow`, `clickInGridRow
 An in-house grid, or a library version whose markup differs, gets an adapter of its own. Most adapters are a dialect: plain data the engine interprets.
 
 ```ts
-import { DialectAdapter, registerComponentAdapter } from 'eztest/components';
+import { DialectAdapter, registerComponentAdapter } from '@mohammed-a-khan/eztest/components';
 
 registerComponentAdapter(new DialectAdapter('grid', 'acme', 'ACME grid', 'emulated', {
   id: 'acme-grid',
@@ -207,4 +207,4 @@ eztest stories --stories "src/**/*.stories.ts" --lens a11y,visual journeys/compo
 eztest stories list --stories "src/**/*.stories.tsx"
 ```
 
-Exported from `eztest/stories` (`StoryHarness`, `listStoryFiles`) for use in code.
+Exported from `@mohammed-a-khan/eztest/stories` (`StoryHarness`, `listStoryFiles`) for use in code.

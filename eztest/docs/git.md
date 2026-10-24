@@ -120,7 +120,11 @@ The commit is built without touching your checkout: a private index
 fetch), the files are hashed in from the working tree, and `commit-tree` +
 `update-ref` create the branch. Your current branch, index and working tree
 stay exactly as they were. Files under `.eztest/` (quarantine, baselines) are
-included even though `.gitignore` usually ignores that folder.
+included even when a `.gitignore` ignores that folder. The `.gitignore` that
+`eztest init` writes ignores only the caches and local state under `.eztest/`
+and keeps the team decisions committable: `quarantine.json`,
+`heal-decisions.json`, `triage-overrides.json`, `baselines/`, `aria/` and
+`approvals/`.
 
 ```yaml
 vcs:

@@ -193,7 +193,7 @@ The tags appear on the triage board, in Quality › Coverage and in the
 ## API
 
 ```ts
-import { analytics, insights } from 'eztest';
+import { analytics, insights } from '@mohammed-a-khan/eztest';
 
 const map = await analytics.computeRunUiCoverage(runDir, runId, journeys, { routes: ['/orders/:id'] });
 console.log(analytics.uiCoverageText(map));

@@ -95,9 +95,16 @@ async function optionalImport<T>(name: string, cwd: string): Promise<T | undefin
   }
 }
 
-/** The module of this EZTest that an `eztest` / `eztest/<sub>` import should load. */
+/** Package specifiers that name this EZTest: the npm name, and the bare `eztest` that older projects import. */
+const SELF_NAMES = ['@mohammed-a-khan/eztest', 'eztest'];
+/** Matches `@mohammed-a-khan/eztest`, `@mohammed-a-khan/eztest/<sub>`, `eztest` and `eztest/<sub>`. */
+export const EZTEST_SPECIFIER = /^(?:@mohammed-a-khan\/)?eztest(?:\/.*)?$/;
+
+/** The module of this EZTest that an `@mohammed-a-khan/eztest[/<sub>]` (or legacy `eztest[/<sub>]`) import should load. */
 export function eztestModulePath(spec: string): string | undefined {
-  const sub = spec === 'eztest' ? '' : spec.slice('eztest/'.length);
+  const name = SELF_NAMES.find((n) => spec === n || spec.startsWith(`${n}/`));
+  if (!name) return undefined;
+  const sub = spec === name ? '' : spec.slice(name.length + 1);
   if (sub === 'package.json') return join(ROOT, '..', 'package.json');
   if (sub && !/^[a-z0-9-]+$/.test(sub)) return undefined;
   for (const ext of ['.js', '.ts']) {
@@ -114,8 +121,8 @@ async function bundle(esbuild: Esbuild, file: string, cwd: string): Promise<{ ou
   const plugin: import('esbuild').Plugin = {
     name: 'eztest-externals',
     setup(build) {
-      // eztest/* -> this EZTest (one runtime for the journey and the runner).
-      build.onResolve({ filter: /^eztest(?:\/.*)?$/ }, (args) => {
+      // @mohammed-a-khan/eztest/* (and legacy eztest/*) -> this EZTest (one runtime for the journey and the runner).
+      build.onResolve({ filter: EZTEST_SPECIFIER }, (args) => {
         const p = eztestModulePath(args.path);
         if (!p) return { errors: [{ text: `Unknown EZTest module "${args.path}"` }] };
         return { path: pathToFileURL(p).href, external: true };
@@ -241,7 +248,7 @@ export async function loadCodeJourneys(file: string, o: LoadOptions = {}): Promi
   const cwd = resolve(o.cwd ?? process.cwd());
   const abs = resolve(cwd, file);
   const { registrations } = await loadCodeModule(abs, o);
-  if (!registrations.length) throw new EzTestError(`${relative(cwd, abs) || abs} declares no journey (call journey("name", async (ctx) => { ... }) from eztest/sdk)`, 'NO_JOURNEY');
+  if (!registrations.length) throw new EzTestError(`${relative(cwd, abs) || abs} declares no journey (call journey("name", async (ctx) => { ... }) from @mohammed-a-khan/eztest/sdk)`, 'NO_JOURNEY');
   return registrations.map((r) => journeyFromRegistration(r, cwd));
 }
 

@@ -127,6 +127,9 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const r = await initProject(resolve(io.cwd, dir), { ci: o.ci });
       for (const f of r.created) io.out(`created  ${f}`);
       for (const f of r.skipped) io.out(`exists   ${f} (left unchanged)`);
+      io.out('');
+      io.out('Next:');
+      for (const n of r.next) io.out(`  ${n}`);
     });
 
   // ------------------------------------------------------------------ run

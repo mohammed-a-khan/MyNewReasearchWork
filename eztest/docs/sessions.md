@@ -31,4 +31,4 @@ Three formats are read and normalised to the same model (navigate, click, input,
 
 A `sessions-report.json` is written next to the generated journeys with the counts, clusters, generated journeys, the coverage gap and anything skipped.
 
-Exported from `eztest/sessions` (`parseSession`, `clusterSessions`, `generateJourneys`, `coverageGap`, `captureSnippet`).
+Exported from `@mohammed-a-khan/eztest/sessions` (`parseSession`, `clusterSessions`, `generateJourneys`, `coverageGap`, `captureSnippet`).

@@ -34,7 +34,7 @@
       "label": "Install EZTest",
       "defaultValue": "auto",
       "required": false,
-      "options": { "auto": "npm ci when there is a package-lock.json", "npmCi": "npm ci", "package": "npm install eztest (version below)", "none": "Already installed" },
+      "options": { "auto": "npm ci when there is a package-lock.json", "npmCi": "npm ci", "package": "npm install @mohammed-a-khan/eztest (version below)", "none": "Already installed" },
       "groupName": "run"
     },
     { "name": "eztestVersion", "type": "string", "label": "EZTest version", "defaultValue": "latest", "required": false, "groupName": "run", "visibleRule": "install = package" },

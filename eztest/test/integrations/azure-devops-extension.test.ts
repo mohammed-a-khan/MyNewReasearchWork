@@ -174,6 +174,32 @@ describe('task handler: orchestration', () => {
   });
 });
 
+describe('task handler: "package" install mode', () => {
+  it('installs @mohammed-a-khan/eztest at the requested version (never the unrelated unscoped "eztest")', async () => {
+    const { project, dir } = await runDir(undefined, 0);
+    const calls: string[][] = [];
+    const r = await handler.main(
+      { INPUT_COMMAND: 'run', INPUT_WORKINGDIRECTORY: project, INPUT_INSTALL: 'package', INPUT_EZTESTVERSION: '0.1.0', INPUT_PUBLISHARTIFACT: 'false' },
+      {
+        exec: async (argv) => {
+          calls.push(argv);
+          return argv[3] === 'run' && !argv.includes('--help') ? { code: 0, stdout: `report json: ${join(dir, 'report.json')}` } : { code: 0, stdout: '' };
+        },
+        write: () => undefined,
+      },
+    );
+    expect(r.result).not.toBe('Failed');
+    expect(calls[0].slice(1)).toEqual(['install', '--no-save', '--no-audit', '--no-fund', '@mohammed-a-khan/eztest@0.1.0']);
+    const failing = await handler.main(
+      { INPUT_COMMAND: 'run', INPUT_WORKINGDIRECTORY: project, INPUT_INSTALL: 'package', INPUT_EZTESTVERSION: 'latest' },
+      { exec: async () => ({ code: 1, stdout: '' }), write: () => undefined },
+    );
+    expect(failing).toMatchObject({ result: 'Failed', message: 'npm install @mohammed-a-khan/eztest@latest failed' });
+    const task = JSON.parse(readFileSync(join(EXT, 'tasks', 'EZTest', 'task.json'), 'utf8')) as { inputs: Array<{ name: string; options?: Record<string, string> }> };
+    expect(task.inputs.find((i) => i.name === 'install')!.options!.package).toBe('npm install @mohammed-a-khan/eztest (version below)');
+  });
+});
+
 describe('pipeline results tab (Chromium)', () => {
   let server: Server;
   let base: string;

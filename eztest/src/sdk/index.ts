@@ -1,10 +1,10 @@
 /**
- * EZTest TypeScript SDK (`eztest/sdk`): code-first journeys that keep EZTest's
+ * EZTest TypeScript SDK (`@mohammed-a-khan/eztest/sdk`): code-first journeys that keep EZTest's
  * guarantees. Every `ui.*` call runs through the same runner path as an `.ez`
  * step (strict locating, verified healing, evidence, trace, debugger).
  *
  * ```ts
- * import { journey, step, screen, expect } from 'eztest/sdk';
+ * import { journey, step, screen, expect } from '@mohammed-a-khan/eztest/sdk';
  * export const Orders = screen('Orders', { search: { css: '#q', label: 'Search' } });
  * journey('Settle overdue invoices', { tags: ['@billing'] }, async ({ ui, db }) => {
  *   for (const r of await db.query('OVERDUE_INVOICES', { region: 'EU' })) {
