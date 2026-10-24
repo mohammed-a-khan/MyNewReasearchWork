@@ -10,7 +10,7 @@ import type { Page } from '../browser/index.js';
 import { EventBus, type EzEvent } from '../core/index.js';
 import { createMaskedLogger, type SecretMasker } from '../config/index.js';
 import { createEngine } from '../engine/index.js';
-import { loadJourneys } from '../cli/journeys.js';
+import { loadJourneys, bddOptionsFrom, defaultJourneyPaths } from '../cli/journeys.js';
 import { DebugController, SENSITIVE_DESC, Screencast, type BreakpointInput, type ScreencastFrame } from '../runner/index.js';
 import type { RunOptions } from '../runner/index.js';
 import { HttpError, loadStudioConfig, type StudioContext, type StudioEvent } from './runs.js';
@@ -109,7 +109,7 @@ export class DebugSessionManager {
     }
     if (req.headed) overrides.headless = false;
     const loaded = await loadStudioConfig(this.ctx, overrides);
-    const { journeys, errors } = await loadJourneys([loaded.config.journeysDir], this.ctx.cwd);
+    const { journeys, errors } = await loadJourneys(defaultJourneyPaths(loaded.config, this.ctx.cwd), this.ctx.cwd, { bdd: bddOptionsFrom(loaded.config) });
     const journey = journeys.find((j) => j.id === req.journey);
     if (!journey) {
       const err = errors.length ? ` (some journeys do not parse: ${errors.map((e) => e.file).join(', ')})` : '';

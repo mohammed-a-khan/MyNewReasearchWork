@@ -251,6 +251,8 @@ export interface ReportModel {
   tests: TestModel[];
   /** Static extra sections (API coverage tables) as escaped HTML. */
   extraHtml?: string[];
+  /** The Gherkin feature / rule / scenario section (escaped HTML), when the run has `.feature` scenarios. */
+  featuresHtml?: string;
   /** Where links point (kept so the model can be re-linked after publishing). */
   linkConfig: Pick<ReportModelInput, 'ado' | 'jira'>;
   warnings: string[];
@@ -530,8 +532,10 @@ function evidenceMap(evidence: EvidenceRef[] | undefined): { kinds: string[]; ma
 }
 
 function suiteOf(j: JourneyResult, file: string | undefined, root: string[], perFile?: Map<string, number>): string[] {
-  const bdd = (j as JourneyResult & { suitePath?: Array<{ kind?: string; name: string }> }).suitePath;
-  if (Array.isArray(bdd) && bdd.length) return bdd.map((s) => (s.kind ? `${s.name}` : s.name)).filter(Boolean);
+  const sp = j.suitePath;
+  if (Array.isArray(sp) && sp.length) return sp.map((s) => s.name).filter(Boolean);
+  // Gherkin scenarios: feature, then rule.
+  if (j.bdd) return [j.bdd.feature.name || j.bdd.file, ...(j.bdd.rule ? [j.bdd.rule.name] : [])];
   if (file) {
     const parts = file.split(/[\\/]/);
     const rel = parts.slice(root.length);

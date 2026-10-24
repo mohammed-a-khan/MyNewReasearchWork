@@ -14,6 +14,7 @@ import { parseEzScript } from './ezscript.js';
 import { defaultStepId, parseIntent } from './parse.js';
 import { describeTarget } from './target.js';
 import { querySugarIntent } from './rules-queries.js';
+import { storeSugarIntent } from '../store/rules.js';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -66,6 +67,8 @@ function sugar(s: Obj): Obj | undefined {
   }
   const nq = querySugarIntent(s);
   if (nq) return { intent: nq, steps: undefined, rest: s };
+  const st = storeSugarIntent(s);
+  if (st) return { intent: st, steps: undefined, rest: s };
   const rc = s.runCode;
   if (rc !== undefined && s.action === undefined && typeof rc === 'string') {
     const w = isObj(s.with) ? Object.entries(s.with).map(([k, v]) => `${k}=${q(v)}`).join(', ') : '';
@@ -87,7 +90,7 @@ function sugar(s: Obj): Obj | undefined {
 
 const SUGAR_KEYS = new Set(['if', 'unless', 'then', 'repeat', 'do', 'forEach', 'for each', 'foreach', 'while', 'until', 'max', 'maxIterations', 'retry', 'every',
   'try', 'onFailure', 'on_failure', 'group', 'frame', 'inFrame', 'runJourney', 'run', 'runCode', 'with', 'as', 'query', 'on', 'returns', 'within', 'capture',
-  'actor', 'switchTo', 'switch to user', 'switchToUser', 'parallel']);
+  'actor', 'switchTo', 'switch to user', 'switchToUser', 'parallel', 'store', 'sharedStore', 'pool']);
 
 function normaliseStep(raw: unknown, index: number): StepInput {
   if (typeof raw === 'string') return parseIntent(raw);

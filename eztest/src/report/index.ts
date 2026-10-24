@@ -15,3 +15,4 @@ export * from './compare.js';
 export * from './notify.js';
 export * from './trends.js';
 export * from './write.js';
+export * from './bdd.js';

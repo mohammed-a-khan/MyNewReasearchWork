@@ -30,6 +30,7 @@ import type { Issue } from '../../core/state.js';
 import { ezCompletions, ezHover, lintSource, yamlCompletions, type Format } from './assist.js';
 import { ezLanguage } from './ezlang.js';
 import { sdkCompletions } from './sdk.js';
+import { featureCompletions, gherkinLanguage } from './gherkin.js';
 
 export interface EditorStateOptions {
   path: string;
@@ -71,6 +72,7 @@ const theme = EditorView.theme({
 
 function languageFor(format: Format): Extension {
   if (format === 'ts') return javascript({ typescript: true });
+  if (format === 'feature') return gherkinLanguage;
   if (format === 'json') return json();
   if (format === 'yaml') return yaml();
   return ezLanguage;
@@ -78,7 +80,7 @@ function languageFor(format: Format): Extension {
 
 export function createEditorState(o: EditorStateOptions): EditorState {
   const format = o.format;
-  const completionSource = format === 'ez' ? ezCompletions : format === 'yaml' ? yamlCompletions : format === 'ts' ? sdkCompletions : () => null;
+  const completionSource = format === 'ez' ? ezCompletions : format === 'yaml' ? yamlCompletions : format === 'ts' ? sdkCompletions : format === 'feature' ? featureCompletions : () => null;
   return EditorState.create({
     doc: o.content,
     extensions: [
@@ -102,7 +104,7 @@ export function createEditorState(o: EditorStateOptions): EditorState {
       search({ top: true }),
       autocompletion({ override: [completionSource], activateOnTyping: true, icons: true, maxRenderedOptions: 60 }),
       lintGutter(),
-      linter(lintSource(() => format, o.onValidated), { delay: 350 }),
+      linter(lintSource(() => format, o.onValidated, o.path), { delay: 350 }),
       format === 'ez' ? hoverTooltip(ezHover, { hoverTime: 400 }) : [],
       languageFor(format),
       theme,

@@ -32,6 +32,12 @@ retries: 0
 logLevel: info
 timeouts: { step: 15000 }
 journeysDir: journeys
+bddDir: features               # Gherkin .feature files (docs/bdd.md); default features/ when it exists
+bdd:
+  steps: ["**/*.steps.ts"]     # step definition globs (default: *.steps.* and step_definitions/ folders)
+  fallback: true               # steps without a definition may run as EZTest phrasings
+  language: en                 # for files without "# language:"
+  worldParameters: {}          # passed to every World
 outputDir: eztest-results
 elements:                      # shared element repository (docs/elements.md)
   dir: elements                # elements/*.yaml
@@ -233,6 +239,16 @@ locks:                            # Locks: on journeys (docs/scale.md)
   timeoutMinutes: 30
 selection:
   impactMapping: impact-mapping.yaml   # for --changed-since
+store:                            # shared test data across journeys, runs and pipeline stages (docs/shared-data.md)
+  backend: auto                   # auto (server when server.url is set) | file | server
+  dir: .eztest/store
+  defaultTtl: 7d
+  pools: { approvable-policies: { from: data/policies.csv, column: policyNo } }
+pipelines:                        # eztest run --pipeline <name|auto> (docs/pipelines.md)
+  pr:         { trigger: pr, tags: "@smoke", impact: true, budget: 10m }
+  nightly:    { trigger: schedule, tags: "@regression and not @quarantined", shards: 4 }
+  deploy-sit: { environment: sit, tags: "@sit or @smoke", testPlan: 417, gate: readiness }
+  deploy-uat: { environment: uat, tags: "@uat", requires: [deploy-sit] }
 plugins: [./plugins/acme.mjs, "@acme/eztest-sso"]   # docs/plugins.md
 publishers:                       # after eztest run / eztest publish
   - { use: slack, webhook: secret://env/SLACK_WEBHOOK, when: failed }

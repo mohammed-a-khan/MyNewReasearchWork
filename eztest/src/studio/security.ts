@@ -167,8 +167,8 @@ export function isSensitive(rel: string): boolean {
 export function confineJourneyPath(root: string, userPath: string, opts: { outputDir?: string } = {}): string {
   const abs = confinePath(root, userPath);
   const rel = relPosix(root, abs);
-  if (!JOURNEY_EXTENSIONS.has(extname(abs).toLowerCase()) && !isCodePath(rel)) {
-    throw new PathError('Only journey files (.ez, .yaml, .yml, .json) and code files (*.journey.ts, *.steps.ts, screens/*.ts) can be opened or saved here');
+  if (!JOURNEY_EXTENSIONS.has(extname(abs).toLowerCase()) && !isCodePath(rel) && extname(abs).toLowerCase() !== '.feature') {
+    throw new PathError('Only journey files (.ez, .yaml, .yml, .json), feature files (.feature) and code files (*.journey.ts, *.steps.ts, step_definitions/*.ts, screens/*.ts) can be opened or saved here');
   }
   if (isSensitive(rel)) throw new PathError('This file is not editable from the Studio');
   if (NOT_JOURNEYS.test(basename(abs))) throw new PathError('Configuration and report files are not journeys');

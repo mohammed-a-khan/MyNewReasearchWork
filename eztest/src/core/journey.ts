@@ -320,6 +320,9 @@ export const ActionType = z.enum([
   'actor',
   /** "In parallel:": the child steps (usually As blocks of different actors) run at the same time. */
   'parallel',
+  // -------------------------------------------- shared test data (see docs/shared-data.md)
+  /** Shared store and data pools: args.op save | load | delete | poolAdd | poolTake | poolCount | poolSeed (src/store). */
+  'store',
 ]);
 export type ActionType = z.infer<typeof ActionType>;
 
@@ -538,6 +541,27 @@ export const Actor = z.object({
 });
 export type Actor = z.infer<typeof Actor>;
 
+/** A Gherkin scenario run natively (`.feature` files, see docs/bdd.md): where it comes from and how its steps bind. */
+export const BddMeta = z.object({
+  /** Absolute path of the feature file. */
+  uri: z.string().min(1),
+  language: z.string().default('en'),
+  feature: z.object({ keyword: z.string(), name: z.string(), line: z.number().int(), tags: z.array(z.string()).default([]), description: z.string().optional() }),
+  rule: z.object({ keyword: z.string(), name: z.string(), line: z.number().int(), tags: z.array(z.string()).default([]) }).optional(),
+  scenario: z.object({ keyword: z.string(), name: z.string(), line: z.number().int(), tags: z.array(z.string()).default([]), outline: z.boolean().default(false) }),
+  /** Outlines: the Examples block, and the row this journey runs (inline tables). */
+  examples: z.object({
+    keyword: z.string(), name: z.string(), line: z.number().int(), tags: z.array(z.string()).default([]), index: z.number().int(),
+    row: z.object({ line: z.number().int(), index: z.number().int() }).optional(),
+  }).optional(),
+  /** Step definition files (absolute), loaded when the scenario runs. */
+  glue: z.array(z.string()).default([]),
+  /** Steps without a definition may run as EZTest plain-English steps. */
+  fallback: z.boolean().default(true),
+  worldParameters: z.record(z.string(), z.unknown()).optional(),
+});
+export type BddMeta = z.infer<typeof BddMeta>;
+
 export const Journey = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -625,6 +649,16 @@ export const Journey = z.object({
    */
   /** Set for code journeys (TypeScript, eztest/sdk): the runner calls the registered function instead of walking `steps`. */
   code: CodeRef.optional(),
+  /** Set for Gherkin scenarios (`.feature` files): the runner binds each step to a step definition or an EZTest phrasing. */
+  bdd: BddMeta.optional(),
+  /** A Gherkin BeforeAll / AfterAll hook run as a journey of its own (src/runner/bdd-all.ts). */
+  bddAll: z.object({
+    kind: z.enum(['beforeAll', 'afterAll']),
+    /** The hook's id (`beforeAll:<file>:<line>`). */
+    hook: z.string().min(1),
+    glue: z.array(z.string()).default([]),
+    worldParameters: z.record(z.string(), z.unknown()).optional(),
+  }).optional(),
   examplesFrom: z.object({
     from: z.string().optional(),
     query: z.string().optional(),

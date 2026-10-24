@@ -438,7 +438,12 @@ async function runBlock(step: Step, scope: FlowScope, env: FlowEnv): Promise<Ste
         const ledger = new Ledger();
         for (const [k, v] of Object.entries(params)) ledger.set(k, v);
         const subScope: FlowScope = { journey: sub, ledger, prefix: `${scope.prefix}/${safeName(sub.id)}-${safeName(step.id)}`, params, depth: scope.depth + 1 };
-        error = (await runList(sub.steps, subScope, env, children, { branch: 'body' })).error;
+        if (sub.bdd) {
+          // A Gherkin scenario: its steps bind to step definitions or EZTest phrasings (src/runner/bdd-run.ts).
+          const out = await (await import('./code-host.js')).runCodeJourney(sub, subScope, env);
+          for (const c of out.steps) children.push({ ...c, branch: 'body' });
+          if (out.status === 'failed') error = out.error?.message ?? `scenario "${sub.name}" failed`;
+        } else error = (await runList(sub.steps, subScope, env, children, { branch: 'body' })).error;
         const returned: Record<string, unknown> = {};
         for (const k of sub.returns ?? []) {
           const v = ledger.get(k);

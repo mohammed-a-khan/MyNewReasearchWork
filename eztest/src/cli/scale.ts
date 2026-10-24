@@ -290,7 +290,7 @@ export interface AfterRunOptions {
 }
 
 /** Everything after analysis: plugin reporters, OTLP export, results-server publish and publishers. */
-export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRunOptions, ctx: { loaded: LoadedConfig; cwd: string; client?: ResultsClient; io: CliIO; out: (s: string) => void }): Promise<void> {
+export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRunOptions, ctx: { loaded: LoadedConfig; cwd: string; client?: ResultsClient; io: CliIO; out: (s: string) => void }): Promise<{ runUrl?: string }> {
   const run = JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')) as RunResult;
   for (const name of o.pluginReporters) {
     const r = registries.reporters.get(name);
@@ -346,6 +346,7 @@ export async function afterRun(runDir: string, analysis: RunAnalysis, o: AfterRu
     await recordPublisherResults(runDir, results).catch(() => undefined);
   }
   await rerenderReports(runDir).catch((e: Error) => ctx.io.err(`warning: report not updated with the integration links: ${e.message}`));
+  return { runUrl };
 }
 
 /** Publisher outcomes into integrations.json: Slack/Teams notifications, Jira bugs, other publishers. */

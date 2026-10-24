@@ -23,6 +23,33 @@ import { icon, STATE_ICON } from './icons.js';
 import { REPORT_CSS } from './styles.js';
 import { REPORT_SCRIPT } from './client.js';
 import type { ReportInsights } from './model.js';
+import { bddHierarchy, type BddScenarioEntry } from './bdd.js';
+import type { RunResult as Run } from '../core/index.js';
+
+const STATUS_STATE: Record<string, TestState> = { passed: 'passed', 'passed-healed': 'healed', failed: 'failed', error: 'error', skipped: 'skipped', blocked: 'error' };
+const sbadge = (s: string) => badge(STATUS_STATE[s] ?? 'skipped');
+const MATCH_LABEL: Record<string, string> = { definition: 'step definition', ez: 'EZTest phrasing', undefined: 'undefined', ambiguous: 'ambiguous' };
+
+function bddScenario(sc: BddScenarioEntry): string {
+  const steps = sc.steps.map((st) => `<li class="g-step">${sbadge(st.status)} <span class="g-kw">${e(st.keyword)}</span> ${e(st.text)}${st.match ? ` <small class="muted" title="${e(st.location ?? '')}">${e(MATCH_LABEL[st.match] ?? st.match)}${st.location ? ` &middot; ${e(st.location)}` : ''}</small>` : ''}${st.error ? `<div class="g-err">${e(st.error)}</div>` : ''}</li>`).join('');
+  const hooks = sc.hookFailures.map((h) => `<li class="g-step">${sbadge('failed')} ${e(h)}</li>`).join('');
+  return `<li class="g-scenario"><details${sc.status === 'failed' || sc.status === 'error' ? ' open' : ''}><summary>${sbadge(sc.status)} <span class="g-kw">${e(sc.keyword)}:</span> <a href="${testHref(sc.journeyId)}">${e(sc.name)}</a> <small class="muted">line ${e(sc.line)}${sc.examples ? ` &middot; ${e(sc.examples.name || 'Examples')} row ${e((sc.examples.row?.index ?? 0) + 1)}` : ''} &middot; ${e(fmtMs(sc.durationMs))}</small></summary><ol class="g-steps">${steps}${hooks}</ol></details></li>`;
+}
+
+/** Feature / rule / scenario hierarchy of the run's Gherkin scenarios (docs/bdd.md). */
+export function featuresBlock(run: Run): string {
+  const h = bddHierarchy(run);
+  if (!h) return '';
+  const t = h.totals;
+  const features = h.features.map((f) => {
+    const c = f.counts;
+    const rules = f.rules.map((r) => `<li class="g-rule"><details open><summary>${sbadge(r.status)} <span class="g-kw">Rule:</span> ${e(r.name)} <small class="muted">line ${e(r.line)}</small></summary><ul class="g-scenarios">${r.scenarios.map(bddScenario).join('')}</ul></details></li>`).join('');
+    return `<li class="g-feature"><details${f.status === 'failed' || f.status === 'error' ? ' open' : ''}><summary>${sbadge(f.status)} <strong>${e(f.name || f.file)}</strong> <small class="muted">${e(f.file)} &middot; ${e(c.passed + c.passedHealed)} passed, ${e(c.failed + c.errors)} failed, ${e(c.skipped)} skipped</small></summary>
+<ul class="g-scenarios">${f.scenarios.map(bddScenario).join('')}${rules}</ul></details></li>`;
+  }).join('');
+  return `<section class="block" id="features" aria-labelledby="features-h"><div class="block-head"><h2 id="features-h">Features</h2><p>${e(t.features)} feature(s), ${e(t.rules)} rule(s), ${e(t.scenarios)} scenario(s), ${e(t.steps)} step(s): ${e(t.passed + t.passedHealed)} passed, ${e(t.failed + t.errors)} failed, ${e(t.skipped)} skipped</p></div>
+<div class="card"><ul class="g-features">${features}</ul></div></section>`;
+}
 
 export interface HtmlReportOptions extends ReportInsights, Omit<ReportModelInput, keyof ReportInsights> {
   title?: string;
@@ -286,7 +313,7 @@ function evidenceBlock(m: ReportModel): string {
 }
 
 /** Render the HTML report of a model. */
-export function renderReportModelHtml(m: ReportModel, o: { exports?: Array<{ label: string; href: string }> } = {}): string {
+export function renderReportModelHtml(m: ReportModel, o: { exports?: Array<{ label: string; href: string }>; featuresHtml?: string } = {}): string {
   const k = m.kpis;
   const failing = k.failed + k.errors;
   const logo = m.brand.logo ? `<img src="${e(m.brand.logo)}" alt="${e(m.brand.name)} logo">` : `<span class="brand-mark" aria-hidden="true">${e(m.brand.name.slice(0, 2).toUpperCase())}</span>`;
@@ -328,6 +355,7 @@ ${health}
 <section class="block" id="summary" aria-labelledby="summary-h"><div class="block-head"><h2 id="summary-h">Executive summary</h2><p>Run <code>${e(m.runId)}</code>${m.previous ? `, compared with the previous run <code>${e(m.previous.runId)}</code>` : ''}.</p></div>
 ${verdictCard(m)}${kpiTiles(m)}${summaryCharts(m)}</section>
 ${browsersBlock(m)}
+${o.featuresHtml ?? m.featuresHtml ?? ''}
 <section class="block" id="tests" aria-labelledby="tests-h"><div class="block-head"><h2 id="tests-h">Tests</h2><p>Filter, search and open any test. Shortcuts: <span class="kbd">/</span> search, <span class="kbd">&uarr;</span><span class="kbd">&darr;</span> move, <span class="kbd">Enter</span> open, <span class="kbd">Esc</span> close.</p></div>
 <div class="explorer" id="explorer">
 <div class="ex-side"><div class="ex-tools" role="search">
@@ -361,5 +389,7 @@ export function renderHtmlReport(run: RunResult, opts: HtmlReportOptions = {}): 
   if (run.journeys.length === 0) throw new EzTestError('renderHtmlReport: run has no journeys', 'INVALID_INPUT');
   const extraHtml = [...(opts.extraHtml ?? []), ...(opts.apiCoverage ?? []).map(apiCoverageHtml)];
   const model = buildReportModel(run, { ...opts, extraHtml });
+  const f = featuresBlock(run);
+  if (f) model.featuresHtml = f;
   return renderReportModelHtml(model, { exports: opts.exports });
 }

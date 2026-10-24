@@ -16,6 +16,7 @@ import { loadJourneyFile, parseEzScript } from '../../src/intent/index.js';
 import { createMobileDriver, mobileRunOptions, type MobileDriverOptions } from '../../src/mobile/index.js';
 import { listTraces, loadCodeJourneys, readTrace, renderSnapshot, runDirSource, runJourneys, SUSPECTED_REGRESSION, type RunOptions } from '../../src/runner/index.js';
 import { AgentSimulator } from './agent-sim.js';
+import { featureJourneys } from '../../src/bdd/index.js';
 import { FakeAdbServer } from './fake-adb.js';
 
 const FIX = resolve(__dirname, 'fixtures');
@@ -253,6 +254,31 @@ describe('code journeys (eztest/sdk) on Android', () => {
     expect(sim.byId('username')?.attrs.text).toBe('alice');
     expect(sim.requests.some((q) => q.path === '/find')).toBe(true);
     expect(readFileSync(join(out, r.runId, 'evidence-manifest.jsonl'), 'utf8')).toMatch(/code\/after-login\.png/);
+  });
+});
+
+describe('Gherkin features (eztest/bdd) on Android', () => {
+  it('runs a scenario on the device: EZTest phrasings and step definitions as native steps', async () => {
+    const file = join(FIX, 'shop-mobile.feature');
+    const journeys = featureJourneys(readFileSync(file, 'utf8'), file, { cwd: FIX, glue: [join(FIX, 'shop-mobile.steps.ts')] });
+    expect(journeys[0]).toMatchObject({ id: 'shop-mobile--sign-in-on-the-device', platform: 'android', app: 'com.shop.app' });
+    const out = tmp();
+    const r = await run(journeys, {}, {}, out);
+    const jr = r.journeys[0];
+    expect(jr.status, JSON.stringify(jr.steps, null, 1)).toBe('passed');
+    expect(jr.browser).toBe('android (Simulated Pixel)');
+    expect(jr.bdd).toMatchObject({ feature: { name: 'Mobile sign-in' }, scenario: { name: 'Sign in on the device' } });
+    const steps = jr.steps.filter((s) => s.gherkin?.kind === 'step');
+    expect(steps.map((s) => [s.intent, s.gherkin?.match])).toEqual([
+      ['When I type "alice" into the Username field', 'ez'],
+      ['And I sign in on the device', 'definition'],
+      ['Then the status reads "Ready"', 'definition'],
+      ['And the screen contains "ORD-"', 'ez'],
+    ]);
+    // The phrasing typed through the agent; the definition's ui.* calls ran on the device.
+    expect(sim.byId('username')?.attrs.text).toBe('alice');
+    expect(steps[1].children!.map((c) => c.intent)).toEqual(expect.arrayContaining([expect.stringMatching(/Log in/)]));
+    expect(readFileSync(join(out, r.runId, 'evidence-manifest.jsonl'), 'utf8')).toMatch(/code\/after-sign-in\.png/);
   });
 });
 

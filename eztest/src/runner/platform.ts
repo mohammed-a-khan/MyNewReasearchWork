@@ -24,6 +24,7 @@ import type { FingerprintStore } from '../heal/store.js';
 import type { EvidenceWriter } from './evidence.js';
 import type { RunOptions } from './types.js';
 import { isManualJourney, manualDriver } from './manual.js';
+import { bddRecord } from './bdd-run.js';
 
 /** A platform name: 'web' (built in), 'android', 'ios', or one a driver adds. */
 export type PlatformName = 'web' | 'android' | 'ios' | (string & {});
@@ -92,5 +93,6 @@ export function noDriverJourney(journey: Journey, platform: string, attempt: num
     steps: journey.steps.map((s) => ({ stepId: s.id, intent: s.intent, status: 'skipped', startedAt: new Date().toISOString(), durationMs: 0, conditions: [], evidence: [], error: { message: 'not run: no platform driver' } })),
     tags: journey.tags, requirements: journey.requirements, risk: journey.risk, attempt, browser: platform, ledger: {}, evidence: [],
     error: { message, name: 'NoPlatformDriver' },
+    ...(journey.bdd ? { bdd: bddRecord(journey) } : {}),
   };
 }

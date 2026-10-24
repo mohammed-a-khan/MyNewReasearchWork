@@ -7,6 +7,7 @@ import { lensRoutes } from './assurance-lenses.js';
 import { pdfjsRoutes } from './assurance-pdfjs.js';
 import { complianceRoutes } from './project-compliance.js';
 import { dataRoutes } from './project-data.js';
+import { storeRoutes } from './project-store.js';
 import { environmentRoutes } from './project-environments.js';
 import { identityRoutes } from './project-identity.js';
 import { mockRoutes } from './project-mocks.js';
@@ -27,6 +28,7 @@ export function assuranceRoutes(): StudioRoute[] {
     ...environmentRoutes,
     ...identityRoutes,
     ...dataRoutes,
+    ...storeRoutes,
     ...mockRoutes,
     ...contractRoutes,
     ...monitorRoutes,

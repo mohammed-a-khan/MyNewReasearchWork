@@ -48,6 +48,19 @@ export function withTimeout<T>(p: Promise<T>, ms: number, message: () => string)
   ]);
 }
 
+/**
+ * Wait for `p` at most `ms`: resolves to its value, or to `onTimeout`. The timer is cleared when
+ * `p` settles first, so a grace period never keeps the process alive after the wait is over.
+ */
+export async function settleWithin<T, U>(p: Promise<T>, ms: number, onTimeout: U): Promise<T | U> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<U>((r) => { timer = setTimeout(() => r(onTimeout), ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A point in time after which an operation gives up. */
 export class Deadline {
   readonly end: number;

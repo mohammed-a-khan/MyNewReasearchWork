@@ -16,6 +16,7 @@ import { toast } from '../../ui/toast.js';
 import { editorExtensions } from '../journeys/editor.js';
 import { ezOutline, structuredOutline } from '../journeys/ezlang.js';
 import { codeOutline } from '../journeys/sdk.js';
+import { featureOutline } from '../journeys/gherkin.js';
 import { openMenu } from './kit.js';
 
 export interface Bp {
@@ -97,13 +98,14 @@ const STRUCTURE = /^(?:end\b.*|done|next|endif|otherwise|else|on\s+(?:failure|er
 
 function stepItems(text: string, format: string) {
   if (format === 'ts') return codeOutline(text);
+  if (format === 'feature') return featureOutline(text).filter((x) => x.kind === 'step');
   return (format === 'ez' ? ezOutline(text) : structuredOutline(text)).filter((x) => x.kind === 'step' && !STRUCTURE.test(x.text));
 }
 
 /** The step line a line belongs to (an Expect line belongs to its step), or undefined outside steps. */
 export function stepLineFor(text: string, format: string, line: number): number | undefined {
   // Code: only the lines that are SDK calls themselves.
-  if (format === 'ts') return stepItems(text, format).some((s) => s.line === line) ? line : undefined;
+  if (format === 'ts' || format === 'feature') return stepItems(text, format).some((s) => s.line === line) ? line : undefined;
   const lines = text.split(/\r?\n/);
   if (STRUCTURE.test((lines[line - 1] ?? '').trim())) return undefined;
   const hit = [...stepItems(text, format)].reverse().find((s) => s.line <= line);

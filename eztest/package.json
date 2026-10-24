@@ -264,6 +264,18 @@
       "types": "./dist/sdk/index.d.ts",
       "import": "./dist/sdk/index.js"
     },
+    "./bdd": {
+      "types": "./dist/bdd/index.d.ts",
+      "import": "./dist/bdd/index.js"
+    },
+    "./store": {
+      "types": "./dist/store/index.d.ts",
+      "import": "./dist/store/index.js"
+    },
+    "./pipelines": {
+      "types": "./dist/pipelines/index.d.ts",
+      "import": "./dist/pipelines/index.js"
+    },
     "./elements": {
       "types": "./dist/elements/index.d.ts",
       "import": "./dist/elements/index.js"
@@ -288,12 +300,14 @@
   "keywords": [
     "android",
     "api-testing",
+    "bdd",
     "browser-automation",
     "cdp",
     "contract-testing",
     "dataverse",
     "dynamics-365",
     "e2e",
+    "gherkin",
     "ios",
     "kafka",
     "mobile-testing",

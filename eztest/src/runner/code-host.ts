@@ -396,6 +396,9 @@ function codeDirs(scope: FlowScope, flow: FlowEnv): string[] {
  */
 export async function runCodeJourney(journey: Journey, scope: FlowScope, flow: FlowEnv): Promise<{ steps: StepResult[]; status: 'passed' | 'passed-healed' | 'failed' | 'skipped'; error?: { message: string; name?: string } }> {
   if (!journey.code) throw new EzTestError(`Journey "${journey.id}" is not a code journey`, 'NOT_CODE');
+  // Gherkin scenarios (.feature files) bind their steps to step definitions or EZTest phrasings.
+  if (journey.bdd) return (await import('./bdd-run.js')).runBddScenario(journey, scope, flow);
+  if (journey.bddAll) return (await import('./bdd-all.js')).runBddAllHook(journey, scope, flow);
   const target = await resolveCodeTarget(`${journey.code.file}#journey:${journey.code.name}`, [], { cwd: flow.opts.baseDir ?? process.cwd() });
   const root = newNode();
   const host = new Host(scope, flow, journey.code.file, root);
@@ -445,4 +448,35 @@ export async function runCodeStep(step: Step, scope: FlowScope, flow: FlowEnv): 
     }
   }
   return result;
+}
+
+/** A code host for other runners built on it (the Gherkin scenario runner, src/runner/bdd-run.ts). */
+export interface CodeHostHandle {
+  readonly host: SdkHost;
+  /** Top-level results, in order. */
+  readonly results: StepResult[];
+  /** Run `fn` with the host bound (SDK calls inside record into `results`). */
+  within<T>(fn: () => Promise<T>): Promise<T>;
+  /** A nested, reported step; its result is pushed to the current group. Throws when it failed. */
+  group<T>(name: string, fn: () => Promise<T>, source?: StepSource): Promise<T>;
+  /** Run a step through the runner path; its result is pushed to the current group. Throws when it failed hard. */
+  exec(input: Omit<StepInput, 'id'> & { id?: string }, o?: ExecOptions): Promise<StepResult>;
+  /** A failed step for an error thrown by user code (with a screenshot). */
+  codeError(e: unknown): Promise<StepResult>;
+  /** True when the error's failure is already a recorded step result. */
+  isRecorded(e: unknown): boolean;
+}
+
+export function openCodeHost(scope: FlowScope, flow: FlowEnv, file: string): CodeHostHandle {
+  const root = newNode();
+  const host = new Host(scope, flow, file, root);
+  return {
+    host,
+    results: root.children,
+    within: (fn) => withHost(host, fn, root),
+    group: (name, fn, source) => host.group(name, fn, source),
+    exec: (input, o) => host.exec(input, o),
+    codeError: (e) => host.codeError(e),
+    isRecorded: (e) => !!e && typeof e === 'object' && recorded.has(e),
+  };
 }

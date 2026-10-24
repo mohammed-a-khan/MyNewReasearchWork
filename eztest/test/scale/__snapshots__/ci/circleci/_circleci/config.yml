@@ -1,0 +1,121 @@
+# EZTest on CircleCI (written by eztest init --ci circleci; docs/pipelines.md).
+#
+#   pull requests / branches -> pr workflow: smoke, --pipeline pr (@smoke, impacted journeys, 10 min budget)
+#   nightly                  -> regression workflow: parallelism 4 (EZTest balances the shards itself; no
+#                               "circleci tests split"), merged into one verified run. Scheduled with a scheduled
+#                               trigger at 02:00 UTC (CircleCI cron is UTC); or create a scheduled pipeline in the
+#                               project settings that sets the pipeline parameter nightly: true.
+#   main                     -> deploy workflow: deploy-sit -> eztest-sit -> approve -> deploy-uat -> eztest-uat
+#
+# JUnit results: store_test_results (the Tests tab); the HTML report: store_artifacts; eztest gate fails the job on NO_GO.
+# Context "eztest": EZTEST_MASTER_KEY, optional EZTEST_SERVER_URL / EZTEST_SERVER_TOKEN.
+version: 2.1
+
+parameters:
+  nightly:
+    type: boolean
+    default: false
+
+executors:
+  node:
+    docker:
+      - image: cimg/node:22.11-browsers
+
+commands:
+  setup:
+    steps:
+      - checkout
+      - run: npm ci
+      - run: npx eztest install-browsers chromium
+  results:
+    steps:
+      - run:
+          name: JUnit results
+          when: always
+          command: mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
+      - store_test_results: { path: test-results }
+      - store_artifacts: { path: eztest-results }
+
+jobs:
+  smoke:
+    executor: node
+    steps:
+      - setup
+      - run:
+          name: EZTest smoke
+          # Fails on failed journeys and on a NO_GO readiness decision (pipelines.pr.gate: readiness).
+          command: EZTEST_BASE_REF=origin/main EZTEST_APP_VERSION=$CIRCLE_SHA1 npx eztest run --reporter html,json,junit --pipeline pr
+      - results
+  shard:
+    executor: node
+    parallelism: 4
+    steps:
+      - setup
+      # CIRCLE_NODE_INDEX / CIRCLE_NODE_TOTAL select this container's shard (pipelines.nightly.shards).
+      - run: EZTEST_SCHEDULED=true npx eztest run --pipeline nightly --reporter json,junit || true
+      - run: mkdir -p shards/$CIRCLE_NODE_INDEX && cp -r eztest-results/run-* shards/$CIRCLE_NODE_INDEX/
+      - persist_to_workspace: { root: ., paths: [shards] }
+  merge:
+    executor: node
+    steps:
+      - checkout
+      - run: npm ci
+      - attach_workspace: { at: . }
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest evidence verify eztest-results/merged
+      - run:
+          name: JUnit results
+          when: always
+          command: mkdir -p test-results && cp eztest-results/merged/junit.xml test-results/
+      - store_test_results: { path: test-results }
+      - store_artifacts: { path: eztest-results/merged }
+      - run: npx eztest gate eztest-results/merged --on-no-go fail
+  deploy:
+    parameters:
+      environment: { type: string }
+    executor: node
+    steps:
+      - run: echo "deploy the app to << parameters.environment >> here"
+  eztest-after-deploy:
+    parameters:
+      environment: { type: string }
+    executor: node
+    steps:
+      - setup
+      - run:
+          name: EZTest << parameters.environment >>
+          command: EZTEST_DEPLOY_ENVIRONMENT=<< parameters.environment >> EZTEST_APP_VERSION=$CIRCLE_SHA1 npx eztest run --reporter html,json,junit --pipeline deploy-<< parameters.environment >>
+      - results
+
+workflows:
+  pr:
+    when:
+      and:
+        - not: << pipeline.parameters.nightly >>
+        - not: { equal: [ main, << pipeline.git.branch >> ] }
+    jobs:
+      - smoke: { context: eztest }
+  regression:
+    when: << pipeline.parameters.nightly >>
+    jobs:
+      - shard: { context: eztest }
+      - merge: { context: eztest, requires: [shard] }
+  nightly:
+    triggers:
+      - schedule:
+          cron: '0 2 * * *'
+          filters: { branches: { only: [main] } }
+    jobs:
+      - shard: { context: eztest }
+      - merge: { context: eztest, requires: [shard] }
+  deploy:
+    when:
+      and:
+        - not: << pipeline.parameters.nightly >>
+        - equal: [ main, << pipeline.git.branch >> ]
+    jobs:
+      - deploy: { name: deploy-sit, environment: sit }
+      - eztest-after-deploy: { name: eztest-sit, environment: sit, context: eztest, requires: [deploy-sit] }
+      - approve-uat: { type: approval, requires: [eztest-sit] }
+      - deploy: { name: deploy-uat, environment: uat, requires: [approve-uat] }
+      - eztest-after-deploy: { name: eztest-uat, environment: uat, context: eztest, requires: [deploy-uat] }

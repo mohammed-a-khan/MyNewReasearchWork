@@ -24,6 +24,7 @@ import { debugLog } from '../debug.js';
 import { PipeTransport, WebSocketTransport, type Transport } from '../transport/transport.js';
 import { redactUrl } from '../transport/websocket.js';
 import { findChromium, type FoundBrowser } from './find.js';
+import { settleWithin } from '../util.js';
 
 export interface LaunchProcessOptions {
   executablePath?: string;
@@ -232,9 +233,11 @@ export async function launchChromiumProcess(opts: LaunchProcessOptions = {}): Pr
     if (!killed) {
       killed = true;
       // Give the browser a moment to exit by itself (Browser.close was sent), then kill the group.
-      const done = await Promise.race([exited.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 3000))]);
+      // The grace timers are cleared as soon as the browser exits: a pending timer would keep the
+      // host process (a CLI run, a test worker) alive for seconds after the browser is gone.
+      const done = await settleWithin(exited.then(() => true), 3000, false);
       killTree(child.pid);
-      if (!done) await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
+      if (!done) await settleWithin(exited, 2000, undefined);
       live.delete(record);
       if (temp) await removeDir(userDataDir);
     }

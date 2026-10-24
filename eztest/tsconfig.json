@@ -5,6 +5,7 @@
     "rootDir": ".",
     "paths": {
       "eztest/sdk": ["./src/sdk/index.ts"],
+      "eztest/bdd": ["./src/bdd/index.ts"],
       "eztest/browser": ["./src/browser/index.ts"]
     }
   },

@@ -25,6 +25,7 @@ import { NativeContext } from './native.js';
 import type { DeviceSession } from './session.js';
 import { NativeTraceRecorder } from './trace.js';
 import type { UsbmuxEndpoint } from './usbmux.js';
+import { bddRecord } from '../runner/bdd-run.js';
 
 export interface AndroidSettings {
   /** adb server (default 127.0.0.1:5037). */
@@ -193,6 +194,7 @@ export class MobileDriver implements PlatformDriver {
     const result: JourneyResult = {
       journeyId: journey.id, name: journey.name, status: 'error', startedAt: nowIso(), durationMs: 0, steps: [], tags: journey.tags,
       requirements: journey.requirements, risk: journey.risk, attempt, browser: platform, ledger: {}, evidence: [],
+      ...(journey.bdd ? { bdd: bddRecord(journey, env.opts.baseDir) } : {}),
     };
     const prefix = `journeys/${safeName(journey.id)}/attempt-${attempt}`;
     const meta = (description: string) => ({ journeyId: journey.id, description });

@@ -22,6 +22,7 @@ import { CLOCK_RULES } from './rules-clock.js';
 import { SPECIALIST_RULES } from './rules-specialist.js';
 import { MANUAL_RULES } from './rules-manual.js';
 import { KEYBOARD_RULES } from './rules-keyboard.js';
+import { STORE_RULES } from '../store/rules.js';
 
 /** What a rule builds: a step without id/intent (the parser adds those). */
 export type StepBody = Omit<StepInput, 'id' | 'intent'>;
@@ -101,6 +102,8 @@ function splitRequest(s: string): [string, string] | undefined {
 const ASSERT_PREFIX = String.raw`^(?:verify|expect|assert|ensure|confirm|make\s+sure|validate)\s+(?!softly\b)(?:that\s+)?(.+)$`;
 
 export const INTENT_RULES: IntentRule[] = [
+  // ------------------------------------------------------------ shared test data: store and data pools (before "Save/Store ..." and assertions)
+  ...STORE_RULES,
   // ------------------------------------------------------------ accessibility checks ("Check accessibility", "Expect the page to be accessible")
   ...A11Y_RULES,
   // ------------------------------------------------------------ multi-actor journeys ("As manager:", "Switch to user", "In parallel:")

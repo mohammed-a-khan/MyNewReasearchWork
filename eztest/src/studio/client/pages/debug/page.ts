@@ -24,6 +24,7 @@ import type { Format } from '../journeys/assist.js';
 import { createEditorState, createEditorView, goToLine, replaceDoc } from '../journeys/editor.js';
 import { anyDirty } from '../journeys/page.js';
 import { codeJourneyLines, codeOutline } from '../journeys/sdk.js';
+import { featureOutline } from '../journeys/gherkin.js';
 import { breakpointMenu, breakpoints, bpSync, bpsFor, installBreakpointGutter, stepLineFor, toggleBreakpoint, type Bp } from './breakpoints.js';
 import { kitIcon, toolButton } from './kit.js';
 import { createLiveView, type LiveView } from './live.js';
@@ -64,8 +65,8 @@ let pauseOnFailure = true;
 let validation: { ok: boolean; errors: Issue[] } | undefined;
 
 const onDebugPage = () => currentRoute.get().page === 'debug';
-/** The open file is a code journey (eztest/sdk): breakpoints by line, no edit-and-continue. */
-const isCode = () => file?.format === 'ts';
+/** The open file is a code journey (eztest/sdk) or a Gherkin feature: breakpoints by line, no edit-and-continue. */
+const isCode = () => file?.format === 'ts' || file?.format === 'feature';
 /** Base step id of a code step ("L12-3" -> "L12"). */
 const codeBase = (id: string | undefined) => id?.replace(/-\d+$/, '');
 const onJourneysPage = () => currentRoute.get().page === 'journeys';
@@ -204,7 +205,7 @@ function buildUi(ctx: PageContext) {
   });
   journeys.subscribe((list) => {
     clear(journeySel).appendChild(h('option', { value: '', text: list.length ? 'Choose a journey…' : 'No journeys' }));
-    for (const j of list.filter((x) => x.format === 'ez' || x.format === 'yaml' || x.format === 'json' || x.format === 'ts')) journeySel.appendChild(h('option', { value: j.path, text: `${j.name ?? j.path}${j.format === 'ts' ? ' (code)' : ''}`, disabled: !!j.error }));
+    for (const j of list.filter((x) => x.format === 'ez' || x.format === 'yaml' || x.format === 'json' || x.format === 'ts' || x.format === 'feature')) journeySel.appendChild(h('option', { value: j.path, text: `${j.name ?? j.path}${j.format === 'ts' ? ' (code)' : j.format === 'feature' ? ' (feature)' : ''}`, disabled: !!j.error }));
     journeySel.value = file?.path ?? '';
   });
 
@@ -274,6 +275,9 @@ async function loadModel(): Promise<void> {
     if (file.format === 'ts') {
       // Code journeys: every SDK call line is a step; ids are the runner's line ids (L12).
       entries = codeOutline(textOf()).map((x, pos) => ({ pos, id: `L${x.line}`, text: x.text, expects: [], line: x.line, endLine: x.line, depth: 0 }));
+    } else if (file.format === 'feature') {
+      // Gherkin features: every step line is a step; the runner's step ids are L<line> too.
+      entries = featureOutline(textOf()).filter((x) => x.kind === 'step').map((x, pos) => ({ pos, id: `L${x.line}`, text: x.text, expects: [], line: x.line, endLine: x.line, depth: 0 }));
     } else if (file.format === 'ez') {
       const o = await api.post<{ entries: Card[] }>('/api/debug/outline', { content: textOf() });
       if (o.entries.length || !entries.length) entries = o.entries;
@@ -522,6 +526,14 @@ function paintCurrent(): void {
 
 function journeyIdForPath(path: string): string | undefined {
   const j = journeys.get().find((x) => x.path === path);
+  // A feature holds one journey per scenario and Examples row: debug the one at the cursor (else the first).
+  if (j?.format === 'feature' && j.code?.length) {
+    const at = file?.path === path && view ? cursorLine() : 0;
+    const row = j.code.find((c) => c.row === at);
+    if (row) return row.id;
+    const before = j.code.filter((c) => c.line <= at);
+    return (before.length ? j.code.find((c) => c.line === Math.max(...before.map((x) => x.line))) : j.code[0])?.id ?? j.id;
+  }
   // A code file can declare several journeys: debug the one around the cursor (else the first).
   if (j?.code?.length && file?.path === path && view) {
     const at = cursorLine();
@@ -710,7 +722,7 @@ function toggleBreakpointAtCursor(): void {
   if (!v) return;
   const path = onDebugPage() ? file?.path : currentRoute.get().rest.replace(/:\d+$/, '');
   if (!path) return;
-  const format = /\.ya?ml$/i.test(path) ? 'yaml' : /\.json$/i.test(path) ? 'json' : /\.(?:m?ts|m?js)$/i.test(path) ? 'ts' : 'ez';
+  const format = /\.ya?ml$/i.test(path) ? 'yaml' : /\.json$/i.test(path) ? 'json' : /\.(?:m?ts|m?js)$/i.test(path) ? 'ts' : /\.feature$/i.test(path) ? 'feature' : 'ez';
   const line = stepLineFor(v.state.doc.toString(), format, v.state.doc.lineAt(v.state.selection.main.head).number);
   if (line === undefined) {
     toast('Put the cursor on a step to set a breakpoint', { timeout: 1800 });

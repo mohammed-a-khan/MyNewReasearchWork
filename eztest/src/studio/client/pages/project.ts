@@ -5,6 +5,7 @@
  */
 import { complianceSection } from './project-compliance.js';
 import { dataSection } from './project-data.js';
+import { storeSection } from './project-store.js';
 import { environmentsSection } from './project-environments.js';
 import { identitySection } from './project-identity.js';
 import { mocksSection } from './project-mocks.js';
@@ -21,6 +22,6 @@ export function registerProjectPage(): void {
     icon: 'briefcase',
     order: 800,
     group: 'secondary',
-    sections: [environmentsSection, identitySection, dataSection, mocksSection, contractsSection, messagesSection, elementsSection, monitorsSection, perfSection, complianceSection],
+    sections: [environmentsSection, identitySection, dataSection, storeSection, mocksSection, contractsSection, messagesSection, elementsSection, monitorsSection, perfSection, complianceSection],
   });
 }

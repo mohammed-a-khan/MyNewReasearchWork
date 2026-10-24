@@ -77,15 +77,29 @@ export function hookJourneys(opts: RunOptions): Journey[] {
 }
 
 /** Run beforeAll/afterAll hook journeys, each in its own browser context; results are tagged "hook". */
-export async function runAllHook(kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv): Promise<JourneyResult[]> {
+export async function runAllHook(kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv, seed?: Record<string, unknown>): Promise<JourneyResult[]> {
   const out: JourneyResult[] = [];
   for (const h of env.opts.hooks?.[kind] ?? []) {
     if (env.opts.signal?.aborted) break; // cancelled runs skip hook journeys
     env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
-    const r = await runJourneyAttempt(h, 1, env);
+    const r = await runJourneyAttempt(h, 1, env, seed);
     r.tags = [...new Set([...r.tags, 'hook', kind])];
     out.push(r);
     env.opts.events?.emit({ type: 'journey:end', journeyId: h.id, status: r.status });
+  }
+  return out;
+}
+
+/**
+ * Run-wide values: the `Returns:` of the beforeAll (setup) journeys that passed, handed to every journey of
+ * the run and to the afterAll (teardown) journeys as if each had captured them (docs/shared-data.md).
+ */
+export function runWideValues(hooks: Journey[], results: JourneyResult[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const h of hooks) {
+    const r = results.find((x) => x.journeyId === h.id);
+    if (!r || (r.status !== 'passed' && r.status !== 'passed-healed')) continue;
+    for (const k of h.returns ?? []) if (r.ledger[k] !== undefined) out[k] = r.ledger[k];
   }
   return out;
 }

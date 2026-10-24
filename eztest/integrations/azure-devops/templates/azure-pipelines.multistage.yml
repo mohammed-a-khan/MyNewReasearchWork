@@ -1,29 +1,60 @@
-# A multi-stage pipeline: pull request validation, then deploy and test per environment.
-# Each environment publishes to its own Azure Test Plans plan and suite (the same ids
-# can live in config/<env>.yaml as ado.testPlanId / ado.testSuiteId instead).
-# NO_GO fails the environment's test stage, so promotion stops there.
+# A multi-stage pipeline: pull request validation, scheduled regressions, then deploy and test
+# per environment. Each environment publishes to its own Azure Test Plans plan and suite (the
+# same ids can live in config/<env>.yaml as ado.testPlanId / ado.testSuiteId, or in the
+# `pipelines:` entry as testPlan / testSuite). NO_GO fails the environment's test stage, so
+# promotion stops there.
+#
+# Schedules: cron is UTC ('0 2 * * 1-5' = 02:00 UTC on weekdays). `always: true` runs even when
+# nothing changed (a regression should still run against a changed environment).
+#
+# Release gates: the test stages run as deployment jobs in the sit / uat environments, so the
+# environment's approvals and checks apply. To block UAT until SIT passed for this build, either
+# keep `requires: [deploy-sit]` in the deploy-uat pipelines: entry (the run stops), or add an
+# "Invoke REST API" check on the uat environment against the EZTest results server:
+#   GET <server>/api/projects/<project>/deployments?environment=sit&version=$(Build.BuildNumber)
+#   success criteria: eq(jsonpath('$[0].readiness.decision')[0], 'GO')
+# (docs/azure-devops.md#release-gates).
 trigger: [main]
 pr: [main]
+
+schedules:
+  - cron: '0 2 * * 1-5'
+    displayName: Nightly regression (02:00 UTC, weekdays)
+    branches: { include: [main] }
+    always: true
+  - cron: '0 4 * * 6'
+    displayName: Weekly full regression, every browser (04:00 UTC, Saturday)
+    branches: { include: [main] }
+    always: true
 
 variables:
   - name: isPR
     value: ${{ eq(variables['Build.Reason'], 'PullRequest') }}
+  - name: EZTEST_APP_VERSION
+    value: $(Build.BuildNumber)
 
 stages:
-  # Pull requests: run the smoke journeys, post "EZTest: GO / NO_GO" and the summary comment.
+  # Pull requests: the pr pipeline (@smoke, impacted journeys), "EZTest: GO / NO_GO" on the PR and the summary comment.
   - ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
       - template: eztest-stage.yml
-        parameters: { environment: dev, tags: smoke, shards: 2, onRisks: pass }
+        parameters: { environment: dev, pipeline: pr, shards: 2, onRisks: pass }
 
-  - ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+  # Scheduled runs: the nightly pipeline in parallel shards (the weekly schedule runs the same stage;
+  # give it its own pipelines: entry, e.g. weekly with browsers: [chromium, firefox], and pass that name).
+  - ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
+      - template: eztest-stage.yml
+        parameters: { environment: sit, pipeline: nightly, shards: 4, onRisks: warn }
+
+  - ${{ if and(ne(variables['Build.Reason'], 'PullRequest'), ne(variables['Build.Reason'], 'Schedule')) }}:
       - stage: deploy_sit
         jobs:
           - deployment: deploy
             environment: sit
             strategy: { runOnce: { deploy: { steps: [ { script: echo "deploy the app to SIT here" } ] } } }
 
+      # Run after deployment: a deployment job in the sit environment (deploy-sit: tags, test plan, deployment record).
       - template: eztest-stage.yml
-        parameters: { environment: sit, dependsOn: [deploy_sit], shards: 3, testPlanId: '417', testSuiteId: '418', configuration: 'Windows + Chrome', createBugs: true }
+        parameters: { environment: sit, pipeline: deploy-sit, deploymentEnvironment: sit, dependsOn: [deploy_sit], testPlanId: '417', testSuiteId: '418', configuration: 'Windows + Chrome', createBugs: true }
 
       - stage: deploy_uat
         dependsOn: [eztest_sit]
@@ -33,4 +64,4 @@ stages:
             strategy: { runOnce: { deploy: { steps: [ { script: echo "deploy the app to UAT here" } ] } } }
 
       - template: eztest-stage.yml
-        parameters: { environment: uat, dependsOn: [deploy_uat], testPlanId: '517', testSuiteId: '518', onRisks: fail }
+        parameters: { environment: uat, pipeline: deploy-uat, deploymentEnvironment: uat, dependsOn: [deploy_uat], testPlanId: '517', testSuiteId: '518', onRisks: fail }

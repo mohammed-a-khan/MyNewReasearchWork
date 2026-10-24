@@ -39,6 +39,7 @@ import type { Emulation } from '../core/index.js';
 /** Network log of each finished attempt (for the flake classifier); not serialised. */
 export const attemptNetwork = new WeakMap<JourneyResult, NetLogEntry[]>();
 import { runCodeJourney } from './code-host.js';
+import { bddRecord } from './bdd-run.js';
 import { applyJourneyClock, clockVars, usesClock } from './clock.js';
 import { manualSummary } from './manual.js';
 
@@ -121,6 +122,7 @@ export function cancelledJourney(journey: Journey, browserName: string): Journey
   return {
     journeyId: journey.id, name: journey.name, startedAt: nowIso(), durationMs: 0, steps: journey.steps.map((s) => skippedStep(s, CANCELLED)),
     tags: journey.tags, requirements: journey.requirements, risk: journey.risk, attempt: 1, browser: browserName, ledger: {}, evidence: [], ...cancelledFields(),
+    ...(journey.bdd ? { bdd: bddRecord(journey) } : {}),
   };
 }
 
@@ -130,6 +132,7 @@ export function noRowsJourney(journey: Journey, reason: string, browserName: str
     journeyId: journey.id, name: journey.name, startedAt: nowIso(), durationMs: 0, steps: journey.steps.map((s) => skippedStep(s, reason)),
     tags: journey.tags, requirements: journey.requirements, risk: journey.risk, attempt: 1, browser: browserName, ledger: {}, evidence: [],
     status: 'skipped', error: { message: reason, name: 'NoExamplesRows' },
+    ...(journey.bdd ? { bdd: bddRecord(journey) } : {}),
   };
 }
 
@@ -145,6 +148,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, env: 
   const result: JourneyResult = {
     journeyId: jid, name: journey.name, status: 'error', startedAt, durationMs: 0, steps: [], tags: journey.tags,
     requirements: journey.requirements, risk: journey.risk, attempt, browser: env.browserName, ledger: {}, evidence: [],
+    ...(journey.bdd ? { bdd: bddRecord(journey, opts.baseDir) } : {}),
   };
   const ledger = new Ledger();
   for (const [k, v] of Object.entries(seed ?? {})) ledger.set(k, v);
@@ -272,7 +276,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, env: 
     const s = slot.session ?? session;
     return {
       runId: env.runId, runDir: env.runDir, journey: j, step, get page() { return s.page; }, context: slot.context ?? context, ledger: l, attempt, baseUrl, logger: env.logger, evidence,
-      vars: v, interpolate: (str: string) => interpolate(str, v()), session: s, ...(labelled() ? { actor: slot.name } : {}),
+      vars: v, interpolate: (str: string) => interpolate(str, v()), session: s, ...(labelled() ? { actor: slot.name } : {}), rootJourneyId: journey.id,
     };
   };
   const jx = env.extensions?.startJourney({ journey, attempt, page, context, ledger, vars, ctxFor: (s) => ctxFor(s), runtime: env, browserName: env.browserName });

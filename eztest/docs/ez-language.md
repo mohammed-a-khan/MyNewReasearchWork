@@ -46,6 +46,7 @@ Expect the URL to contain "/checkout"          # post-condition of the Click
 | `App: electron "apps/orders/main.js"` | Desktop app journey (no `Platform:` header, or `Platform: web`): launch the Electron app and run the steps in its windows (see [desktop-and-legacy.md](desktop-and-legacy.md)) |
 | `Loaders: ".busy", "#mask"` | Loader/spinner selectors waited out before every action and check (added to config `waits.loaders`) |
 | `Requires: db demo "SELECT id FROM customers WHERE region = 'EU'" has rows; variable KEY` | Data-state preconditions checked before the journey; a miss is a data problem (see [reliability.md](reliability.md#preconditions-requires)) |
+| `Setup: Create the test tenant` · `Teardown: Delete the test tenant` | Instead of `Journey:`: runs once before / after every other journey of the run; a setup's `Returns:` become run-wide values (see [shared-data.md](shared-data.md#run-wide-values-setup-and-teardown-journeys)) |
 | `Depends on: create-order with orderNumber` | Prerequisite journeys run first; the named ledger values are handed over; dependents of a failure are skipped with the reason |
 | `Locks: account-<account>, ledger` | Shared entities this journey touches: journeys holding a common key never run at the same time, across workers, processes and machines (see [scale.md](scale.md#resource-locks)) |
 | `Examples:` + a table | Data-driven journey: one run per row (see below) |
@@ -61,7 +62,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (359 phrasings)
+## Actions (366 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -348,6 +349,13 @@ A step of its own, not a post-condition, even when it starts with `Expect`. It r
 | Set | `Set variable total to ${price} * ${qty}` · `Set var greeting = upper(name)` · `Set ${due} to addDays(today(), 3)` · `Let label = "ORD-" + id` · `Calculate net as round(gross / 1.19, 2)` · `Increment count` · `Decrease stock by 2` |
 
 Expressions are parsed by a small, safe evaluator, never by JavaScript. They support numbers, quoted text (with `${var}` inside), variables (`order.lines.0.sku`, `items[1]`), lists `[1, 2]`, `+ - * / %`, comparisons `== != < <= > >=`, `and or not`, `contains`, `in`, `matches`, `startsWith`, `endsWith`, and `cond ? a : b`. `+` adds when both sides are numbers (or numeric text) and joins text otherwise. Functions: `today now addDays addHours addMinutes addMonths daysBetween format formatNumber upper lower trim len substring replace split join concat contains startsWith endsWith padStart number int string round floor ceil abs min max sum random randomString uuid first last at keys pluck json parseJson match isEmpty coalesce range`.
+
+### Shared data (see [shared-data.md](shared-data.md))
+
+| Purpose | Examples |
+|---|---|
+| Shared store | `Save ${orderId} to the shared store as "pending-order"` · `Save ${orderId} to the shared store as "pending-order" for 2 days in namespace "sit"` · `Save ${token} to the shared store as "api-token" as a secret for the pipeline` · `Load "pending-order" from the shared store as orderId` · `Load "pending-order" from the shared store as orderId or use "ORD-0"` · `Delete "pending-order" from the shared store` |
+| Data pools | `Add ${policy} to pool "approvable-policies"` · `Fill pool "approvable-policies" from "data/policies.csv" column "policyNo"` · `Take one item from pool "approvable-policies" as policy` · `Take one item from pool "accounts" as account and keep it` · `Expect pool "approvable-policies" has at least 3 items` |
 
 ### Flow control and reuse
 

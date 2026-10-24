@@ -6,7 +6,7 @@ import { EzTestError, NotSupportedError } from '../core/index.js';
 import { readEvidenceManifest } from '../insights/index.js';
 import { normalizeNetworkLog, type NetworkEntry } from '../perf/network.js';
 import { apiCoverageHtml } from '../contracts/coverage.js';
-import { renderReportModelHtml } from './html.js';
+import { featuresBlock, renderReportModelHtml } from './html.js';
 import { buildJsonReport, type JsonReport } from './json.js';
 import { renderJUnit } from './junit.js';
 import { renderTestsCsv } from './csv.js';
@@ -176,6 +176,8 @@ export async function writeReports(runDir: string, run: RunResult, opts: WriteRe
   const artifacts = opts.artifacts ?? (await collectStepArtifacts(runDir, run, evidence));
   const extraHtml = [...(opts.extraHtml ?? []), ...(opts.apiCoverage ?? []).map(apiCoverageHtml)];
   const model = buildReportModel(run, { ...opts, evidence, context, integrations, artifacts, extraHtml });
+  const features = featuresBlock(run);
+  if (features) model.featuresHtml = features;
   const formats = expandFormats([...new Set(opts.formats)]);
   const out: Partial<Record<ReportFormat, string>> = {};
   const insights: ReportInsights = { triage: opts.triage, readiness: opts.readiness, flaky: opts.flaky, evidence, apiCoverage: opts.apiCoverage };

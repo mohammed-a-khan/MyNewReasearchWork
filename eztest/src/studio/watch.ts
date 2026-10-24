@@ -51,7 +51,7 @@ async function scan(cwd: string, dir: string, ignore: string[]): Promise<Snapsho
       const rel = relPosix(cwd, p);
       if (isSensitive(rel)) continue;
       if (d.isDirectory()) await walk(p);
-      else if (d.isFile() && JOURNEY_EXTENSIONS.has(extname(d.name).toLowerCase())) {
+      else if (d.isFile() && (JOURNEY_EXTENSIONS.has(extname(d.name).toLowerCase()) || extname(d.name).toLowerCase() === '.feature')) {
         try {
           const s = await stat(p);
           out.set(rel, `${s.size}:${s.mtimeMs}`);

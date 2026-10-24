@@ -1,4 +1,4 @@
-import type { EvidenceRef, RunResult } from '../core/index.js';
+import { flattenStepResults, type EvidenceRef, type RunResult } from '../core/index.js';
 import type { TriageReport, ReadinessResult, FlakyScore } from '../insights/index.js';
 
 export interface ReportInsights {
@@ -32,7 +32,8 @@ const loc = (l: { strategy: string; value: string; name?: string }) => `${l.stra
 export function healProposals(run: RunResult): HealProposal[] {
   const out: HealProposal[] = [];
   for (const j of run.journeys) {
-    for (const s of j.steps) {
+    // Heals may sit inside groups: code journey step() blocks, Gherkin steps, if/loop blocks.
+    for (const { result: s } of flattenStepResults(j.steps)) {
       if (!s.heal) continue;
       out.push({
         journeyId: j.journeyId,

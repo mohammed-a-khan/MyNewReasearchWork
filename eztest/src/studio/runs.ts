@@ -13,7 +13,7 @@ import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptio
 import { journeyKind, type ManualVerdictProvider } from '../runner/manual.js';
 import { expandExamples } from '../runner/journey-hooks.js';
 import type { Journey } from '../core/index.js';
-import { loadJourneys, filterJourneys } from '../cli/journeys.js';
+import { loadJourneys, filterJourneys, bddOptionsFrom, defaultJourneyPaths } from '../cli/journeys.js';
 import { expandBrowserMatrix } from '../runner/browsers.js';
 import { HistoryStore, scoreHistory, loadRunArtifacts, triageRun, readEvidenceManifest } from '../insights/index.js';
 import type { ReportFormat } from '../report/index.js';
@@ -204,7 +204,7 @@ export class RunManager {
 
     const loaded = await loadStudioConfig(this.ctx, overrides);
     const cfg = loaded.config;
-    const { journeys: all, errors } = await loadJourneys([cfg.journeysDir], this.ctx.cwd);
+    const { journeys: all, errors } = await loadJourneys(defaultJourneyPaths(cfg, this.ctx.cwd), this.ctx.cwd, { bdd: bddOptionsFrom(cfg) });
     if (errors.length) throw new HttpError(422, `Some journeys do not parse: ${errors.map((e) => `${e.file}: ${e.message}`).join('; ')}`);
     const tags = Array.isArray(req.tags) ? req.tags.map(String) : undefined;
     const ids = Array.isArray(req.journeys) ? req.journeys.map(String) : undefined;

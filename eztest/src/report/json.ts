@@ -6,6 +6,7 @@
 import type { RunResult } from '../core/index.js';
 import { EzTestError } from '../core/index.js';
 import { healProposals, type HealProposal, type ReportInsights } from './model.js';
+import { bddHierarchy, type BddReport } from './bdd.js';
 import type { ReportModel } from './data.js';
 
 export const REPORT_JSON_VERSION = 2 as const;
@@ -18,6 +19,8 @@ export interface JsonReport {
   $schema?: string;
   generatedAt: string;
   run: RunResult;
+  /** Gherkin scenarios grouped by feature and rule (present when the run has `.feature` scenarios). */
+  bdd?: BddReport;
   insights: {
     triage?: ReportInsights['triage'];
     readiness?: ReportInsights['readiness'];
@@ -31,12 +34,14 @@ export interface JsonReport {
 
 export function buildJsonReport(run: RunResult, insights: ReportInsights = {}, model?: ReportModel): JsonReport {
   if (run.journeys.length === 0) throw new EzTestError('buildJsonReport: run has no journeys', 'INVALID_INPUT');
+  const bdd = bddHierarchy(run);
   return {
     format: 'eztest-report',
     version: REPORT_JSON_VERSION,
     $schema: 'eztest:report/2',
     generatedAt: new Date().toISOString(),
     run,
+    ...(bdd ? { bdd } : {}),
     insights: {
       triage: insights.triage,
       readiness: insights.readiness,

@@ -13,6 +13,8 @@ import type { RunHistoryEntry } from '../insights/index.js';
 import type { CanReleaseResult, PublishedContract, ReleaseRecord, VerificationRecord } from '../contracts/release.js';
 import type { DurationTable } from '../scale/durations.js';
 import type { LockBackend, LockHandle } from '../scale/locks.js';
+import type { NewPoolItem, PoolItem, PoolSummary, StoredEntry } from '../store/types.js';
+import type { DeploymentRecord } from '../pipelines/types.js';
 
 export interface ResultsClientOptions {
   url: string;
@@ -167,6 +169,78 @@ export class ResultsClient {
 
   canRelease(q: { app: string; version: string; environment: string }): Promise<CanReleaseResult> {
     return this.req('GET', this.p(`/can-release?${new URLSearchParams(q)}`));
+  }
+
+  // ---------------------------------------------------------------- shared test data (docs/shared-data.md)
+
+  private sp(kind: 'store' | 'pools', ns: string, name?: string): string {
+    return this.p(`/${kind}/${encodeURIComponent(ns)}${name !== undefined ? `/${encodeURIComponent(name)}` : ''}`);
+  }
+
+  storeList(namespace?: string): Promise<StoredEntry[]> {
+    return this.req('GET', this.p(`/store${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`));
+  }
+
+  async storeGet(namespace: string, key: string): Promise<StoredEntry | undefined> {
+    try {
+      return await this.req<StoredEntry>('GET', this.sp('store', namespace, key));
+    } catch (e) {
+      if (e instanceof ServerRequestError && e.status === 404) return undefined;
+      throw e;
+    }
+  }
+
+  storePut(e: StoredEntry): Promise<StoredEntry> {
+    const { namespace, key, ...body } = e;
+    return this.req('PUT', this.sp('store', namespace, key), body);
+  }
+
+  async storeDelete(namespace: string, key: string): Promise<boolean> {
+    return (await this.req<{ deleted: boolean }>('DELETE', this.sp('store', namespace, key))).deleted;
+  }
+
+  async storePurge(namespace?: string): Promise<number> {
+    return (await this.req<{ purged: number }>('POST', this.p('/store-purge'), namespace ? { namespace } : {})).purged;
+  }
+
+  pools(namespace?: string): Promise<PoolSummary[]> {
+    return this.req('GET', this.p(`/pools${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`));
+  }
+
+  poolItems(namespace: string, pool: string): Promise<PoolItem[]> {
+    return this.req('GET', this.sp('pools', namespace, pool));
+  }
+
+  poolAdd(namespace: string, pool: string, items: NewPoolItem[], by: string): Promise<{ added: number; skipped: number }> {
+    return this.req('POST', `${this.sp('pools', namespace, pool)}/items`, { items, by });
+  }
+
+  async poolClaim(namespace: string, pool: string, owner: string, leaseMs: number): Promise<PoolItem | undefined> {
+    const r = await this.req<{ claimed: boolean; item?: PoolItem }>('POST', `${this.sp('pools', namespace, pool)}/claim`, { owner, leaseMs });
+    return r.claimed ? r.item : undefined;
+  }
+
+  async poolRelease(namespace: string, pool: string, id: string, owner: string): Promise<boolean> {
+    return (await this.req<{ released: boolean }>('POST', `${this.sp('pools', namespace, pool)}/release`, { id, owner })).released;
+  }
+
+  async poolConsume(namespace: string, pool: string, id: string, owner: string): Promise<boolean> {
+    return (await this.req<{ consumed: boolean }>('POST', `${this.sp('pools', namespace, pool)}/consume`, { id, owner })).consumed;
+  }
+
+  async poolRemove(namespace: string, pool: string, id: string): Promise<boolean> {
+    return (await this.req<{ removed: boolean }>('DELETE', `${this.sp('pools', namespace, pool)}/items/${encodeURIComponent(id)}`)).removed;
+  }
+
+  // ---------------------------------------------------------------- deployment test records (docs/pipelines.md)
+
+  recordDeployment(d: Omit<DeploymentRecord, 'id' | 'recordedAt' | 'recordedBy'> & { id?: string }): Promise<DeploymentRecord> {
+    return this.req('POST', this.p('/deployments'), d);
+  }
+
+  deployments(q: { environment?: string; version?: string; pipeline?: string; limit?: number } = {}): Promise<DeploymentRecord[]> {
+    const qs = new URLSearchParams(Object.entries(q).filter((e) => e[1] !== undefined && e[1] !== '').map(([k, v]) => [k, String(v)]));
+    return this.req('GET', this.p(`/deployments${qs.toString() ? `?${qs}` : ''}`));
   }
 
   acquireLock(key: string, owner: string, ttlMs: number): Promise<{ acquired: boolean; token?: string; holder?: string; expiresAt: number }> {

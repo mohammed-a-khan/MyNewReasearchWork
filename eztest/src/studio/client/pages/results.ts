@@ -17,6 +17,7 @@ import { createSplit } from '../ui/split.js';
 import { createTable } from '../ui/table.js';
 import { createTabs } from '../ui/tabs.js';
 import { toastError } from '../ui/toast.js';
+import { registerFeaturesTab } from './results-features.js';
 
 export interface RunListItem {
   runId: string;
@@ -334,6 +335,7 @@ function registerBuiltInTabs(): void {
 
 export function registerResultsPage(): void {
   registerBuiltInTabs();
+  registerFeaturesTab();
   registerPage({
     id: 'runs',
     title: 'Results',

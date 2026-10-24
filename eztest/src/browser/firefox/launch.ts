@@ -26,6 +26,7 @@ import { debugLog } from '../debug.js';
 import { browserCacheDir } from '../launcher/find.js';
 import { killTree, removeDir, trackLiveBrowser } from '../launcher/launch.js';
 import { WebSocketTransport, type Transport } from '../transport/transport.js';
+import { settleWithin } from '../util.js';
 
 export interface FoundFirefox {
   executablePath: string;
@@ -455,9 +456,10 @@ export async function launchFirefoxProcess(opts: FirefoxLaunchOptions = {}): Pro
   const kill = async () => {
     if (killed) return;
     killed = true;
-    const done = await Promise.race([exited.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 3000))]);
+    // Grace timers are cleared once the browser exits (they would keep the host process alive).
+    const done = await settleWithin(exited.then(() => true), 3000, false);
     killTree(child.pid);
-    if (!done) await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
+    if (!done) await settleWithin(exited, 2000, undefined);
     untrack();
     if (temp) await removeDir(profileDir);
   };

@@ -20,7 +20,8 @@ import { collectRunVcs, runVcsEnvironment } from '../git/branch.js';
 import { collectHealProposals } from '../heal/proposals.js';
 import { FingerprintStore } from '../heal/store.js';
 import { EvidenceWriter } from './evidence.js';
-import { blockedByHook, expandExamples, hookJourneys, runAllHook } from './journey-hooks.js';
+import { blockedByHook, expandExamples, hookJourneys, runAllHook, runWideValues } from './journey-hooks.js';
+import { maskDeep } from './dom.js';
 import { createRunExtensions } from './extensions.js';
 import { resolveExamplesSources } from './examples-source.js';
 import { attemptNetwork, cancelledJourney, noRowsJourney, runJourneyAttempt, type JourneyRunEnv } from './journey.js';
@@ -35,6 +36,21 @@ import { installAppIdle } from './reliability/idle.js';
 import { safeName } from './evidence.js';
 import type { HealthCheckResult, RunHealth } from '../core/index.js';
 import { driverFor, noDriverJourney, platformOf, type PlatformDriver } from './platform.js';
+import { bddRecord } from './bdd-run.js';
+import { bddAllJourneys, clearBddAllState } from './bdd-all.js';
+
+/** Run the Gherkin BeforeAll / AfterAll hook journeys of a run's scenarios (tagged hook, bdd). */
+async function runBddAllHooks(journeys: Journey[], kind: 'beforeAll' | 'afterAll', env: JourneyRunEnv): Promise<JourneyResult[]> {
+  const out: JourneyResult[] = [];
+  for (const h of await bddAllJourneys(journeys, kind, env.opts.baseDir ?? process.cwd())) {
+    if (env.opts.signal?.aborted) break;
+    env.opts.events?.emit({ type: 'journey:start', journeyId: h.id, name: h.name });
+    const r = await runJourneyAttempt(h, 1, env);
+    out.push(r);
+    env.opts.events?.emit({ type: 'journey:end', journeyId: h.id, status: r.status });
+  }
+  return out;
+}
 import { describeBrowser, expandBrowserMatrix, openBrowser, runBrowsers, type ResolvedBrowser } from './browsers.js';
 
 /** Stand-in when every journey runs on a platform driver: using it is a bug, so it fails loudly. */
@@ -189,7 +205,10 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
    * prerequisites: web journeys get them in the ledger; platform drivers (which have no ledger hook) get
    * them as journey variables (strings, JSON for objects).
    */
-  const runAttempt = async (j: Journey, attempt: number, seed?: Record<string, unknown>): Promise<JourneyResult> => {
+  // Run-wide values: the Returns: of setup (beforeAll) journeys, seeded into every journey (Depends on: values win).
+  let runSeed: Record<string, unknown> = {};
+  const runAttempt = async (j: Journey, attempt: number, handoff?: Record<string, unknown>): Promise<JourneyResult> => {
+    const seed = Object.keys(runSeed).length ? { ...runSeed, ...(handoff ?? {}) } : handoff;
     const platform = platformOf(j, options);
     if (platform === 'web') {
       const failedLaunch = launchErrors.get(j.browser ?? primaryBrowser.id);
@@ -235,7 +254,7 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   const notRun = (j: Journey, reason: string, name: string): JourneyResult => ({
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, reason)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt: 1, browser: envOf(j).browserName, ledger: {}, evidence: [],
-    status: 'skipped', error: { message: reason, name },
+    status: 'skipped', error: { message: reason, name }, ...(j.bdd ? { bdd: bddRecord(j, options.baseDir) } : {}),
   });
   const passed = (r: JourneyResult) => r.status === 'passed' || r.status === 'passed-healed';
   /** The final result of a journey: dependency handoff summary, and why it was flaky when a retry passed. */
@@ -326,7 +345,11 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   };
   try {
     const pre = await runAllHook('beforeAll', env);
-    const failedHook = pre.find((r) => r.status === 'failed' || r.status === 'error');
+    runSeed = runWideValues(options.hooks?.beforeAll ?? [], pre);
+    if (Object.keys(runSeed).length) logger.info('run-wide values from setup journeys', { keys: Object.keys(runSeed) });
+    // Gherkin BeforeAll hooks: once per run, before the scenarios they apply to (src/runner/bdd-all.ts).
+    if (!pre.some((r) => r.status === 'failed' || r.status === 'error')) pre.push(...(await runBddAllHooks(journeys, 'beforeAll', env)));
+    const failedHook = pre.find((r) => (r.status === 'failed' || r.status === 'error') && !r.tags.includes('bdd'));
     if (failedHook) journeys.forEach((j, i) => { results[i] = blockedByHook(j, failedHook, envOf(j).browserName); });
     else await Promise.all(Array.from({ length: Math.min(concurrency, journeys.length) }, worker));
     // Isolated retries run one at a time after everything else (no parallel interference).
@@ -352,8 +375,12 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
     }
     // Journeys whose Browsers: header leaves out every browser of this run.
     for (const { journey: j, reason } of matrix.excluded) results.push({ ...notRun(j, reason, 'NotOnThisBrowser'), browser: j.browsers?.join(',') });
-    results.push(...(await runAllHook('afterAll', env)));
+    // Gherkin AfterAll hooks: once, for the scenarios that ran.
+    const ran = new Set(results.filter((r) => r && r.status !== 'skipped' && !r.steps.some((x) => x.error?.name === 'BeforeAllFailed')).map((r) => r.journeyId));
+    results.push(...(await runBddAllHooks(journeys.filter((j) => ran.has(j.id)), 'afterAll', env)));
+    results.push(...(await runAllHook('afterAll', env, Object.keys(runSeed).length ? runSeed : undefined)));
   } finally {
+    clearBddAllState(env.runDir);
     for (const e of envs.values()) await e.contextPool?.closeAll();
     for (const d of usedDrivers) await d.close?.().catch((e: unknown) => logger.warn('platform driver close failed', { driver: d.name, message: (e as Error).message }));
     // Launched browsers are closed; attached (remote) ones only lose the contexts this run created.
@@ -389,6 +416,8 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   }
   if (health.preflight || health.circuit) run.health = health;
   if (multiBrowser) run.browsers = browserSummaries(results, wanted, browsers);
+  // Ledgers can hold secrets (credentials, secret shared-store values): masked in the stored run.
+  if (options.mask) for (const r of results) r.ledger = maskDeep(r.ledger, options.mask) as Record<string, unknown>;
   if (contextPool) run.environment.contextReuse = `${contextPool.created} created, ${contextPool.reused} reused`;
   await writeFile(join(runDir, 'run.json'), JSON.stringify(run, null, 2));
   options.events?.emit({ type: 'run:end', runId });
@@ -412,7 +441,7 @@ function browserDown(j: Journey, attempt: number, browser: string, e: Error): Jo
   return {
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, `not run: ${message}`)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt, browser, ledger: {}, evidence: [],
-    status: 'error', error: { message, name: 'BrowserLaunchError' },
+    status: 'error', error: { message, name: 'BrowserLaunchError' }, ...(j.bdd ? { bdd: bddRecord(j) } : {}),
   };
 }
 
@@ -436,6 +465,7 @@ async function environmentDown(journeys: Journey[], checks: HealthCheckResult[],
     journeyId: j.id, name: j.name, startedAt: nowIso(), durationMs: 0, steps: j.steps.map((s) => skippedStep(s, reason)),
     tags: j.tags, requirements: j.requirements, risk: j.risk, attempt: 1, browser: c.options.browser ?? 'chromium', ledger: {}, evidence: [ref.id],
     status: 'skipped', error: { message: reason, name: 'EnvironmentUnavailable' }, reliability: { environment: { reason: bad, evidence: [ref.id] } },
+    ...(j.bdd ? { bdd: bddRecord(j, c.options.baseDir) } : {}),
   }));
   const evidenceHead = await c.evidence.flush();
   const run: RunResult = {

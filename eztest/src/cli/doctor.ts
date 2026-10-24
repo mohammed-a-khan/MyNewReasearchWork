@@ -21,6 +21,8 @@ export interface DoctorCheck {
   status: 'ok' | 'warn' | 'error' | 'skipped';
   detail?: string;
   lines?: string[];
+  /** Configuration warnings (the text goes to stderr, never into the JSON report). */
+  warnings?: number;
 }
 
 export interface DoctorReport {
@@ -90,13 +92,16 @@ export function registerDoctorCommand(program: Command, io: CliIO, load: Loader)
           const l = await load({ ...o, project });
           firstLoaded ??= l;
           const sources = l.sources.map((x) => (x.startsWith(io.cwd) ? x.slice(io.cwd.length + 1) : x)).join(' < ');
-          const lines = [...effectiveSummary(l), ...l.warnings.map((w) => `warning: ${w}`)];
+          // Warnings go to stderr: the --json report stays one machine-readable document. Warnings about
+          // EZTEST_* environment variables that are not settings do not degrade the config check.
+          for (const w of [...l.warnings, ...(l.envWarnings ?? [])]) io.err(`warning: ${w}`);
+          const lines = effectiveSummary(l);
           say(`${project ? label : 'config     '} ok (${sources})`);
           for (const line of lines) say(`            ${line}`);
           const dbLines: string[] = [];
           let dbOk = true;
           if (o.db !== false) dbOk = await doctorDatabases(l, { ...io, out: (s: string) => (o.json ? dbLines.push(s) : io.out(s)) } as CliIO);
-          checks.push({ name: label, status: !dbOk ? 'error' : l.warnings.length ? 'warn' : 'ok', detail: sources, lines: [...lines, ...dbLines] });
+          checks.push({ name: label, status: !dbOk ? 'error' : l.warnings.length ? 'warn' : 'ok', detail: sources, lines: [...lines, ...dbLines], ...(l.warnings.length ? { warnings: l.warnings.length } : {}) });
         } catch (e) {
           checks.push({ name: label, status: 'error', detail: (e as Error).message });
           say(`${label} ERROR ${(e as Error).message}`);

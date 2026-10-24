@@ -9,23 +9,29 @@ import type { Journey } from '../core/index.js';
 import { loadConfig } from '../config/index.js';
 import { loadJourneyFile } from '../intent/index.js';
 import { affectedJourneys } from '../scale/watch.js';
-import { findJourneyFiles } from './journeys.js';
+import { defaultJourneyPaths, findJourneyFiles } from './journeys.js';
+import { isFeatureFile, loadFeatureJourneys } from '../bdd/load.js';
 import type { CliIO } from './program.js';
 
-const EXT = new Set(['.ez', '.yaml', '.yml', '.json']);
+const EXT = new Set(['.ez', '.yaml', '.yml', '.json', '.feature']);
+
+/** The journeys of a changed file (a feature has one per scenario and Examples row). */
+async function journeysOf(f: string, cwd: string): Promise<Journey[]> {
+  return isFeatureFile(f) ? loadFeatureJourneys(f, { cwd }) : [await loadJourneyFile(f)];
+}
 
 async function dirsFor(paths: string[], cwd: string, o: { config?: string; env?: string; project?: string }, env: Record<string, string | undefined>): Promise<string[]> {
   if (paths.length) return paths.map((p) => resolve(cwd, p));
   const loaded = await loadConfig({ cwd, configFile: o.config, env: o.env, project: o.project, environment: env });
-  return [resolve(cwd, loaded.config.journeysDir)];
+  return defaultJourneyPaths(loaded.config, cwd).map((p) => resolve(cwd, p));
 }
 
 /** journey id -> file, for the watched paths. */
 export async function journeyFileMap(paths: string[], cwd: string, o: { config?: string; env?: string; project?: string }, env: Record<string, string | undefined> = process.env): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  for (const f of await findJourneyFiles(await dirsFor(paths, cwd, o, env), cwd)) {
+  for (const f of await findJourneyFiles(await dirsFor(paths, cwd, o, env), cwd, { features: true })) {
     try {
-      out.set((await loadJourneyFile(f)).id, f);
+      for (const j of await journeysOf(f, cwd)) out.set(j.id, f);
     } catch {
       // invalid files are reported by the run itself
     }
@@ -57,9 +63,13 @@ export async function watchAndRerun(
     pending.clear();
     running = running.then(async () => {
       const changed: Journey[] = [];
+      const fileOf = new Map<string, string>();
       for (const f of files) {
         try {
-          changed.push(await loadJourneyFile(f));
+          for (const j of await journeysOf(f, io.cwd)) {
+            changed.push(j);
+            fileOf.set(j.id, f);
+          }
         } catch (e) {
           io.err(`error: ${f}: ${(e as Error).message}`);
         }
@@ -68,7 +78,7 @@ export async function watchAndRerun(
       const state = last();
       const all = state?.all ?? changed;
       const fileMap = new Map(state?.files ?? []);
-      for (const [i, j] of changed.entries()) fileMap.set(j.id, files[i]);
+      for (const j of changed) fileMap.set(j.id, fileOf.get(j.id) ?? '');
       const ids = affectedJourneys(changed, [...all.filter((a) => !changed.some((c) => c.id === a.id)), ...changed], fileMap);
       io.out(`\nwatch: ${files.map((f) => f.slice(io.cwd.length + 1) || f).join(', ')} changed; re-running ${ids.join(', ')}`);
       await rerun(ids).catch((e: Error) => io.err(`error: ${e.message}`));

@@ -257,4 +257,5 @@ a{color:#000;text-decoration:none}
 .tbl-wrap{max-height:none;overflow:visible}
 }
 .print-only{display:none}
+.g-features,.g-scenarios,.g-steps{list-style:none;padding-left:18px;margin:4px 0}.g-features{padding-left:0}.g-kw{font-weight:600}.g-step{margin:3px 0}.g-err{color:var(--ink-failed);margin-left:28px;white-space:pre-wrap}.g-feature>details>summary,.g-rule>details>summary,.g-scenario>details>summary{cursor:pointer;padding:3px 0}
 `;

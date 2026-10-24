@@ -62,7 +62,7 @@ Download the "Download invoice" link as invoice
 Compare document invoice to the order using invoice-vs-order
 ```
 
-`Expect …` lines attach to the step before them as **post-conditions**, the outcome the step must produce. Post-conditions are what make healing verifiable. See [docs/ez-language.md](docs/ez-language.md) for all 359 action phrasings and 70 expectation phrasings (plus 73 packaged-app phrasings for SAP Fiori, ServiceNow, Workday, Oracle and Power Apps, which are active when their config block is present), including multi-actor journeys, relative and scoped targets ("the Edit button in the row containing Acme"), browser clock control, accessible-name and aria snapshot assertions, native mobile gestures and device operations, tabs and popups, frames, dialogs, keyboard and mouse gestures, network mocking, browser state, API/GraphQL/SOAP/WebSocket, databases, email/SMS, variables and flow control (If, loops, Retry, Try, sub-journeys, Examples tables).
+`Expect …` lines attach to the step before them as **post-conditions**, the outcome the step must produce. Post-conditions are what make healing verifiable. See [docs/ez-language.md](docs/ez-language.md) for all 366 action phrasings and 70 expectation phrasings (plus 73 packaged-app phrasings for SAP Fiori, ServiceNow, Workday, Oracle and Power Apps, which are active when their config block is present), including multi-actor journeys, relative and scoped targets ("the Edit button in the row containing Acme"), browser clock control, accessible-name and aria snapshot assertions, native mobile gestures and device operations, tabs and popups, frames, dialogs, keyboard and mouse gestures, network mocking, browser state, API/GraphQL/SOAP/WebSocket, databases, email/SMS, variables and flow control (If, loops, Retry, Try, sub-journeys, Examples tables).
 
 ## Commands
 
@@ -113,7 +113,11 @@ Compare document invoice to the order using invoice-vs-order
 | `eztest api-scan [scan.yaml] --spec <spec> --yes [--readiness <runDir>]` | Deterministic API security scan pack (OWASP API Top 10): auth bypass, BOLA/IDOR, mass assignment, injection (safe payloads), rate limits, headers, CORS, verbose errors; safe by default (allow-listed non-production hosts, opt-in) and an `apiSecurity` readiness gate ([docs/api-security.md](docs/api-security.md)) |
 | `eztest sessions import <files> [--against journeys]` / `eztest sessions snippet` | Turn captured user sessions (EZTest capture, HAR, rrweb JSON) into ranked `.ez` journeys with a coverage gap; the opt-in, privacy-safe capture snippet ([docs/sessions.md](docs/sessions.md)) |
 | `eztest stories [run\|list] --stories <globs>` | Run journeys against single component stories on EZTest's own harness, with the visual and a11y lenses ([docs/components.md](docs/components.md)) |
-| `eztest init --ci github\|azure` | Also add a CI pipeline |
+| `eztest init --ci azure\|github\|gitlab\|jenkins\|teamcity\|bitbucket\|circleci` | Also add CI pipelines: a PR smoke job, a scheduled nightly regression in shards merged into one run, an on-deploy job per environment, JUnit in the CI's test view, the HTML report and the readiness gate ([docs/pipelines.md](docs/pipelines.md)) |
+| `eztest run --pipeline <name\|auto>` · `eztest pipelines list\|explain <name>` · `eztest tags report` | Run the journeys a `pipelines:` entry maps a trigger or deployment stage to (tags, impact, budget, shards, browsers, environment, test plan, gate), detected from the CI stage with `auto`; explain the selection; find journeys no pipeline runs |
+| `eztest deployments list\|record` | Deployment test records: what was tested in each environment for each version, on the results server and in Azure DevOps (build summary and tags, work items, test plan) |
+| `eztest gate <runDir>` · `eztest ci summary <runDir>` | The readiness gate and a Markdown run summary for any CI system |
+| `eztest store list\|get\|set\|delete\|purge\|pools\|pool-add` | The shared test data store and data pools ([docs/shared-data.md](docs/shared-data.md)) |
 | `eztest mobile devices\|build-agent\|install-agent\|inspect` | Native mobile: list Android/iOS devices, build and install the EZTest device agents, dump a screen's hierarchy and screenshot ([docs/mobile.md](docs/mobile.md)) |
 | `eztest doctor [--project p] [--env e] [--json]` | Check Node, browsers, config, databases, plugins and the results server; `--json` for machine-readable health |
 | `eztest run --shard 2/4` / `eztest merge <shard runs> -o merged` | Duration-balanced shards across machines, merged into one run whose evidence chain links every shard chain ([docs/scale.md](docs/scale.md)) |
@@ -172,11 +176,38 @@ What you get with code journeys:
 
 Importer plugins can write logic that `.ez` cannot express as SDK code. See [docs/sdk.md](docs/sdk.md).
 
+### Gherkin features, run natively (`eztest/bdd`)
+
+BDD teams keep their `.feature` files and run them as they are, with step definitions in TypeScript:
+
+```ts
+// steps/orders.steps.ts
+import { Given, Then } from 'eztest/bdd';
+
+Given('the customer {string} has {int} orders', async ({ db, world }, name, n) => { /* ... */ });
+Then('the order total is {float}', async ({ expect }, total) => expect.ui.text('testid=order-total').toBe(total.toFixed(2)));
+```
+
+```bash
+eztest run features/ --tags "@smoke and not @wip"
+```
+
+What you get:
+
+- **EZTest's own Gherkin.** The parser, step expressions (`{int}`, `{float}`, `{string}`, `{word}`, `{}`, custom parameter types, regular expressions) and tag expressions are EZTest's own code. They cover Rules, Backgrounds, outlines with tagged Examples, doc strings, data tables and ten languages.
+- **No glue code needed for EZTest phrasings.** A step without a definition runs as an EZTest step when it is one (`When I click the "Save" button`, `Then the page contains "Saved"`). Definitions and phrasings mix freely.
+- **Journeys.** Each scenario and each Examples row is a journey result, with verified healing, evidence, traces, readiness, flaky detection, sharding, retries and Azure DevOps publishing. Examples can come from CSV, XLSX, JSON or a named query (`Examples: from data "rows.xlsx" sheet "Gold"`).
+- **The World and hooks.** Before, After, BeforeStep and AfterStep hooks, tag-filtered. Undefined steps print a snippet to paste; ambiguous steps list the matching definitions.
+- **Reports and Studio.** Reports group results by feature, rule and scenario; JUnit has one suite per feature. The Studio edits features with Gherkin highlighting and step diagnostics, and runs and debugs a scenario.
+
+See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](examples/bdd-project).
+
 ## What's inside
 
 | Area | Capabilities |
 |---|---|
 | Authoring | `.ez` plain-English grammar, YAML/JSON journeys, round-trip conversion |
+| BDD | Gherkin `.feature` files run natively with TypeScript step definitions (`eztest/bdd`): EZTest's own Gherkin parser (Rule, Background, outlines with tagged Examples, doc strings, data tables, ten languages), step and tag expressions, the World, hooks, snippets for undefined steps, the plain-English fallback, external Examples, feature/rule/scenario reports and Studio support ([docs/bdd.md](docs/bdd.md)) |
 | Runner | Chrome, Edge, Chromium and Electron (CDP) and Firefox (WebDriver BiDi) on EZTest's own browser driver, `eztest/browser` ([docs/browser-driver.md](docs/browser-driver.md)); Safari/WebKit is not supported; strict locators, all actions and post-conditions, retries, parallel journeys, traces, downloads, run ledger |
 | Native mobile | `Platform: android\|ios` journeys on EZTest's own drivers: an ADB client (smart-socket protocol) plus the EZTest Android agent (androidx.test.uiautomator), and the EZTest iOS XCTest agent over usbmuxd; taps, typing, gestures (swipe-until, long press, pinch, drag), app lifecycle, deep links, permissions, connectivity, files, hybrid web views over the DevTools socket, verified healing over the page source, screenshots and page-source evidence, native time-travel traces and a Studio Device tab ([docs/mobile.md](docs/mobile.md)) |
 | Pages and frames | Tabs, windows and popups (open, follow, switch by number/title/URL, close, count), nested iframes by name/id/title/URL/selector with frame blocks; evidence, conditions and healing follow the current tab and frame |
@@ -203,6 +234,8 @@ Importer plugins can write logic that `.ez` cannot express as SDK code. See [doc
 | Git | Studio Source Control (status, word diffs, stage, commit, branches, pull/push, history and blame per step, conflict resolution), branch-aware runs, history and baselines, CODEOWNERS, hooks, bisect, PR status and comments on GitHub, GitLab, Bitbucket and Azure Repos ([docs/git.md](docs/git.md)) |
 | Scale | Duration-balanced sharding and merge, resource locks across machines, test selection and budgets, burn-in and fail-fast flags, CI matrix generation, virtualised reports for thousands of journeys ([docs/scale.md](docs/scale.md)) |
 | Team server | Results server with dashboards, shared state, OIDC/PKCE sign-in, per-project RBAC, audit log and retention ([docs/server.md](docs/server.md)) |
+| Shared test data | A shared store (namespaces, expiry, secrets sealed and masked) and data pools claimed once across workers and machines; `Setup:` journeys with run-wide values; values handed to later pipeline stages as output variables ([docs/shared-data.md](docs/shared-data.md)) |
+| Pipelines | `pipelines:` maps PR, nightly and deployment stages to journeys; CI files for seven systems; deployment test records per environment and version; release gates ([docs/pipelines.md](docs/pipelines.md)) |
 | Extensibility | Typed plugin API (`eztest/plugins`) with an API version check ([docs/plugins.md](docs/plugins.md)) |
 | Operations | Docker image and compose example, `doctor --json`, JSON logs, OpenTelemetry traces, config schema versioning ([docs/operations.md](docs/operations.md)) |
 | Dynamics 365 | Metadata-aware steps (`Set "Account Name" to "Contoso" on the form`, lookups, save, process stages, views), Dataverse Web API cross-checks, release-wave impact analysis |

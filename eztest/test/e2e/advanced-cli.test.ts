@@ -23,7 +23,8 @@ async function cli(cwd: string, args: string[]) {
   await buildProgram({ out: (s) => out.push(s), err: (s) => err.push(s), cwd, env: process.env }).exitOverride().parseAsync(['node', 'eztest', ...args]);
   const exitCode = Number(process.exitCode ?? 0);
   process.exitCode = before;
-  return { out: out.join('\n'), err: err.join('\n'), exitCode };
+  // EZTEST_* variables of the machine that are not EZTest settings are reported on stderr; they are not this test's.
+  return { out: out.join('\n'), err: err.filter((l) => !/^warning: environment variable EZTEST_/.test(l)).join('\n'), exitCode };
 }
 
 let server: DemoServer;
