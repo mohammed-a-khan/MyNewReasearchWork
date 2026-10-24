@@ -22,6 +22,9 @@ import { adoWeb, safeHttpUrl, type IntegrationsRecord } from './integrations.js'
 import { healProposals, formatLocator, type HealProposal } from './model.js';
 import { safeRelativeUrl } from './escape.js';
 import { parseAdoTags } from '../alm-ado/tags.js';
+import { categoriseFailure, FAILURE_CATEGORIES, type CategoryVerdict, type FailureCategory } from './categorise.js';
+import { summariseLenses, type LensFile, type LensSummary } from './lenses.js';
+import { configSnapshot } from './config-snapshot.js';
 
 export const REPORT_MODEL_VERSION = 2 as const;
 
@@ -133,7 +136,9 @@ export interface TestModel {
   cluster?: string;
   failure?: { known: boolean; firstSeenRun?: string; firstSeenAt?: string; tags: string[]; streak?: number };
   triage?: { category: string; confidence: number; status: string; reasons: string[]; evidence: string[]; secondOpinion?: string };
-  history?: { state: string; sequence: string; failRate: number; samples: number; reasons: string[] };
+  history?: { state: string; sequence: string; failRate: number; samples: number; reasons: string[]; flips?: number };
+  /** Failure category (product, test, environment, data, flaky, needs review), why, and the suggested next step. */
+  cat?: CategoryVerdict;
   flake?: { cause: string; reason: string; confidence: number };
   heals: number;
   ado?: { testCases: Array<{ id: number; url?: string }>; plan?: { id: number; url?: string }; suite?: { id: number; url?: string }; results: Array<{ testCaseId: number; resultId?: number; outcome?: string; url?: string }> };
@@ -194,6 +199,9 @@ export interface FailureGroup {
   firstSeenRun?: string;
   firstSeenAt?: string;
   category?: string;
+  /** Report category of the group's first test, and its suggested fix. */
+  cat?: FailureCategory;
+  fix?: string;
 }
 
 export interface ClusterModel {
@@ -203,6 +211,8 @@ export interface ClusterModel {
   tests: string[];
   cohesion: number;
   category?: string;
+  cat?: FailureCategory;
+  fix?: string;
 }
 
 export interface ComparisonModel {
@@ -289,6 +299,12 @@ export interface ReportModel {
   evidenceHead?: string;
   health?: { preflight?: { ok: boolean; failed: string[] }; circuit?: { afterJourney: string; reason: string; notRun: number } };
   tests: TestModel[];
+  /** Failing and flaky tests per failure category. */
+  categories?: Partial<Record<FailureCategory, number>>;
+  /** Accessibility, security and performance lens findings of the run. */
+  lenses?: LensSummary;
+  /** The effective configuration, flattened, secrets masked. */
+  config?: Array<[string, string]>;
   /** Static extra sections (API coverage tables) as escaped HTML. */
   extraHtml?: string[];
   /** The Gherkin feature / rule / scenario section (escaped HTML), when the run has `.feature` scenarios. */
@@ -326,6 +342,8 @@ export interface StepArtifacts {
   visual?: Map<string, NonNullable<StepModel['vd']>>;
   /** journeyId -> trace zip files (traces/*.zip), relative to the run directory. */
   traceZips?: Map<string, string[]>;
+  /** Lens findings recorded per step (lens-<name>-<step>.json). */
+  lenses?: LensFile[];
 }
 
 export interface ReportModelInput {
@@ -358,6 +376,8 @@ export interface ReportModelInput {
   flakyIds?: Iterable<string>;
   /** The video policy (config `video`), to explain a missing video. */
   videoPolicy?: string;
+  /** The effective configuration (masked into the report's Configuration section). */
+  config?: unknown;
 }
 
 const PASS = (s: string) => s === 'passed' || s === 'passed-healed';
@@ -758,7 +778,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       ...(signature ? { signature } : {}),
       ...(failure ? { failure } : {}),
       ...(tv ? { triage: { category: tv.category, confidence: tv.confidence, status: tv.status, reasons: tv.reasons, evidence: tv.evidence, ...(tv.secondOpinion ? { secondOpinion: `${tv.secondOpinion.category} (${Math.round(tv.secondOpinion.confidence * 100)}%): ${tv.secondOpinion.reason}` } : {}) } } : {}),
-      ...(fs && fs.samples ? { history: { state: fs.state, sequence: fs.sequence.slice(-30), failRate: fs.failRate, samples: fs.samples, reasons: fs.reasons } } : {}),
+      ...(fs && fs.samples ? { history: { state: fs.state, sequence: fs.sequence.slice(-30), failRate: fs.failRate, samples: fs.samples, reasons: fs.reasons, flips: fs.flips } } : {}),
       ...(j.reliability?.flake ? { flake: { cause: j.reliability.flake.cause, reason: j.reliability.flake.reason, confidence: j.reliability.flake.confidence } } : {}),
       heals: allSteps(j.steps).filter((s) => s.heal).length,
       bugs: [],
@@ -779,11 +799,20 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     });
   }
 
+  // failure categories (triage when confident, else the report's rules)
+  const categories: Partial<Record<FailureCategory, number>> = {};
+  for (const t of tests) {
+    const cat = categoriseFailure({ state: t.state, ...(t.error ? { error: t.error } : {}), ...(t.failedStep ? { failedStep: t.failedStep } : {}), ...(t.triage ? { triage: t.triage } : {}), ...(t.flake ? { flakeReason: t.flake.reason } : {}) });
+    if (!cat) continue;
+    t.cat = cat;
+    categories[cat.c] = (categories[cat.c] ?? 0) + 1;
+  }
+
   // failure groups (exact signature) and clusters (similar messages)
   const groups = new Map<string, FailureGroup>();
   for (const t of tests) {
     if (!t.signature) continue;
-    const g = groups.get(t.signature) ?? { signature: t.signature, message: (t.error?.message ?? '').split('\n')[0].slice(0, 300), tests: [], known: !!t.failure?.known, ...(t.failure?.firstSeenRun ? { firstSeenRun: t.failure.firstSeenRun, firstSeenAt: t.failure.firstSeenAt } : {}), ...(t.triage ? { category: t.triage.category } : {}) };
+    const g = groups.get(t.signature) ?? { signature: t.signature, message: (t.error?.message ?? '').split('\n')[0].slice(0, 300), tests: [], known: !!t.failure?.known, ...(t.failure?.firstSeenRun ? { firstSeenRun: t.failure.firstSeenRun, firstSeenAt: t.failure.firstSeenAt } : {}), ...(t.triage ? { category: t.triage.category } : {}), ...(t.cat ? { cat: t.cat.c, fix: t.cat.fix } : {}) };
     g.tests.push(t.id);
     groups.set(t.signature, g);
   }
@@ -791,7 +820,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
   const rawClusters = input.triage?.clusters?.length ? input.triage.clusters : failing.length ? clusterFailures(failing) : [];
   const byId = new Map(tests.map((t) => [t.id, t]));
   const clusters: ClusterModel[] = rawClusters
-    .map((c, i) => ({ id: `C${i + 1}`, size: c.size, message: (c.representative.message ?? c.normalized).split('\n')[0].slice(0, 300), tests: c.members, cohesion: Math.round(c.cohesion * 100) / 100, ...(byId.get(c.members[0])?.triage ? { category: byId.get(c.members[0])!.triage!.category } : {}) }))
+    .map((c, i) => ({ id: `C${i + 1}`, size: c.size, message: (c.representative.message ?? c.normalized).split('\n')[0].slice(0, 300), tests: c.members, cohesion: Math.round(c.cohesion * 100) / 100, ...(byId.get(c.members[0])?.triage ? { category: byId.get(c.members[0])!.triage!.category } : {}), ...(byId.get(c.members[0])?.cat ? { cat: byId.get(c.members[0])!.cat!.c, fix: byId.get(c.members[0])!.cat!.fix } : {}) }))
     .sort((a, b) => b.size - a.size);
   for (const c of clusters) for (const m of c.tests) {
     const t = byId.get(m);
@@ -875,6 +904,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       }
     : undefined;
 
+  const lenses = input.artifacts?.lenses?.length ? summariseLenses(input.artifacts.lenses) : undefined;
   const brandName = input.brand?.name ?? 'EZTest';
   const model: ReportModel = {
     format: 'eztest-report-model',
@@ -904,6 +934,9 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     ...(run.evidenceHead ? { evidenceHead: run.evidenceHead } : {}),
     ...(health && (health.preflight || health.circuit) ? { health } : {}),
     tests,
+    ...(Object.keys(categories).length ? { categories: Object.fromEntries(FAILURE_CATEGORIES.filter((c) => categories[c]).map((c) => [c, categories[c]])) } : {}),
+    ...(lenses ? { lenses } : {}),
+    ...(input.config ? { config: configSnapshot(input.config) } : {}),
     ...(input.extraHtml?.length ? { extraHtml: input.extraHtml } : {}),
     linkConfig: { ...(input.ado ? { ado: input.ado } : {}), ...(input.jira ? { jira: input.jira } : {}) },
     ...(input.artifacts?.snapshots?.size ? { snapshots: Object.fromEntries(input.artifacts.snapshots) } : {}),
@@ -996,4 +1029,39 @@ export function applyIntegrationLinks(model: ReportModel, input: Pick<ReportMode
   } else if (owners) integrations.git = { codeowners: true };
   model.integrations = integrations;
   return model;
+}
+
+/** What needs attention in a run, for the executive summary, the e-mail and the exports. */
+export interface Attention {
+  /** Failing tests whose error signature no earlier run in history had. */
+  newFailures: TestModel[];
+  /** Tests that passed in the baseline run and fail now. */
+  regressions: TestModel[];
+  /** Tests that failed in the baseline run and pass now. */
+  fixed: Array<{ id: string; name: string }>;
+  /** Tests that passed only on retry in this run, or flip between outcomes in history. */
+  flaky: TestModel[];
+  /** Tests at least 1.5 times (and 500 ms) slower than in the baseline. */
+  slower: Array<{ id: string; name: string; beforeMs: number; afterMs: number; ratio: number }>;
+}
+
+export function attentionOf(m: ReportModel): Attention {
+  const byId = new Map(m.tests.map((t) => [t.id, t]));
+  const failing = (t: TestModel) => t.state === 'failed' || t.state === 'error';
+  return {
+    newFailures: m.tests.filter((t) => failing(t) && t.failure && !t.failure.known),
+    regressions: (m.comparison?.newlyFailing ?? []).map((x) => byId.get(x.id)).filter((t): t is TestModel => !!t),
+    fixed: (m.comparison?.fixed ?? []).map((x) => ({ id: x.id, name: x.name })),
+    flaky: m.tests.filter((t) => t.state === 'flaky' || t.history?.state === 'flaky'),
+    slower: (m.comparison?.slower ?? []).slice(0, 10),
+  };
+}
+
+/** The flakiest tests from history: failure rate, flips and samples (most flips first). */
+export function topFlakyOf(m: ReportModel, n = 10): Array<{ id: string; name: string; state: TestState; failRate: number; samples: number; failures: number; flips: number; sequence: string }> {
+  return m.tests
+    .filter((t) => t.history && t.history.samples >= 2 && (t.history.state === 'flaky' || (t.history.flips ?? 0) > 0 || t.state === 'flaky'))
+    .map((t) => ({ id: t.id, name: t.name, state: t.state, failRate: t.history!.failRate, samples: t.history!.samples, failures: Math.round(t.history!.failRate * t.history!.samples), flips: t.history!.flips ?? 0, sequence: t.history!.sequence }))
+    .sort((a, b) => b.flips - a.flips || b.failRate - a.failRate || a.name.localeCompare(b.name))
+    .slice(0, n);
 }

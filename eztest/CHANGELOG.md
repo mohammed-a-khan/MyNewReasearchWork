@@ -4,6 +4,19 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Reports: categories, attention, lenses, PDF, Excel and e-mail
+
+- **Failure categories with a next step** ([docs/reports.md](docs/reports.md#what-the-report-shows)): every failing and flaky test is a product defect, test issue, environment, test data, flaky or needs review - from triage when it is confident, else from rules on the error (unreachable hosts, crashed browsers, duplicate keys, locators that matched nothing, expectations, server errors, lens findings) - with the rule that decided and a suggested next step. A category chart that filters the test list, a category filter and grouping, chips in the list, and the category on error signatures, clusters, the failing-tests table, the failure panel and "Copy for bug".
+- **What needs attention** at the top of the report: new failures, regressions against the baseline, flaky, fixed and slower tests; the flakiest tests from history; each test's recent outcomes as a sparkline in the list.
+- **Quality lenses section**: accessibility violations by rule (impact, WCAG criteria, elements, pages, tests, evidence), security findings by check, and web-vital budgets by metric, across the run.
+- **Configuration** under the run context: the effective configuration, flattened and filterable, with passwords, tokens, keys, webhook URLs and URL credentials masked.
+- **`report.pdf`** from EZTest's own PDF writer (Helvetica and Courier with their metrics, vector charts, PNG and JPEG images, bookmarks, links, page numbers): the summary, every failure with its screenshot, steps and next step, every test, requirements, lenses, context and configuration. No browser is needed.
+- **`report.xlsx`** from EZTest's own SpreadsheetML writer: Summary, Tests, Steps, Failures, Requirements, Trend, Quality, Configuration and Environment sheets with filters, frozen headers, state colours and links to each test in `report.html`. 10,000 tests and 90,000 steps are written in about a second.
+- **`email.html`** and the **`email` publisher**: the run summary as a mail-client-safe e-mail (tables, inline styles, no script or SVG; phone and dark mode), sent over SMTP (STARTTLS, AUTH PLAIN / LOGIN, cc / bcc) with the PDF (and optionally the workbook) attached; `when: failed | not-go`.
+- **Studio Results**: a run's Overview starts with the report's analysis (verdict, figures against the previous run, what needs attention, categories with next steps, lens counts, report files) and a new Report tab shows the full HTML report in place. The report is served with `frame-ancestors 'self'` and now allows its videos (`media-src`).
+- **Azure DevOps**: the PDF, the Excel workbook and the e-mail summary are attached to the test run with the HTML report; a failed result also carries the failure's video and console log, the category and next step in its comment, and `New Issue` or `Known Issue` as its failure type.
+- The report fits a phone without sideways scrolling (wide selects are bounded).
+
 ### Fixed: record, then run
 
 - An expectation typed in Studio while the last field was still being typed was attached to the step before it; pending typing is now recorded first.

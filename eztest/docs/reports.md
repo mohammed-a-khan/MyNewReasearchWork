@@ -7,13 +7,16 @@ directory, next to the evidence they link to:
 |---|---|
 | `report.html` | The run report: one self-contained HTML file. Works offline and from `file://`, can be mailed or attached (Azure DevOps attaches it to the test run), prints as an executive summary, light and dark, accessible (WCAG 2.2 AA, checked with EZTest's own accessibility engine in both themes), and handles runs of 10,000+ tests (virtualised list). |
 | `summary.html` | The one-page summary: verdict, key figures, outcome and trend charts, top failures and where the run was published, laid out for one A4 / Letter page. Print it to PDF. |
+| `report.pdf` | The PDF report, written by EZTest's own PDF writer (no browser needed): executive summary with the outcome donut and the pass-rate trend, failure categories and what needs attention; every failing and flaky test with its category, failing step, error, expected and found, suggested next step, the screenshot of the failing step and its steps; every test; requirements; quality lenses; run context; configuration. Bookmarks per section, page numbers, and test names that link to their permalink in `report.html`. |
+| `report.xlsx` | The Excel workbook, written by EZTest's own SpreadsheetML writer: Summary, Tests, Steps, Failures, Requirements, Trend, Quality, Configuration and Environment sheets, with frozen headers, filters, number formats, state colours and a link from each test to its permalink in `report.html`. |
+| `email.html` | The run summary as an e-mail: verdict, key figures, outcome bar, pass-rate trend, what needs attention, failure categories, the failures with their next step, and buttons to the report, the Azure DevOps test run, the build and the pull request. Tables and inline styles only (no script, SVG or external images), so it reads the same in desktop and web mail clients, on a phone and in dark mode. The `email` publisher sends it. |
 | `report.json` | The machine-readable report, versioned ([schema](#reportjson)). |
 | `junit.xml` | JUnit XML for CI test tabs. |
 | `tests.csv` | One row per test, for spreadsheets and BI tools. |
 | `report-model.json` | The report model the files above are rendered from; `eztest report render` re-renders from it. |
 | `context.json`, `integrations.json` | The run context, and what the integrations did (Azure DevOps, PR, Jira, Slack/Teams, results server). |
 
-Formats: `reporters: [console, html, json, junit]` in the config, or `eztest run --reporter html,json,junit`. `html` also writes `tests.csv` and `summary.html` (`csv` and `summary` can be asked for on their own).
+Formats: `reporters: [console, html, json, junit]` in the config, or `eztest run --reporter html,json,junit`. `html` also writes `tests.csv`, `summary.html`, `email.html`, `report.xlsx` and `report.pdf` (each can be asked for on its own: `csv`, `summary`, `email`, `xlsx`, `pdf`).
 
 ## What the report shows
 
@@ -21,11 +24,14 @@ Formats: `reporters: [console, html, json, junit]` in the config, or `eztest run
 
 - The readiness verdict (GO / GO WITH RISKS / NO GO) from the readiness policy, its score, each reason with the tests, requirements and evidence it cites, and the state of every gate. Without a policy, EZTest's built-in rule decides (failures are NO GO; flaky or healed tests are GO WITH RISKS), and the report says so.
 - Key figures: total, passed, failed, flaky, healed, skipped, pass rate and duration, each with its change against the previous run in history. Each figure filters the test list.
+- Needs attention: the new failures (an error signature no earlier run in history had), the regressions (passed in the baseline, fail now), the flaky tests, the fixed tests and the tests that got 1.5 times slower, each linked.
+- Failure categories: every failing and flaky test is in one category - product defect, test issue, environment, test data, flaky or needs review - with the rule that decided and a suggested next step. Triage decides when it is confident (50% or more); otherwise rules on the error decide (an unreachable host or a crashed browser is the environment; a duplicate key or missing row is test data; a locator that matched nothing or a test-code error is a test issue; an expectation, a server error, an accessibility or security finding is a product defect). A bar per category filters the test list (`report.html#category/product`). The categories are also on the error signatures, the clusters, the failing tests table, the test list (a chip, a filter and a grouping), each test's failure panel and "Copy for bug".
+- The flakiest tests from history: outcome flips, failure rate and the recent outcomes.
 - Charts (EZTest's own SVG, no chart library): the outcome donut; the pass-rate trend and the duration trend over the last runs (from `.eztest/history.json`); the duration distribution; the slowest tests; the top failure clusters; risk-weighted, requirements, API (`api.spec`) and UI coverage when the run has them; the execution timeline on parallel lanes. Every chart has a title, a text description and a data table, and a tooltip on hover and keyboard focus.
 
-**Run context.** Environment, base URL, browsers and devices; CI system, pipeline, build number and link, release, branch, commit with its link, pull request, trigger and who ran it; EZTest and Node.js versions, machine, shard, start and end, time zone.
+**Run context.** Environment, base URL, browsers and devices; CI system, pipeline, build number and link, release, branch, commit with its link, pull request, trigger and who ran it; EZTest and Node.js versions, machine, shard, start and end, time zone. Under it, the effective configuration, flattened (`healing.maxTier = T2-semantic`) and filterable, with secrets masked: values of keys such as password, secret, token, API key, credential, cookie, TOTP, webhook and connection string; credentials in URLs; token-shaped values. `secret://` references are shown as they are.
 
-**Tests.** A tree of suites (from the journey folders, or from a runner-supplied suite path such as BDD feature and rule; group by tag, owner, browser or failure cluster instead), filters by state, full-text search (names, ids, tags, steps, errors, owners, test case ids), tag / owner / browser facets, sorting (failures first, slowest, risk, name). Every test has a permalink: `report.html#test/<id>`. Keyboard: `/` search, arrows to move, Enter to open, Left/Right to collapse or expand a group, Esc to close, `?` for the list.
+**Tests.** A tree of suites (from the journey folders, or from a runner-supplied suite path such as BDD feature and rule; group by tag, owner, browser, failure category or failure cluster instead), filters by state, full-text search (names, ids, tags, steps, errors, owners, test case ids, categories, data-row values), tag / owner / browser / category facets, each row's recent outcomes as a sparkline, sorting (failures first, slowest, risk, name). Every test has a permalink: `report.html#test/<id>`. Keyboard: `/` search, arrows to move, Enter to open, Left/Right to collapse or expand a group, Esc to close, `?` for the list.
 
 **Each test.**
 
@@ -45,6 +51,8 @@ Formats: `reporters: [console, html, json, junit]` in the config, or `eztest run
 - "Copy for bug": the title, steps, error, environment, data, probable cause, test case and permalink, ready to paste.
 
 **Failure analysis.** Errors grouped by signature (normalised message and stack frames) with the number of tests, new or known (an earlier run in history failed the same way) and the run it was first seen in, the probable cause and the tests sharing it; clusters of similar failures (likely one root cause each); and a table of every failing and flaky test with its owners and bugs, for print and mail.
+
+**Quality lenses.** What the accessibility, security and performance lenses found across the run (`lenses: [a11y, security, perf]`): accessibility violations by rule with impact, WCAG criteria, element count, pages, tests and evidence; security findings by check with severity, pages and tests; web-vital budgets by metric with the worst value and the tests over budget. Checks on a step with no web page (`about:blank`, e.g. an API step) are left out.
 
 **Comparison.** This run against a baseline (`report.baseline`: the previous run in the output directory by default, `none`, or a run directory): newly failing, fixed, still failing, slower and faster (1.5 times and 500 ms apart), new and removed tests.
 
@@ -76,6 +84,10 @@ report:
 
 Azure DevOps links need `ado.organizationUrl` and `ado.project` (in Azure Pipelines they default to the pipeline's collection and project); Jira links use the `baseUrl` of the `jira` publisher.
 
+## In Studio
+
+Studio's Results page shows the same analysis on a run's Overview (verdict, figures against the previous run, what needs attention, failure categories with next steps, lens counts and the report files) and the whole HTML report in its Report tab ([docs/studio.md](studio.md)).
+
 ## Commands
 
 ```bash
@@ -87,6 +99,27 @@ eztest report schema                 # the JSON Schema of report.json
 ```
 
 `eztest report trends` is the cross-run portfolio dashboard: pass-rate and duration trends, readiness history, the flakiest, slowest and most failing tests, and a failure heat map by day and suite. It reads `.eztest/history.json` (and the run directories' report models for suite names).
+
+## E-mail
+
+The `email` publisher mails `email.html` (with a plain-text alternative) after the run, with the PDF attached:
+
+```yaml
+publishers:
+  - use: email
+    host: smtp.example.com
+    port: 587                          # STARTTLS when the server offers it; 465 = TLS from the start
+    username: secret://env/SMTP_USER
+    password: secret://env/SMTP_PASSWORD
+    from: "Test reports <qa@example.com>"
+    to: [team@example.com]             # also cc, bcc
+    attach: [pdf, xlsx]                # pdf (default), xlsx, html, summary; [] for none (15 MiB in all)
+    when: always                       # always | failed | not-go
+    reportUrl: https://ci.example.com/artifacts/report.html
+    # starttls: required, secure: true, subjectPrefix: "[Shop]", dryRun: true
+```
+
+The subject is `[NO GO] <title>: 3 of 40 tests failed (<run id>)`. With `reportUrl`, every test in the mail links to its permalink in the report. AUTH PLAIN or LOGIN is used as the server offers; what was sent is recorded in `integrations.json` and shown in the report's Integrations section.
 
 ## Chat cards
 
@@ -105,9 +138,9 @@ publishers:
 
 - `run`: the run result (journeys, steps, evidence ids, environment), as in version 1;
 - `insights`: triage, readiness, flaky scores, API coverage and heal proposals, as in version 1;
-- `model`: the report model (`format: "eztest-report-model"`, `version: 2`): `kpis`, `previous`, `verdict`, `trend`, `slowest`, `failureGroups`, `clusters`, `coverage`, `comparison`, `integrations`, `context`, `browsers`, `evidence` and `tests`.
+- `model`: the report model (`format: "eztest-report-model"`, `version: 2`): `kpis`, `previous`, `verdict`, `trend`, `slowest`, `failureGroups`, `clusters`, `coverage`, `comparison`, `integrations`, `context`, `browsers`, `evidence`, `categories`, `lenses`, `config` and `tests`.
 
-Each test in `model.tests` has `id`, `name`, `state` (`passed`, `healed`, `flaky`, `failed`, `error` or `skipped`, mutually exclusive), the journey's own `status`, `durationMs`, `startMs`, `tags`, `requirements`, `risk`, `attempt`, `browser`, `owners`, `file`, `suite` (outermost first), `error`, `failedStep`, `signature`, `cluster`, `failure` (`known`, `firstSeenRun`), `triage`, `history`, `flake`, `ado` (`testCases`, `plan`, `suite`, `results`, with links), `bugs`, `requirementLinks`, `row`, `actors`, `video`, `trace`, `attempts`, `network`, `console` and `steps`. Steps use short keys because a large run has hundreds of thousands of them: `n` intent, `s` status (`P` passed, `H` passed-healed, `F` failed, `S` skipped, `B` blocked), `d` duration ms, `t` start ms after the test started, `e` evidence ids, `x` error, `h` heal, `c` post-conditions, `l` locator, `a` actor, `i` iteration, `b` branch, `so` soft, `w` warnings, `dg` diagnosis, `db` query rows, `api` API exchanges, `im` locator suggestion, `m` manual verdict, `ch` child steps. `model.evidence` maps an evidence id to `[kind index into evidenceKinds, relative URL, description]`.
+Each test in `model.tests` has `id`, `name`, `state` (`passed`, `healed`, `flaky`, `failed`, `error` or `skipped`, mutually exclusive), the journey's own `status`, `durationMs`, `startMs`, `tags`, `requirements`, `risk`, `attempt`, `browser`, `owners`, `file`, `suite` (outermost first), `error`, `failedStep`, `signature`, `cluster`, `failure` (`known`, `firstSeenRun`), `triage`, `history`, `cat` (failure category: `c`, `src`, `why`, `fix`), `flake`, `ado` (`testCases`, `plan`, `suite`, `results`, with links), `bugs`, `requirementLinks`, `row`, `actors`, `video`, `trace`, `attempts`, `network`, `console` and `steps`. Steps use short keys because a large run has hundreds of thousands of them: `n` intent, `s` status (`P` passed, `H` passed-healed, `F` failed, `S` skipped, `B` blocked), `d` duration ms, `t` start ms after the test started, `e` evidence ids, `x` error, `h` heal, `c` post-conditions, `l` locator, `a` actor, `i` iteration, `b` branch, `so` soft, `w` warnings, `dg` diagnosis, `db` query rows, `api` API exchanges, `im` locator suggestion, `m` manual verdict, `ch` child steps. `model.evidence` maps an evidence id to `[kind index into evidenceKinds, relative URL, description]`.
 
 Readers of version 1 keep working: `run` and `insights` are unchanged.
 
@@ -117,7 +150,7 @@ A runner that knows a richer hierarchy sets `JourneyResult.suitePath` (outermost
 
 ## Size and speed
 
-The static parts (summary, failure analysis, comparison, integrations, context) are plain HTML and SVG; tests are embedded once as JSON and the list renders only the rows in view. A synthetic run of 10,000 tests with 8 steps each gives a report of about 15 MB, rendered in about a second and interactive in a browser in about a second (`test/scale/report-perf.test.ts` holds the budget).
+The static parts (summary, failure analysis, comparison, integrations, context) are plain HTML and SVG; tests are embedded once as JSON and the list renders only the rows in view. A synthetic run of 10,000 tests with 8 steps each gives a report of about 24 MB, rendered in about two seconds and interactive in a browser in about a second and a half; its Excel workbook (90,000 step rows) is written in about a second, the PDF in half a second and the e-mail in milliseconds (`test/scale/report-perf.test.ts` holds the budgets). The PDF details the first 60 failing tests and embeds at most 40 screenshots; the e-mail lists the first 12 failures.
 
 ## Security
 

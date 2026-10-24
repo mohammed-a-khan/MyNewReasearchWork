@@ -1,12 +1,13 @@
 /**
  * First-party publisher plugins: Slack and Microsoft Teams incoming webhooks,
- * and Jira bugs for failures. They are written against the public plugin API,
+ * the run summary by e-mail (SMTP), and Jira bugs for failures. They are written against the public plugin API,
  * exactly like an organisation's own plugin would be.
  */
 import type { RunResult } from '../../core/index.js';
 import { definePlugin, PLUGIN_API_VERSION, type EzPlugin } from '../api.js';
 import type { PublishContext, PublishResult } from '../registry.js';
 import { almPlugins } from './alm.js';
+import { emailPlugin } from './email.js';
 import { readReportModel } from '../../report/write.js';
 import { buildSlackMessage, buildTeamsCard, cardLinks, teamsMessage } from '../../report/notify.js';
 
@@ -99,4 +100,4 @@ export const teamsPlugin: EzPlugin = definePlugin({
   },
 });
 
-export const firstPartyPlugins: EzPlugin[] = [slackPlugin, teamsPlugin, ...almPlugins];
+export const firstPartyPlugins: EzPlugin[] = [slackPlugin, teamsPlugin, emailPlugin, ...almPlugins];

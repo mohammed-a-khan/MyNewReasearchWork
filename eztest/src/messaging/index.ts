@@ -8,3 +8,4 @@ export * from './types.js';
 export * from './providers.js';
 export { parseMime, htmlToText, decodeWords, type ParsedMime } from './mime.js';
 export * from './voice.js';
+export * from './smtp-client.js';

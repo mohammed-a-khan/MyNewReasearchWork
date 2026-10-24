@@ -168,6 +168,21 @@ export interface RunDetail {
   healProposals?: { proposals?: Array<Record<string, unknown>>; rejected?: Array<Record<string, unknown>> };
   insights?: Record<string, unknown>;
   report?: string;
+  /** The report's other files (PDF, Excel, e-mail summary, JSON, JUnit, CSV) that exist for the run. */
+  exports?: Array<{ format: string; label: string; href: string }>;
+  /** The report's run-level analysis: verdict, figures, failure categories, what needs attention, lenses, trend. */
+  reportSummary?: ReportSummary;
+}
+
+export interface ReportSummary {
+  verdict: { decision: string; score?: number; source: string };
+  kpis: { total: number; passed: number; failed: number; errors: number; flaky: number; healed: number; skipped: number; passRate: number; durationMs: number };
+  previous?: { runId: string; kpis: ReportSummary['kpis'] };
+  categories: Record<string, number>;
+  failures: Array<{ id: string; name: string; state: string; category: string; why: string; fix: string; known: boolean; failedStep?: string; error: string }>;
+  attention: Record<'newFailures' | 'regressions' | 'flaky' | 'fixed' | 'slower', Array<{ id: string; name: string }>>;
+  lenses?: { a11y?: Record<string, number>; security?: Record<string, number>; perf?: string[] };
+  trend: Array<{ runId: string; passRate: number; durationMs: number; current: boolean }>;
 }
 
 export interface RunDetailContext {

@@ -58,10 +58,10 @@ describe('escaping helpers', () => {
 });
 
 describe('writeReports', () => {
-  it('writes HTML (with its CSV and one-page summary), JSON v2 with the model, and JUnit XML', async () => {
+  it('writes HTML (with its CSV, one-page summary, e-mail summary, Excel workbook and PDF), JSON v2 with the model, and JUnit XML', async () => {
     const ins = await insights();
     const out = await writeReports(fx.runDir, fx.run, { formats: ['html', 'json', 'junit'], ...ins });
-    expect(Object.keys(out).sort()).toEqual(['csv', 'html', 'json', 'junit', 'summary']);
+    expect(Object.keys(out).sort()).toEqual(['csv', 'email', 'html', 'json', 'junit', 'pdf', 'summary', 'xlsx']);
     const json = JSON.parse(await readFile(out.json!, 'utf8'));
     expect(json).toMatchObject({ format: 'eztest-report', version: 2 });
     expect(json.run.runId).toBe(fx.run.runId);
@@ -71,7 +71,7 @@ describe('writeReports', () => {
     expect(existsSync(join(fx.runDir, 'report-model.json'))).toBe(true);
     expect(existsSync(join(fx.runDir, 'context.json'))).toBe(true);
     await expect(writeReports(fx.runDir, fx.run, { formats: [] })).rejects.toThrow(/no formats/);
-    await expect(writeReports(fx.runDir, fx.run, { formats: ['pdf' as never] })).rejects.toThrow(/Not supported/);
+    await expect(writeReports(fx.runDir, fx.run, { formats: ['docx' as never] })).rejects.toThrow(/Not supported/);
     await expect(writeReports(fx.runDir, fx.run, { formats: ['ctrf' as never] })).rejects.toThrow(/Not supported/);
     await expect(writeReports(fx.runDir, { ...fx.run, journeys: [] }, { formats: ['json'] })).rejects.toThrow(/no journeys/);
   });

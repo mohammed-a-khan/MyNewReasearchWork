@@ -24,6 +24,8 @@ import { REPORT_CSS } from './styles.js';
 import { REPORT_SCRIPT } from './client.js';
 import type { ReportInsights } from './model.js';
 import { bddHierarchy, type BddScenarioEntry } from './bdd.js';
+import { attentionBlock, categoriesCard, configCard, qualityBlock, topFlakyCard } from './html-insights.js';
+import { CATEGORY_LABEL } from './categorise.js';
 import type { RunResult as Run } from '../core/index.js';
 
 const STATUS_STATE: Record<string, TestState> = { passed: 'passed', 'passed-healed': 'healed', failed: 'failed', error: 'error', skipped: 'skipped', blocked: 'error' };
@@ -176,6 +178,7 @@ function summaryCharts(m: ReportModel): string {
 <div class="grid g-2" style="margin-top:16px">
 <div class="card"><h3>Top failure clusters</h3><p class="card-sub">Failures with similar messages and stack frames, likely one root cause each.</p>${clusters}</div>
 <div class="card"><h3>Coverage</h3>${meters || '<p class="muted">No coverage data in this run (requirements, risk, API spec or UI map).</p>'}</div></div>
+<div class="grid g-2" style="margin-top:16px">${categoriesCard(m)}${topFlakyCard(m)}</div>
 ${gantt ? `<details class="card" style="margin-top:16px"><summary><h3 style="display:inline">Execution timeline</h3> <span class="muted small">tests on parallel lanes, by start time</span></summary><div style="margin-top:10px;overflow-x:auto">${gantt}</div></details>` : ''}`;
 }
 
@@ -197,15 +200,15 @@ function failuresBlock(m: ReportModel): string {
   if (!failed.length && !m.tests.some((t) => t.state === 'flaky')) {
     return `<section class="block" id="failures" aria-labelledby="failures-h"><div class="block-head"><h2 id="failures-h">Failure analysis</h2></div><div class="card"><p>${icon('check')} No failures in this run.</p></div></section>`;
   }
-  const groups = m.failureGroups.map((g) => `<tr id="sig-${e(g.signature)}"><td><pre>${e(g.message)}</pre><div class="small muted mono">signature ${e(g.signature)}</div></td><td class="num">${e(g.tests.length)}</td><td>${g.known ? `<span class="badge b-neutral">known</span>` : `<span class="badge b-failed">new</span>`}</td><td>${g.firstSeenRun ? `${e(shortDate(g.firstSeenAt ?? '', true))}<div class="small muted mono">${e(g.firstSeenRun)}</div>` : '<span class="muted">this run</span>'}</td><td>${g.category ? e(g.category) : '-'}</td><td><div class="chips">${g.tests.slice(0, 12).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}${g.tests.length > 12 ? `<span class="muted small">+${g.tests.length - 12} more</span>` : ''}</div></td><td><button type="button" class="btn no-print" data-copy-bug="${e(g.tests[0])}">${icon('copy')}Copy for bug</button></td></tr>`).join('');
-  const clusters = m.clusters.map((c) => `<li id="failure/${e(c.id)}"><strong>${e(c.id)}</strong> &middot; ${e(c.size)} test(s)${c.category ? ` &middot; ${e(c.category)}` : ''} &middot; cohesion ${e(fmtPct(c.cohesion, 0))}<pre>${e(c.message)}</pre><div class="chips">${c.tests.slice(0, 20).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}</div></li>`).join('');
+  const groups = m.failureGroups.map((g) => `<tr id="sig-${e(g.signature)}"><td><pre>${e(g.message)}</pre><div class="small muted mono">signature ${e(g.signature)}</div></td><td class="num">${e(g.tests.length)}</td><td>${g.known ? `<span class="badge b-neutral">known</span>` : `<span class="badge b-failed">new</span>`}</td><td>${g.firstSeenRun ? `${e(shortDate(g.firstSeenAt ?? '', true))}<div class="small muted mono">${e(g.firstSeenRun)}</div>` : '<span class="muted">this run</span>'}</td><td>${g.cat ? `<span class="cat c-${e(g.cat)}">${e(CATEGORY_LABEL[g.cat])}</span>${g.fix ? `<details class="small"><summary>Suggested fix</summary><p class="fixline">${e(g.fix)}</p></details>` : ''}` : g.category ? e(g.category) : '-'}</td><td><div class="chips">${g.tests.slice(0, 12).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}${g.tests.length > 12 ? `<span class="muted small">+${g.tests.length - 12} more</span>` : ''}</div></td><td><button type="button" class="btn no-print" data-copy-bug="${e(g.tests[0])}">${icon('copy')}Copy for bug</button></td></tr>`).join('');
+  const clusters = m.clusters.map((c) => `<li id="failure/${e(c.id)}"><div class="cl-head"><strong>${e(c.id)}</strong> &middot; ${e(c.size)} test(s)${c.cat ? ` &middot; <span class="cat c-${e(c.cat)}">${e(CATEGORY_LABEL[c.cat])}</span>` : c.category ? ` &middot; ${e(c.category)}` : ''} &middot; cohesion ${e(fmtPct(c.cohesion, 0))}</div><pre>${e(c.message)}</pre>${c.fix ? `<p class="fixline"><strong>Suggested fix:</strong> ${e(c.fix)}</p>` : ''}<div class="chips">${c.tests.slice(0, 20).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}</div></li>`).join('');
   const cap = 200;
   const list = [...failed, ...m.tests.filter((t) => t.state === 'flaky')].slice(0, cap);
-  const rows = list.map((t) => `<tr><td>${badge(t.state)}</td><td><a href="${testHref(t.id)}">${e(t.name)}</a><div class="small muted mono">${e(t.id)}${t.browser ? ` &middot; ${e(t.browser)}` : ''}</div></td><td>${e(t.failedStep ?? '')}<pre class="small">${e((t.error?.message ?? t.flake?.reason ?? '').split('\n')[0].slice(0, 220))}</pre></td><td>${t.triage ? `${e(t.triage.category)} <span class="muted">(${e(Math.round(t.triage.confidence * 100))}%)</span>` : '-'}</td><td>${e(t.owners.join(', ') || '-')}</td><td>${t.bugs.map((b) => ext(b.url, `${b.system === 'ado' ? 'Bug' : ''} ${b.id}`.trim())).join(', ') || '-'}</td></tr>`).join('');
+  const rows = list.map((t) => `<tr><td>${badge(t.state)}</td><td><a href="${testHref(t.id)}">${e(t.name)}</a><div class="small muted mono">${e(t.id)}${t.browser ? ` &middot; ${e(t.browser)}` : ''}</div></td><td>${e(t.failedStep ?? '')}<pre class="small">${e((t.error?.message ?? t.flake?.reason ?? '').split('\n')[0].slice(0, 220))}</pre></td><td>${t.cat ? `<span class="cat c-${e(t.cat.c)}" title="${e(t.cat.why)}">${e(CATEGORY_LABEL[t.cat.c])}</span>` : '-'}${t.triage ? `<div class="small muted">triage ${e(t.triage.category)} (${e(Math.round(t.triage.confidence * 100))}%)</div>` : ''}</td><td>${e(t.owners.join(', ') || '-')}</td><td>${t.bugs.map((b) => ext(b.url, `${b.system === 'ado' ? 'Bug' : ''} ${b.id}`.trim())).join(', ') || '-'}</td></tr>`).join('');
   return `<section class="block" id="failures" aria-labelledby="failures-h"><div class="block-head"><h2 id="failures-h">Failure analysis</h2><p>${e(failed.length)} failing test(s) in ${e(m.failureGroups.length)} distinct error signature(s); ${e(m.failureGroups.filter((g) => !g.known).length)} new, ${e(m.failureGroups.filter((g) => g.known).length)} seen in earlier runs.</p></div>
-${m.failureGroups.length ? `<div class="card"><h3>Errors by signature</h3><p class="card-sub">Same normalised message and stack frames. "Known" means an earlier run in history failed the same way.</p><div class="tbl-wrap"><table><thead><tr><th scope="col">Error</th><th scope="col">Tests</th><th scope="col">New or known</th><th scope="col">First seen</th><th scope="col">Probable cause</th><th scope="col">Tests sharing it</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${groups}</tbody></table></div></div>` : ''}
-${clusters ? `<div class="card" style="margin-top:16px"><h3>Shared root causes</h3><p class="card-sub">Clusters of similar failures (they may differ in detail but probably share a cause).</p><ul class="reasons" style="gap:12px">${clusters}</ul></div>` : ''}
-<div class="card" style="margin-top:16px"><h3>Failing and flaky tests</h3>${list.length < failed.length + m.tests.filter((t) => t.state === 'flaky').length ? `<p class="card-sub">First ${cap}; the test explorer has all of them.</p>` : ''}<div class="tbl-wrap"><table><thead><tr><th scope="col">State</th><th scope="col">Test</th><th scope="col">Where it failed</th><th scope="col">Triage</th><th scope="col">Owners</th><th scope="col">Bugs</th></tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
+${m.failureGroups.length ? `<div class="card"><h3>Errors by signature</h3><p class="card-sub">Same normalised message and stack frames. "Known" means an earlier run in history failed the same way.</p><div class="tbl-wrap"><table><thead><tr><th scope="col">Error</th><th scope="col">Tests</th><th scope="col">New or known</th><th scope="col">First seen</th><th scope="col">Category</th><th scope="col">Tests sharing it</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${groups}</tbody></table></div></div>` : ''}
+${clusters ? `<div class="card" style="margin-top:16px"><h3>Shared root causes</h3><p class="card-sub">Clusters of similar failures (they may differ in detail but probably share a cause).</p><ul class="clusters">${clusters}</ul></div>` : ''}
+<div class="card" style="margin-top:16px"><h3>Failing and flaky tests</h3>${list.length < failed.length + m.tests.filter((t) => t.state === 'flaky').length ? `<p class="card-sub">First ${cap}; the test explorer has all of them.</p>` : ''}<div class="tbl-wrap"><table><thead><tr><th scope="col">State</th><th scope="col">Test</th><th scope="col">Where it failed</th><th scope="col">Category</th><th scope="col">Owners</th><th scope="col">Bugs</th></tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
 }
 
 function comparisonBlock(m: ReportModel): string {
@@ -253,7 +256,7 @@ ${ado.requirementsCommented.length ? `<p class="small"><strong>Requirements comm
   const jira = i.jira;
   cards.push(`<div class="card int-card" id="int-jira"><h3>Jira ${jira ? statusBadge(jira.status) : ''}</h3>${jira ? (jira.bugs.length ? `<ul>${jira.bugs.map((b) => `<li>${ext(b.url, b.key)} <span class="muted small">${e(b.action)} for ${e(b.journeyId)}</span></li>`).join('')}</ul>` : `<p class="none">No bugs filed${jira.reason ? `: ${e(jira.reason)}` : ''}.</p>`) : '<p class="none">The Jira publisher did not run for this run.</p>'}</div>`);
   const notes = i.notifications;
-  cards.push(`<div class="card int-card" id="int-notify"><h3>Slack and Teams</h3>${notes.length ? `<ul>${notes.map((n) => `<li><strong>${e(n.channel)}</strong> ${statusBadge(n.ok ? 'sent' : 'failed', n.ok)} <span class="small">${e(n.message)}</span> <span class="muted small">${e(fmtDate(n.at))}</span></li>`).join('')}</ul>` : '<p class="none">No message sent (publishers: slack, teams).</p>'}</div>`);
+  cards.push(`<div class="card int-card" id="int-notify"><h3>Slack, Teams and e-mail</h3>${notes.length ? `<ul>${notes.map((n) => `<li><strong>${e(n.channel)}</strong> ${statusBadge(n.ok ? 'sent' : 'failed', n.ok)} <span class="small">${e(n.message)}</span> <span class="muted small">${e(fmtDate(n.at))}</span></li>`).join('')}</ul>` : '<p class="none">No message sent (publishers: slack, teams, email).</p>'}</div>`);
   const git = i.git;
   const owners = [...new Set(m.tests.filter((t) => t.state === 'failed' || t.state === 'error').flatMap((t) => t.owners))];
   cards.push(`<div class="card int-card" id="int-git"><h3>Git and CODEOWNERS</h3>${git ? `<dl class="kv">${git.repository ? `<dt>Repository</dt><dd>${ext(git.repositoryUrl, git.repository)}</dd>` : ''}${git.branch ? `<dt>Branch</dt><dd><code>${e(git.branch)}</code></dd>` : ''}${git.commit ? `<dt>Commit</dt><dd>${ext(git.commitUrl, git.commit.slice(0, 12), 'mono')}</dd>` : ''}<dt>Owners of failing tests</dt><dd>${owners.length ? e(owners.join(', ')) : git.codeowners ? 'none failing' : '<span class="muted">no CODEOWNERS file</span>'}</dd></dl>` : '<p class="none">Not a git checkout.</p>'}</div>`);
@@ -297,7 +300,7 @@ function contextBlock(m: ReportModel): string {
   ]);
   const extra = c && Object.keys(c.extra).length ? `<details class="small" style="margin-top:8px"><summary>Other recorded environment values</summary>${dl(Object.entries(c.extra).map(([k, v]) => [k, `<code>${e(v)}</code>`]))}</details>` : '';
   return `<section class="block" id="context" aria-labelledby="ctx-h"><div class="block-head"><h2 id="ctx-h">Run context</h2></div><div class="ctx-grid">
-<div class="card"><h3>Where</h3>${env}</div><div class="card"><h3>Build and pipeline</h3>${build}</div><div class="card"><h3>How</h3>${how}${extra}</div></div></section>`;
+<div class="card"><h3>Where</h3>${env}</div><div class="card"><h3>Build and pipeline</h3>${build}</div><div class="card"><h3>How</h3>${how}${extra}</div></div>${configCard(m)}</section>`;
 }
 
 function evidenceBlock(m: ReportModel): string {
@@ -360,11 +363,11 @@ export function renderReportModelHtml(m: ReportModel, o: { exports?: Array<{ lab
 <span class="badge ${m.verdict.decision === 'GO' ? 'b-passed' : m.verdict.decision === 'NO_GO' ? 'b-failed' : 'b-flaky'}" title="Release readiness">${icon(m.verdict.decision === 'GO' ? 'check' : m.verdict.decision === 'NO_GO' ? 'x' : 'alert')}${e(m.verdict.decision.replace(/_/g, ' '))}</span>
 <span class="small muted">${e(fmtDate(m.startedAt))} &middot; ${e(fmtMs(m.durationMs))}${m.context?.branch ? ` &middot; <code>${e(m.context.branch)}</code>` : ''}</span>
 <div class="top-actions">${exportsMenu}<button type="button" class="btn" id="print-btn">${icon('print')}Print or PDF</button><button type="button" class="btn" id="theme-toggle" aria-pressed="false">${icon('moon')}<span>Dark theme</span></button></div></div>
-<nav class="sections" aria-label="Report sections"><a href="#summary">Summary</a><a href="#tests">Tests<span class="count">${e(k.total)}</span></a><a href="#failures">Failures<span class="count">${e(failing)}</span></a><a href="#comparison">Comparison</a><a href="#integrations">Integrations</a><a href="#context">Context</a><a href="#evidence">Evidence</a></nav></header>
+<nav class="sections" aria-label="Report sections"><a href="#summary">Summary</a><a href="#tests">Tests<span class="count">${e(k.total)}</span></a><a href="#failures">Failures<span class="count">${e(failing)}</span></a>${m.lenses ? '<a href="#quality">Quality</a>' : ''}<a href="#comparison">Comparison</a><a href="#integrations">Integrations</a><a href="#context">Context</a><a href="#evidence">Evidence</a></nav></header>
 <main id="main" tabindex="-1">
 ${health}
 <section class="block" id="summary" aria-labelledby="summary-h"><div class="block-head"><h2 id="summary-h">Executive summary</h2><p>Run <code>${e(m.runId)}</code>${m.previous ? `, compared with the previous run <code>${e(m.previous.runId)}</code>` : ''}.</p></div>
-${verdictCard(m)}${kpiTiles(m)}${summaryCharts(m)}</section>
+${verdictCard(m)}${kpiTiles(m)}${attentionBlock(m)}${summaryCharts(m)}</section>
 ${browsersBlock(m)}
 ${o.featuresHtml ?? m.featuresHtml ?? ''}
 <section class="block" id="tests" aria-labelledby="tests-h"><div class="block-head"><h2 id="tests-h">Tests</h2><p>Filter, search and open any test. Shortcuts: <span class="kbd">/</span> search, <span class="kbd">&uarr;</span><span class="kbd">&darr;</span> move, <span class="kbd">Enter</span> open, <span class="kbd">Esc</span> close.</p></div>
@@ -372,9 +375,9 @@ ${o.featuresHtml ?? m.featuresHtml ?? ''}
 <div class="ex-side"><div class="ex-tools" role="search">
 <div class="ex-search"><label for="q" class="sr-only">Search tests</label><input type="search" id="q" placeholder="Search name, id, tag, error, step, owner" autocomplete="off"></div>
 <div class="filters" role="group" aria-label="Filter by state"><button type="button" class="fchip" data-state="all" aria-pressed="true">All <span class="num">${e(k.total)}</span></button>${TEST_STATES.map((s) => `<button type="button" class="fchip" data-state="${s}" aria-pressed="false"><span class="dot st-${s}" aria-hidden="true"></span>${e(STATE_LABEL[s])} <span class="num">${e(s === 'failed' ? k.failed : s === 'error' ? k.errors : s === 'passed' ? k.passed : s === 'healed' ? k.healed : s === 'flaky' ? k.flaky : k.skipped)}</span></button>`).join('')}</div>
-<div class="ex-row2"><label>Group <select id="group"><option value="suite">Suite</option><option value="tag">Tag</option><option value="owner">Owner</option><option value="browser">Browser</option><option value="cluster">Failure cluster</option><option value="none">No grouping</option></select></label>
+<div class="ex-row2"><label>Group <select id="group"><option value="suite">Suite</option><option value="tag">Tag</option><option value="owner">Owner</option><option value="browser">Browser</option><option value="category">Failure category</option><option value="cluster">Failure cluster</option><option value="none">No grouping</option></select></label>
 <label>Sort <select id="sort"><option value="default">Run order</option><option value="severity">Failures first</option><option value="duration">Slowest first</option><option value="name">Name</option><option value="risk">Risk</option></select></label>
-<label>Tag <select id="f-tag"><option value="">Any</option></select></label><label>Owner <select id="f-owner"><option value="">Any</option></select></label><label>Browser <select id="f-browser"><option value="">Any</option></select></label></div>
+<label>Tag <select id="f-tag"><option value="">Any</option></select></label><label>Owner <select id="f-owner"><option value="">Any</option></select></label><label>Browser <select id="f-browser"><option value="">Any</option></select></label><label>Category <select id="f-cat"><option value="">Any</option></select></label></div>
 </div>
 <div class="ex-count" id="count" aria-live="polite"></div>
 <div class="vlist" id="vlist" role="tree" aria-label="Tests" tabindex="0"><div class="vlist-inner" id="vinner"></div></div></div>
@@ -382,6 +385,7 @@ ${o.featuresHtml ?? m.featuresHtml ?? ''}
 </div>
 <noscript><p>The interactive test list needs JavaScript. Failing tests are listed under Failure analysis.</p></noscript></section>
 ${failuresBlock(m)}
+${qualityBlock(m)}
 ${comparisonBlock(m)}
 ${integrationsBlock(m)}
 ${contextBlock(m)}

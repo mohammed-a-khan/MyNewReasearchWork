@@ -24,6 +24,8 @@ export const assetRoutes: StudioRoute[] = [
       const type = CONTENT_TYPES[ext] ?? 'application/octet-stream';
       const isReport = relPosix(runDir, abs) === 'report.html';
       res.setHeader('Content-Security-Policy', isReport ? REPORT_CSP : ASSET_CSP);
+      // The run report is shown inside Studio's Results page (same origin only).
+      if (isReport) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
       if (!CONTENT_TYPES[ext]) res.setHeader('Content-Disposition', 'attachment');
       const data = await readFile(abs);
       res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length });

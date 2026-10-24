@@ -17,7 +17,7 @@ import type { Journey } from '../core/index.js';
 import { loadJourneys, filterJourneys, bddOptionsFrom, defaultJourneyPaths } from '../cli/journeys.js';
 import { expandBrowserMatrix } from '../runner/browsers.js';
 import { HistoryStore, scoreHistory, loadRunArtifacts, triageRun, readEvidenceManifest } from '../insights/index.js';
-import type { ReportFormat } from '../report/index.js';
+import { attentionOf, readReportModel, REPORT_FILES, type ReportFormat } from '../report/index.js';
 import { reportOptionsFromConfig } from '../engine/analyze.js';
 import { HttpError } from './http.js';
 import type { EventHub, StudioEvent } from './events.js';
@@ -440,6 +440,30 @@ export async function runDetail(outputDir: string, runId: string, masker?: Secre
       insights = undefined;
     }
   }
+  const base = `/runs/${encodeURIComponent(runId)}/`;
+  const exportLabels: Array<[ReportFormat, string]> = [['pdf', 'PDF report'], ['xlsx', 'Excel workbook'], ['email', 'E-mail summary'], ['summary', 'One-page summary'], ['json', 'JSON'], ['junit', 'JUnit XML'], ['csv', 'CSV']];
+  const exportsList = exportLabels.filter(([f]) => existsSync(join(dir, REPORT_FILES[f]))).map(([f, label]) => ({ format: f, label, href: `${base}${REPORT_FILES[f]}` }));
+  // The report's run-level analysis (categories, what needs attention, quality lenses) for the overview.
+  let reportSummary: Record<string, unknown> | undefined;
+  try {
+    const m = await readReportModel(dir);
+    if (m) {
+      const a = attentionOf(m);
+      const pick = (list: Array<{ id: string; name: string }>) => list.slice(0, 20).map((t) => ({ id: t.id, name: t.name }));
+      reportSummary = {
+        verdict: { decision: m.verdict.decision, ...(m.verdict.score !== undefined ? { score: m.verdict.score } : {}), source: m.verdict.source },
+        kpis: m.kpis,
+        ...(m.previous ? { previous: { runId: m.previous.runId, kpis: m.previous.kpis } } : {}),
+        categories: m.categories ?? {},
+        failures: m.tests.filter((t) => t.cat).slice(0, 50).map((t) => ({ id: t.id, name: t.name, state: t.state, category: t.cat!.c, why: t.cat!.why, fix: t.cat!.fix, known: t.failure?.known ?? true, failedStep: t.failedStep, error: (t.error?.message ?? '').split('\n')[0].slice(0, 300) })),
+        attention: { newFailures: pick(a.newFailures), regressions: pick(a.regressions), flaky: pick(a.flaky), fixed: pick(a.fixed), slower: pick(a.slower) },
+        ...(m.lenses ? { lenses: { a11y: m.lenses.a11y?.counts, security: m.lenses.security?.counts, perf: m.lenses.perf?.metrics.filter((x) => x.status === 'fail' || x.status === 'warn').map((x) => x.metric) } } : {}),
+        trend: m.trend.map((t) => ({ runId: t.runId, passRate: t.passRate, durationMs: t.durationMs, current: !!t.current })),
+      };
+    }
+  } catch {
+    reportSummary = undefined;
+  }
   const detail = {
     run,
     evidence: evidenceMap,
@@ -447,6 +471,8 @@ export async function runDetail(outputDir: string, runId: string, masker?: Secre
     healProposals,
     insights,
     report: existsSync(join(dir, 'report.html')) ? `/runs/${encodeURIComponent(runId)}/report.html` : undefined,
+    exports: exportsList,
+    ...(reportSummary ? { reportSummary } : {}),
     ...(failed ? { state: 'error', error: failed.error } : {}),
   };
   return masker ? masker.maskDeep(detail) : detail;

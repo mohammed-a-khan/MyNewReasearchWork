@@ -50,8 +50,8 @@ export const PAGE_CSP =
   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 /** Generated HTML reports carry their own inline script/style and may not talk to the network. */
 export const REPORT_CSP =
-  "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; " +
-  "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+  "default-src 'none'; img-src 'self' data:; media-src 'self' blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; " +
+  "form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 /** Any other run artifact is sandboxed. */
 export const ASSET_CSP = "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'none'";
 
