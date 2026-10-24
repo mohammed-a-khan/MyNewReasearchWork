@@ -312,13 +312,19 @@ export class IdentityVault {
         await ctx.clearCookies();
         return false;
       }
-      if (renew && hops.some((u) => {
+      // Renewed on the way (the gateway sent the browser through the identity provider, which still knew the
+      // user): the cookies changed, so the cache is refreshed for the other journeys. Seen by the cookies, not by
+      // navigations: a redirect chain may commit no page on the provider's host.
+      const cookieKey = (list: Array<{ name: string; domain?: string; path?: string; value: string }> | undefined) =>
+        JSON.stringify((list ?? []).map((c) => `${c.domain}|${c.path ?? '/'}|${c.name}=${c.value}`).sort());
+      const viaOtherHost = hops.some((u) => {
         try {
           return new URL(u).origin !== origin;
         } catch {
           return false;
         }
-      })) {
+      });
+      if (renew && (viaOtherHost || cookieKey((await ctx.storageState()).cookies) !== cookieKey(state.cookies))) {
         await this.saveSession(page, role);
         this.logger.info(`Role ${role}: the gateway session was renewed through single sign-on; session cached`);
       }

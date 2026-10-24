@@ -116,9 +116,10 @@ describe.skipIf(!!skip)('an app behind a corporate SSO gateway (oauth2-proxy + K
         await humanType(page, 'Conference ticket');
         await humanClick(page, page.getByLabel('Amount'));
         await humanType(page, '199.00');
-        await humanClick(page, page.getByLabel('Category'));
-        await page.keyboard.press('ArrowDown');
-        await page.keyboard.press('Enter');
+        // Pick the category from the keyboard after clicking its label (Firefox draws an open drop-down outside the
+        // page, where automation's mouse and keys cannot reach; typing into the focused select works everywhere).
+        await humanClick(page, page.locator('label[for=category]'));
+        await humanType(page, 'M');
         // A date field takes its digits segment by segment (month, day, year here) from its first segment.
         const date = (await page.getByLabel('Date').boundingBox())!;
         await page.mouse.click(date.x + 12, date.y + date.height / 2);
