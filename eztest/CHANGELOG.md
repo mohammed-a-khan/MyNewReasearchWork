@@ -4,6 +4,10 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Fixed: real websites
+
+- Firefox ignored the machine's proxy (`HTTPS_PROXY`) and could not load any site on a network that only allows the proxy; it now follows the proxy variables as Chromium does. On Linux a temporary Firefox profile also trusts the certificates of the shared NSS database (`~/.pki/nssdb`, where a TLS-inspecting proxy CA is installed), so sites load in both browsers.
+
 ### Fixed: record, then run
 
 - An expectation typed in Studio while the last field was still being typed was attached to the step before it; pending typing is now recorded first.

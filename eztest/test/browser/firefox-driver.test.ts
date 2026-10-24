@@ -16,7 +16,7 @@ import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { startDemoApp, type DemoServer } from '../../examples/demo-app/server.js';
 import { firefox, type Browser, type BrowserContext, type Page } from '../../src/browser/index.js';
-import { findFirefox, firefoxCommandLine, firefoxPreferences, firefoxChannelCandidates, userJs, cachedFirefoxBuilds } from '../../src/browser/firefox/launch.js';
+import { adoptSharedCertificates, findFirefox, firefoxCommandLine, firefoxPreferences, firefoxChannelCandidates, userJs, cachedFirefoxBuilds } from '../../src/browser/firefox/launch.js';
 import { webdriverKeyValue } from '../../src/browser/firefox/input.js';
 import { netErrorText, headersFromBidi } from '../../src/browser/firefox/network.js';
 import { toLocalValue, fromRemoteValue } from '../../src/browser/firefox/realm.js';
@@ -63,6 +63,37 @@ describe('firefox launcher, preferences and keys (no browser needed)', () => {
     expect(() => findFirefox({ executablePath: '/nope/firefox' })).toThrow(/not found/);
     expect(() => findFirefox({ channel: 'chrome' })).toThrow(/Unknown Firefox channel/);
     expect(cachedFirefoxBuilds(join(tmpdir(), 'no-such-cache-dir'))).toEqual([]);
+  });
+
+  it('follows the machine proxy from the environment, as Chromium does, and connects directly without one', () => {
+    const keys = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'];
+    const saved = keys.map((k) => process.env[k]);
+    try {
+      for (const k of keys) delete process.env[k];
+      expect(firefoxPreferences({})['network.proxy.type']).toBe(0);
+      process.env.HTTPS_PROXY = 'http://proxy.corp:3128';
+      expect(firefoxPreferences({})['network.proxy.type']).toBe(5);
+      expect(firefoxPreferences({ proxy: { server: 'other:8080' } })['network.proxy.type']).toBe(1);
+    } finally {
+      keys.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
+    }
+  });
+
+  it('starts a temporary profile from the shared NSS certificate database (a TLS-inspecting proxy CA)', () => {
+    const db = mkdtempSync(join(tmpdir(), 'eztest-nssdb-'));
+    const profile = mkdtempSync(join(tmpdir(), 'eztest-ffprofile-'));
+    try {
+      expect(adoptSharedCertificates(profile, { EZTEST_NSSDB: db }, 'linux')).toBe(false);
+      writeFileSync(join(db, 'cert9.db'), 'certs');
+      writeFileSync(join(db, 'key4.db'), 'keys');
+      expect(adoptSharedCertificates(profile, { EZTEST_NSSDB: db }, 'linux')).toBe(true);
+      expect(readFileSync(join(profile, 'cert9.db'), 'utf8')).toBe('certs');
+      expect(readFileSync(join(profile, 'key4.db'), 'utf8')).toBe('keys');
+      expect(adoptSharedCertificates(profile, { HOME: db }, 'win32')).toBe(false);
+    } finally {
+      rmSync(db, { recursive: true, force: true });
+      rmSync(profile, { recursive: true, force: true });
+    }
   });
 
   it('maps layout keys to WebDriver key values', () => {

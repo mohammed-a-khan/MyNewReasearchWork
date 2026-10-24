@@ -262,6 +262,12 @@ popups allowed; a mouse-like pointer (`ui.primaryPointerCapabilities`, as
 the Chromium launch reports a fine pointer with hover); lazy images loading
 within about 1250px as in Chromium; the remote agent speaking BiDi
 (`remote.active-protocols`).
+Without a `proxy` option the profile follows `HTTPS_PROXY` / `HTTP_PROXY` /
+`NO_PROXY` (Firefox's system mode), as Chromium does, and connects directly
+when none is set. On Linux the temporary profile starts from a copy of the
+user's shared NSS certificate database (`~/.pki/nssdb`, or `EZTEST_NSSDB`),
+the one Chromium trusts, so a company's TLS-inspecting proxy CA is trusted
+by both browsers.
 `firefoxUserPrefs` adds or overrides preferences. The browser runs in its
 own process group; `close()` sends `browser.close`, then kills the group and
 removes the profile. `EZTEST_FIREFOX_SYSTEM_ACCESS=0` drops
