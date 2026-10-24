@@ -63,8 +63,9 @@ export async function click(page: Page, el: Locator, opts: { button?: 'left' | '
 
 /** A full-screen Google ad after a link click (#google_vignette): a person clicks its "Close" button. */
 export async function closeAdIfShown(page: Page): Promise<void> {
-  await settle(400);
+  for (let i = 0; i < 4 && !page.url().includes('#google_vignette'); i++) await settle(400);
   if (!page.url().includes('#google_vignette')) return;
+  await settle(1500); // the ad draws its close button
   for (const frame of page.frames()) {
     const close = frame.locator('#dismiss-button');
     if ((await close.count().catch(() => 0)) !== 1) continue;
@@ -81,9 +82,13 @@ export async function type(page: Page, text: string): Promise<void> {
   await page.keyboard.type(text, { delay: 35 });
 }
 
-/** Click a field and type into it. */
+/** Click a field, select what is in it, and type over it. */
 export async function fill(page: Page, el: Locator, text: string): Promise<void> {
   await click(page, el);
+  if (await el.inputValue().catch(() => '')) {
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+  }
   await type(page, text);
 }
 

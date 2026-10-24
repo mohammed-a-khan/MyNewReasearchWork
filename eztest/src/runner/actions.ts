@@ -82,7 +82,7 @@ const DEAD_CLICK_MS = 2000;
  * request, a new tab, a dialog or a download. Undefined when the element is a control whose effect is invisible
  * to that (a checkbox, a select, a file input), so it is never clicked twice.
  */
-async function watchEffects(target: Locator, ctx: StepContext): Promise<{ changed(ms: number): Promise<boolean>; stop(): void } | undefined> {
+async function watchEffects(target: Locator, ctx: StepContext): Promise<{ changed(ms: number): Promise<boolean>; failed(): boolean; stop(): void } | undefined> {
   const page = ctx.page;
   let ready: boolean;
   try {
@@ -103,20 +103,31 @@ async function watchEffects(target: Locator, ctx: StepContext): Promise<{ change
   }
   if (!ready) return undefined;
   let other = false;
+  let requested = false;
+  let threw = false;
   const onAny = () => { other = true; };
+  let failedOwn = false;
+  const onError = (e: Error) => {
+    threw = true;
+    // The page's own code failed (not an ad's or a tracker's): a handler that ran before the page was ready.
+    const urls = String(e?.stack ?? '').match(/https?:\/\/[^\s)]+/g) ?? [];
+    if (!urls.length || urls.some((u) => site(u) === own && !THIRD_PARTY.test(u))) failedOwn = true;
+  };
   // A request counts when the page's own site makes it: ad and analytics scripts send requests all the time.
   const site = (u: string) => { try { return new URL(u).hostname.split('.').slice(-2).join('.'); } catch { return ''; } };
   const own = site(page.url());
-  const onRequest = (r: { url(): string }) => { if (site(r.url()) === own && !THIRD_PARTY.test(r.url())) other = true; };
+  const onRequest = (r: { url(): string }) => { if (site(r.url()) === own && !THIRD_PARTY.test(r.url())) requested = true; };
   const onNav = (f: { parentFrame(): unknown }) => { if (!f.parentFrame()) other = true; };
   const url = page.url();
   const pages = ctx.session?.pages.lastNumber;
   page.on('request', onRequest);
+  page.on('pageerror', onError);
   page.on('dialog', onAny);
   page.on('download', onAny);
   page.on('framenavigated', onNav);
   const stop = () => {
     page.off('request', onRequest);
+    page.off('pageerror', onError);
     page.off('dialog', onAny);
     page.off('download', onAny);
     page.off('framenavigated', onNav);
@@ -136,11 +147,12 @@ async function watchEffects(target: Locator, ctx: StepContext): Promise<{ change
         return true; // gone, or the page moved on: the click did something
       }
       if (n === undefined || n > 0) return true;
-      if (Date.now() >= deadline) return false;
+      // A request of the page's own counts, unless the click's handler failed (it ran too early).
+      if (Date.now() >= deadline) return requested && !threw;
       await sleep(150);
     }
   };
-  return { changed, stop };
+  return { changed, failed: () => failedOwn, stop };
 }
 
 /** Whether all of a step's post-conditions hold right now (a click that needed no change). */
@@ -197,9 +209,25 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       // at all was too early (a server-rendered page whose scripts have not wired the button yet) and is repeated once.
       const watch = (step.postconditions.length || since !== undefined) && !a.modifiers && !a.clickCount ? await watchEffects(target, ctx) : undefined;
       await doClick();
-      if (watch && !(await watch.changed(DEAD_CLICK_MS)) && !(since === undefined && (await expectationsHold(step, ctx)))) {
-        ctx.logger.warn(`"${step.intent}": the click changed nothing on the page (its scripts were probably still starting); clicked again`, { stepId: step.id });
-        await doClick();
+      if (watch) {
+        const changed = await watch.changed(DEAD_CLICK_MS);
+        // The click's own handler threw: give its expectations the same 2 s, then click once more if they still fail.
+        let failed = false;
+        if (changed && watch.failed() && since === undefined) {
+          const until = Date.now() + DEAD_CLICK_MS;
+          failed = true;
+          while (Date.now() < until) {
+            if (await expectationsHold(step, ctx)) {
+              failed = false;
+              break;
+            }
+            await sleep(200);
+          }
+        }
+        if ((!changed || failed) && !(since === undefined && (await expectationsHold(step, ctx)))) {
+          ctx.logger.warn(`"${step.intent}": ${failed ? "the page's script failed on the click" : 'the click changed nothing on the page'} (it was probably still starting); clicked again`, { stepId: step.id });
+          await doClick();
+        }
       }
       watch?.stop();
       if (since !== undefined && ctx.session) {
@@ -234,7 +262,13 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       return {};
     }
     case 'download': {
-      const [download] = await Promise.all([page.waitForEvent('download', { timeout }), need().click({ timeout })]);
+      // A link the page's scripts have not wired yet starts no download: click it once more, as a person would.
+      const first = Math.min(5000, timeout);
+      let download = await Promise.all([page.waitForEvent('download', { timeout: first }), need().click({ timeout })]).then(([d]) => d).catch(() => undefined);
+      if (!download) {
+        ctx.logger.warn(`"${step.intent}": no download started within ${first} ms; clicked again`, { stepId: step.id });
+        [download] = await Promise.all([page.waitForEvent('download', { timeout: Math.max(1000, timeout - first) }), need().click({ timeout })]);
+      }
       const failure = await download.failure();
       if (failure) throw new EzTestError(`Download failed: ${failure}`, 'DOWNLOAD_FAILED');
       // The name the server gave the file is what "is named" checks; only the file kept on disk gets a safe, short name.

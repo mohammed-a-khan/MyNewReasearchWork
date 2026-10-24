@@ -36,6 +36,7 @@ describe.skipIf(!ONLINE)('practicetestautomation.com login', () => {
       await page.keyboard.press('Control+A');
       await page.keyboard.press('Backspace');
       await page.keyboard.type('student', { delay: 35 });
+      await fill(page, page.getByLabel('Password'), PASSWORD);
       await click(page, page.getByRole('button', { name: 'Submit' }));
       await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('logged-in-successfully');
       await rec.addExpectation('user lands on "Logged In Successfully" screen');
@@ -51,6 +52,7 @@ describe.skipIf(!ONLINE)('practicetestautomation.com login', () => {
       'Click the "Submit" button',
       '  Expect page contains "Your username is invalid!"',
       'Type "student" into the Username field',
+      'Type "${password}" into the Password field',
       'Click the "Submit" button',
       '  Expect URL contains "/logged-in-successfully/"',
       '  Expect page contains "Logged In Successfully"',

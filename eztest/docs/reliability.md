@@ -73,7 +73,9 @@ A server-rendered page shows its buttons before its scripts wire them; a click t
 that must have an effect (it has post-conditions, or opens a tab) is watched: when nothing at all happens
 within 2 s (no change in the element's document, no navigation, request, new tab, dialog or download) and
 its post-conditions do not already hold, it is clicked once more and the log says so. Checkboxes, radio
-buttons, switches, selects, labels and file inputs are never clicked twice.
+buttons, switches, selects, labels and file inputs are never clicked twice. The same goes for a click whose
+handler threw an error in the page's own script while its post-conditions still fail 2 s later. A
+`Download ...` step whose click started no download within 5 s clicks once more.
 
 ### Ads and consent walls in front of the page
 

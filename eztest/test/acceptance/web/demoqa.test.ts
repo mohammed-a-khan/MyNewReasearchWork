@@ -50,8 +50,8 @@ describe.skipIf(!ONLINE)('demoqa.com', () => {
       });
       expectPlainEnglish(r);
       const lines = bodyOf(r);
-      // Four "Click me" buttons: each is named by the label next to it, in words.
-      expect(lines.filter((l) => /^Click the "Click me" button /.test(l)).length).toBe(4);
+      // Four "Click me" buttons: each is named by its row, or by the id the page gave it; never by position or CSS.
+      expect(lines.filter((l) => /^Click (?:the "Click me" button in the row containing "[^"]+"|#\w+Button)$/.test(l)).length, r.ez).toBe(4);
       expect(lines).toContain('Accept the next confirm dialog');
       expect(lines).toContain('Answer the next prompt with "Grace"');
       expect(lines).toContain('  Expect an alert saying "This alert appeared after 5 seconds"');

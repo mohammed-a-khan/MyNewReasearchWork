@@ -1037,6 +1037,12 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         if (isField(el) && pending.has(el)) { var ev = fillEvent(el); if (ev) send(ev); }
       }, true);
       W.addEventListener('focusout', function (e) { sendPending(editHost(targetOf(e))); }, true);
+      // The page changed the field since it was recorded (a login page empties the password after a failed try):
+      // typing the same text again is a step again.
+      W.addEventListener('focusin', function (e) {
+        var el = editHost(targetOf(e));
+        if (el && lastSent.has(el) && lastSent.get(el) !== editedText(el)) lastSent.delete(el);
+      }, true);
       // Leaving a frame (a rich-text editor's iframe) moves focus out of its window, not out of an element in it.
       W.addEventListener('blur', function (e) { if (e.target === W) flushPending().forEach(function (ev) { send(ev); }); }, true);
       W.addEventListener('keydown', function (e) {
