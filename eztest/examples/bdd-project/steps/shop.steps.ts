@@ -2,7 +2,7 @@
  * Step definitions for the EZ Shop features: UI, API and database steps through
  * the EZTest SDK, a custom parameter type and the World.
  */
-import { Given, When, Then, defineParameterType, setWorldConstructor, type DataTable } from '@mohammed-a-khan/eztest/bdd';
+import { Given, When, Then, defineParameterType, setWorldConstructor, type DataTable } from '@eztech/eztest/bdd';
 
 /** What the steps of one scenario share. A new World is made for every scenario attempt. */
 class ShopWorld {

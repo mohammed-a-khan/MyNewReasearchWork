@@ -175,7 +175,7 @@ describe('task handler: orchestration', () => {
 });
 
 describe('task handler: "package" install mode', () => {
-  it('installs @mohammed-a-khan/eztest at the requested version (never the unrelated unscoped "eztest")', async () => {
+  it('installs @eztech/eztest at the requested version (never the unrelated unscoped "eztest")', async () => {
     const { project, dir } = await runDir(undefined, 0);
     const calls: string[][] = [];
     const r = await handler.main(
@@ -189,14 +189,14 @@ describe('task handler: "package" install mode', () => {
       },
     );
     expect(r.result).not.toBe('Failed');
-    expect(calls[0].slice(1)).toEqual(['install', '--no-save', '--no-audit', '--no-fund', '@mohammed-a-khan/eztest@0.1.0']);
+    expect(calls[0].slice(1)).toEqual(['install', '--no-save', '--no-audit', '--no-fund', '@eztech/eztest@0.1.0']);
     const failing = await handler.main(
       { INPUT_COMMAND: 'run', INPUT_WORKINGDIRECTORY: project, INPUT_INSTALL: 'package', INPUT_EZTESTVERSION: 'latest' },
       { exec: async () => ({ code: 1, stdout: '' }), write: () => undefined },
     );
-    expect(failing).toMatchObject({ result: 'Failed', message: 'npm install @mohammed-a-khan/eztest@latest failed' });
+    expect(failing).toMatchObject({ result: 'Failed', message: 'npm install @eztech/eztest@latest failed' });
     const task = JSON.parse(readFileSync(join(EXT, 'tasks', 'EZTest', 'task.json'), 'utf8')) as { inputs: Array<{ name: string; options?: Record<string, string> }> };
-    expect(task.inputs.find((i) => i.name === 'install')!.options!.package).toBe('npm install @mohammed-a-khan/eztest (version below)');
+    expect(task.inputs.find((i) => i.name === 'install')!.options!.package).toBe('npm install @eztech/eztest (version below)');
   });
 });
 

@@ -78,7 +78,7 @@ With `validate: both` (the default), the request is checked against the WSDL's s
 
 **Signed responses** (`verify`): the signature must be valid, cover the envelope's own Body and Timestamp (a signed element moved elsewhere, as in signature wrapping, does not count, and duplicate ids are refused), be made by one of the trusted `certificates`, and the Timestamp must be current (5 minutes of clock skew allowed). `require: false` accepts unsigned responses. An unsigned SOAP fault is reported as the fault. Verification accepts SHA-1, SHA-256 and SHA-512 digests, RSA-SHA1/256/512 signatures, and exclusive or inclusive canonicalization, with or without comments.
 
-The same functions are available in code (`@mohammed-a-khan/eztest/surfaces`): `applyWsSecurity`, `verifyWsSecurity`, `checkUsernameToken` (the receiving side, for service stand-ins), `signXml`, `verifyXmlSignature` and `canonicalize`.
+The same functions are available in code (`@eztech/eztest/surfaces`): `applyWsSecurity`, `verifyWsSecurity`, `checkUsernameToken` (the receiving side, for service stand-ins), `signXml`, `verifyXmlSignature` and `canonicalize`.
 
 **How it is tested.** Canonicalization against the examples of the W3C Canonical XML 1.0 and Exclusive XML Canonicalization recommendations, and against libxml2 (`xmllint --c14n` / `--exc-c14n`) where it is installed. Signatures by a SOAP test server that verifies them like a strict service, and independently with Python's lxml (libxml2) recomputing the digests and the canonical SignedInfo, and OpenSSL checking the RSA signature. Tampering, untrusted signers, signature wrapping and expired timestamps are rejected.
 

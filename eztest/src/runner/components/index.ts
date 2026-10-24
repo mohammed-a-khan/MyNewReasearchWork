@@ -3,7 +3,7 @@
  * library renders them. Plain functions over EZTest driver locators, so code
  * (the EZTest SDK, a code journey, a custom step) can use them directly:
  *
- *   import { locateWidget, clickGridRow, chooseOptions, pickDate } from '@mohammed-a-khan/eztest/components';
+ *   import { locateWidget, clickGridRow, chooseOptions, pickDate } from '@eztech/eztest/components';
  *   const orders = await locateWidget(page, 'the Orders grid', 'grid');
  *   await clickGridRow(orders, { Customer: 'Contoso', Status: 'Open' });
  *   await chooseOptions(await locateWidget(page, 'the City combobox', 'combobox'), ['Berlin']);

@@ -1,5 +1,5 @@
 # EZTest on GitHub Actions (written by eztest init --ci github; docs/pipelines.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   pull_request        -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   schedule (nightly)  -> regression: --pipeline nightly in duration-balanced shards, merged into one verified run

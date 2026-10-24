@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 
 /** The npm package name (the CLI is still called `eztest`). */
-export const PACKAGE_NAME = '@mohammed-a-khan/eztest';
+export const PACKAGE_NAME = '@eztech/eztest';
 
 function readVersion(): string {
   for (const rel of ['../../package.json', '../package.json']) {

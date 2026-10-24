@@ -106,7 +106,7 @@ Found by acceptance tests on a real OrangeHRM 5.7 and its MariaDB (`test/accepta
 
 ### Hardening after the first audit
 
-- **The npm package is `@mohammed-a-khan/eztest`** (the unscoped `eztest` is an unrelated package); the command is still `eztest`, and imports use the scoped name (`@mohammed-a-khan/eztest/sdk`; the bare `eztest/...` still resolves in code journeys). `publishConfig.access` is public.
+- **The npm package is `@eztech/eztest`** (the unscoped `eztest` is an unrelated package); the command is still `eztest`, and imports use the scoped name (`@eztech/eztest/sdk`; the bare `eztest/...` still resolves in code journeys). `publishConfig.access` is public.
 - **A fresh `eztest init` project is GO when its run is green**: the config records accessibility results (`lenses: [a11y:warn]`) and the example is a risk 4 journey, as the readiness policy expects. Its `.gitignore` adds `node_modules/` and keeps quarantine, heal decisions, triage overrides and baselines committable.
 - **`EZTEST_SERVER_TOKEN` is read directly** (it was looked up through the env secret store's prefix and never found); `server.token: secret://...` still works.
 - **Debugger Stop aborts the journey**: the paused and later steps are not run, the session ends as stopped, and cleanup and teardown hooks still run (`RunOptions.teardownOnCancel`).

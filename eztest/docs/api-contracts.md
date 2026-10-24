@@ -372,7 +372,7 @@ Stop GraphQL subscription updates
 
 - **Validation** introspects the server once and checks the document with EZTest's own GraphQL parser and validator: fields on the right types (with suggestions), union selections, leaf and object selections, arguments (unknown, missing, repeated) and literal values (Int range, enum values, input objects), fragments (unknown, unused, cycles, impossible spreads), variables (undefined, unused, output types, nullable passed where a value is required), directives and operations (one root field per subscription). Every problem has its line:column; the step lists them all. A server with introspection disabled is reported as such.
 - **Subscriptions** use the graphql-transport-ws protocol on EZTest's own WebSocket client: `connection_init` (carrying the role's `authorization`, which is also sent as a handshake header), `connection_ack`, `subscribe`, `next` / `error` / `complete`, ping / pong. Events are buffered from the subscribe step on, so a wait sees events that came first. A refused `connection_init` (close code 4403) fails the step as forbidden.
-- **SDK**: `graphql.query`, `graphql.validate`, `graphql.introspect`, `graphql.subscribe(...).next(where).stop()` from `@mohammed-a-khan/eztest/sdk` (also `ctx.graphql`); programmatically, `GraphQLClient.introspect()` / `.validate()`, `validateGraphQL(document, schema)` and `GraphQLWsClient` from `@mohammed-a-khan/eztest/surfaces`.
+- **SDK**: `graphql.query`, `graphql.validate`, `graphql.introspect`, `graphql.subscribe(...).next(where).stop()` from `@eztech/eztest/sdk` (also `ctx.graphql`); programmatically, `GraphQLClient.introspect()` / `.validate()`, `validateGraphQL(document, schema)` and `GraphQLWsClient` from `@eztech/eztest/surfaces`.
 - Not covered: the older `subscriptions-transport-ws` protocol, and validation rules that need execution semantics (overlapping field merging, `@defer` / `@stream`).
 
 ## WebSocket with headers and certificates
@@ -381,7 +381,7 @@ Stop GraphQL subscription updates
 
 ## Programmatic API
 
-The `@mohammed-a-khan/eztest/contracts` subpath exports these functions:
+The `@eztech/eztest/contracts` subpath exports these functions:
 
 | Area | Functions |
 |---|---|
@@ -390,7 +390,7 @@ The `@mohammed-a-khan/eztest/contracts` subpath exports these functions:
 | Mocks | `createOpenApiMock`, `mockStoreFromSpec` |
 | Contract files | `parseContract`, `readContractFile`, `contractToJson`, `contractHash`, `inferMatchers`, `compareResponse` |
 | Verification | `verifyContract`, `stateHandlersFromConfig`, `messageProducersFromConfig`, `compareMessage` |
-| Releases | `evaluateCanRelease`; the results-server client (`ResultsClient` from `@mohammed-a-khan/eztest/server`): `publishContract`, `contracts`, `recordVerification`, `recordRelease`, `canRelease` |
+| Releases | `evaluateCanRelease`; the results-server client (`ResultsClient` from `@eztech/eztest/server`): `publishContract`, `contracts`, `recordVerification`, `recordRelease`, `canRelease` |
 
 ## Limits
 

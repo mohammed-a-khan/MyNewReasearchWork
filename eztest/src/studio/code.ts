@@ -81,7 +81,7 @@ export async function validateCode(text: string, path = 'file.ts'): Promise<Vali
 export function codeJourneyTemplate(name: string): string {
   const clean = name.replace(/[\r\n'\\]+/g, ' ').trim() || 'New journey';
   return [
-    "import { journey, step, expect } from '@mohammed-a-khan/eztest/sdk';",
+    "import { journey, step, expect } from '@eztech/eztest/sdk';",
     '',
     `journey('${clean}', { tags: ['@draft'], risk: 3 }, async ({ ui }) => {`,
     "  await step('Open the app', async () => {",

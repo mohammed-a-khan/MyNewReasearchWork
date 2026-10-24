@@ -1,8 +1,8 @@
-# Code journeys: the TypeScript SDK (`@mohammed-a-khan/eztest/sdk`)
+# Code journeys: the TypeScript SDK (`@eztech/eztest/sdk`)
 
 Most journeys are best written in plain English (`.ez`). Some logic is easier to write as
 code: loops over query rows, `switch` on data, date arithmetic, file round trips, or
-migrated test code. `@mohammed-a-khan/eztest/sdk` covers those cases. Every UI call in the SDK goes through
+migrated test code. `@eztech/eztest/sdk` covers those cases. Every UI call in the SDK goes through
 the same runner path as an `.ez` step:
 
 - strict locating;
@@ -15,7 +15,7 @@ published the same way.
 
 ```ts
 // journeys/orders.journey.ts
-import { journey, step, expect } from '@mohammed-a-khan/eztest/sdk';
+import { journey, step, expect } from '@eztech/eztest/sdk';
 import { Login, NewOrder, Order } from '../screens/shop.js';
 
 journey('Order for every EU customer', { tags: ['@orders'], requirements: ['REQ-12'], risk: 4 }, async ({ ui, db, dates, files, vars }) => {
@@ -63,7 +63,7 @@ call, so reports, history and breakpoints all point at code.
 
 Registers a code journey. `fn` receives an `SdkContext` (`{ ui, api, db, data, files, dates,
 identity, vars, log, expect, step, run, soft }`). The same objects can also be imported
-from `@mohammed-a-khan/eztest/sdk`.
+from `@eztech/eztest/sdk`.
 
 | Option | Meaning (same as the `.ez` header) |
 |---|---|
@@ -126,7 +126,7 @@ A string uses the `.ez` phrases (`ui.click('the "Edit" button in the row contain
 Helpers build the same scopes from elements:
 
 ```ts
-import { within, inRow, below, above, rightOf, leftOf, near, nth } from '@mohammed-a-khan/eztest/sdk';
+import { within, inRow, below, above, rightOf, leftOf, near, nth } from '@eztech/eztest/sdk';
 
 await ui.click(inRow('Acme', 'the "Edit" button'));
 await ui.fill(within(Checkout.billing, below('"Email"', 'the field')), 'a@b.c');
@@ -160,7 +160,7 @@ Every call is a runner step with its own intent, evidence and trace entry.
 | Dialogs and session | `acceptNextDialog(answer?)`, `dismissNextDialog()`, `lastDialog()`, `clearSession()` |
 | Components | `component(widget, name, op, args?)`: a grid, combo box, date picker, tree, tab, dialog or other library widget step, run like the `.ez` Components phrasings (strict widget lookup, library detection, read-back verification, healing, evidence); returns what `readCell`, `readAll` or `capture` reads. See [components.md](components.md) |
 | Identity | `login(role?)`, the verified Identity Vault login with session reuse |
-| Other | `screenshot(name)` (added to evidence), `page()`, the raw browser page from `@mohammed-a-khan/eztest/browser` (see below) |
+| Other | `screenshot(name)` (added to evidence), `page()`, the raw browser page from `@eztech/eztest/browser` (see below) |
 
 Action options (`ActionOptions`):
 
@@ -172,7 +172,7 @@ Action options (`ActionOptions`):
 | `poll` | `{ attempts, intervalMs }`: re-run the action until its post-conditions hold |
 | `intent` | Report text (default: generated, e.g. `Click Sign in button`) |
 
-`ui.page()` gives the raw browser page (the `Page` type of `@mohammed-a-khan/eztest/browser`) as an escape hatch. Calls made on it are not
+`ui.page()` gives the raw browser page (the `Page` type of `@eztech/eztest/browser`) as an escape hatch. Calls made on it are not
 located strictly, healed, verified or recorded as evidence. Prefer `ui.*`.
 
 ## `expect`
@@ -305,7 +305,7 @@ Expect ${totals.count} == 2
 
 ```ts
 // steps/billing.steps.ts
-import { codeStep } from '@mohammed-a-khan/eztest/sdk';
+import { codeStep } from '@eztech/eztest/sdk';
 export const orderTotals = codeStep<{ region: string; minLimit: string }>(async ({ db }, { region, minLimit }) => {
   const rows = await db.query<{ name: string; credit_limit: number }>('CUSTOMERS_BY_REGION', { region });
   const big = rows.filter((r) => r.credit_limit >= Number(minLimit));
@@ -372,7 +372,7 @@ host process.
 Discovery for the Studio's file list is a **static scan** of `journey(...)` calls. Listing
 journeys never executes code. Code runs only when a journey runs or validates.
 
-Typecheck with your own `tsc --noEmit`. The SDK ships `.d.ts` files (`@mohammed-a-khan/eztest/sdk`). The
+Typecheck with your own `tsc --noEmit`. The SDK ships `.d.ts` files (`@eztech/eztest/sdk`). The
 Studio checks syntax as you type but does not typecheck.
 
 ## Studio, trace and debugger

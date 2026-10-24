@@ -70,13 +70,13 @@ const RULES: Rule[] = [
   },
   {
     c: 'test',
-    re: /no locator candidate matched|matched (\d+|several|multiple) elements|strict mode violation|resolved to \d+ elements|element is not attached|detached from the DOM|stale element|not (an? )?(input|select|checkbox)|unknown step|undefined step|ambiguous step|no step definition|cannot parse|SyntaxError|ReferenceError|TypeError|is not a function|is not defined/i,
+    re: /no locator candidate matched|matched (\d+|several|multiple) elements|resolved to \d+ elements|element is not attached|detached from the DOM|stale element|not (an? )?(input|select|checkbox)|unknown step|undefined step|ambiguous step|no step definition|cannot parse|SyntaxError|ReferenceError|TypeError|is not a function|is not defined/i,
     why: 'the test could not find or drive the element, or the test code is wrong',
     fix: 'Open the failing screenshot and the DOM snapshot: if the element is there under a new name or position, update the locator (or accept a heal proposal with eztest heal); if it is genuinely gone, the product changed - file a bug or update the journey.',
   },
   {
     c: 'test',
-    re: /timeout \d+ ?ms exceeded[\s\S]*(waiting for|locator|selector|element)|waiting for (locator|selector|element|get[A-Z]\w*\()|element is not (visible|enabled|stable)|intercepts pointer events|not clickable/i,
+    re: /timeout \d+ ?ms exceeded[\s\S]*(waiting for|locator|selector|element)|waiting for (locator|selector|element|get[A-Z]\w*\()|element is not (visible|enabled|stable)|covered by another element|not clickable/i,
     why: 'the element did not become ready in time',
     fix: 'The element existed but was hidden, disabled, covered or still moving. Wait for the state the step needs (an explicit "Expect ... to be visible" before it) or close the overlay that covers it; if the page is genuinely slower, raise the step timeout.',
   },

@@ -1,9 +1,9 @@
 /**
  * A fresh project, the way a user gets one: the published tarball (`npm pack`)
- * installed as @mohammed-a-khan/eztest, `eztest init`, the example pointed at a
+ * installed as @eztech/eztest, `eztest init`, the example pointed at a
  * local site, `eztest run`, then `eztest gate`. A fully passing run of what
  * init writes must be GO, and the package's subpath exports must resolve by
- * the scoped name (a code journey imports @mohammed-a-khan/eztest/sdk).
+ * the scoped name (a code journey imports @eztech/eztest/sdk).
  *
  * Needs dist/ (npm run build), like the other tests of the published package.
  */
@@ -58,13 +58,13 @@ describe('a fresh project from the packed package', () => {
     const packed = await sh('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', base], ROOT);
     expect(packed.code, packed.out).toBe(0);
     const info = JSON.parse(packed.out.slice(packed.out.indexOf('['))) as Array<{ name: string; filename: string }>;
-    expect(info[0].name).toBe('@mohammed-a-khan/eztest');
+    expect(info[0].name).toBe('@eztech/eztest');
     const tarball = join(base, info[0].filename.replace(/^@/, '').replace(/\//g, '-'));
     expect(existsSync(tarball), `${tarball} in ${(await readdir(base)).join(', ')}`).toBe(true);
 
-    // "npm install" without the network: unpack into node_modules/@mohammed-a-khan/eztest, link the
+    // "npm install" without the network: unpack into node_modules/@eztech/eztest, link the
     // runtime dependencies from this repository's install, and add the bin the way npm does.
-    const pkgDir = join(project, 'node_modules', '@mohammed-a-khan', 'eztest');
+    const pkgDir = join(project, 'node_modules', '@eztech', 'eztest');
     await mkdir(pkgDir, { recursive: true });
     const untar = await sh('tar', ['-xzf', tarball, '-C', pkgDir, '--strip-components=1'], base);
     expect(untar.code, untar.out).toBe(0);
@@ -75,7 +75,7 @@ describe('a fresh project from the packed package', () => {
       await mkdir(join(at, '..'), { recursive: true });
       await symlink(join(ROOT, 'node_modules', dep), at, 'dir');
     }
-    await writeFile(join(project, 'package.json'), JSON.stringify({ name: 'fresh-project', private: true, type: 'module', devDependencies: { '@mohammed-a-khan/eztest': '0.1.0' } }, null, 2));
+    await writeFile(join(project, 'package.json'), JSON.stringify({ name: 'fresh-project', private: true, type: 'module', devDependencies: { '@eztech/eztest': '0.1.0' } }, null, 2));
     const bin = join(pkgDir, manifest.bin.eztest);
     const eztest = (args: string[]) => sh(process.execPath, [bin, ...args], project, { EZTEST_ADO_ORG_URL: undefined, EZTEST_ADO_PROJECT: undefined, CI: undefined });
 
@@ -91,7 +91,7 @@ describe('a fresh project from the packed package', () => {
     const exPath = join(project, 'journeys', 'example.ez');
     await writeFile(exPath, (await readFile(exPath, 'utf8')).replace('Expect the page to contain "Welcome"', 'Expect the page to contain "Welcome to the shop"'));
     // A code journey importing the SDK by the package name (a subpath export of the installed package).
-    await writeFile(join(project, 'journeys', 'stock.journey.mjs'), `import { journey, expect } from '@mohammed-a-khan/eztest/sdk';
+    await writeFile(join(project, 'journeys', 'stock.journey.mjs'), `import { journey, expect } from '@eztech/eztest/sdk';
 journey('Stock message shows', { tags: ['@smoke'] }, async ({ ui }) => {
   await ui.open('/');
   await expect.ui.page().toContainText('Everything is in stock');

@@ -3,12 +3,12 @@
 **One package for verified, end-to-end test automation.** Web UI, native Android and iOS apps, APIs, databases, PDFs and reports, logins with MFA, test data, accessibility, security, performance and release readiness, in a single npm package with a single command.
 
 ```bash
-npm install @mohammed-a-khan/eztest   # one package, everything included
+npm install @eztech/eztest   # one package, everything included
 npx eztest init                       # config, example journey, readiness policy
 npx eztest run                        # run, heal, triage, report, decide
 ```
 
-The npm package is `@mohammed-a-khan/eztest` (the unscoped `eztest` on npm is an unrelated package). It installs the `eztest` command, so `npx eztest …` works in a project that has it installed. Imports use the package name: `import { journey } from '@mohammed-a-khan/eztest/sdk'`.
+The npm package is `@eztech/eztest` (the unscoped `eztest` on npm is an unrelated package). It installs the `eztest` command, so `npx eztest …` works in a project that has it installed. Imports use the package name: `import { journey } from '@eztech/eztest/sdk'`.
 
 ### Browsers
 
@@ -140,7 +140,7 @@ Compare document invoice to the order using invoice-vs-order
 ## Use it from code
 
 ```ts
-import { runEzTest, parseEzScript, docs } from '@mohammed-a-khan/eztest';
+import { runEzTest, parseEzScript, docs } from '@eztech/eztest';
 
 const { run, analysis } = await runEzTest({ cwd: process.cwd() });
 console.log(run.summary, analysis?.readiness?.decision);
@@ -148,15 +148,15 @@ console.log(run.summary, analysis?.readiness?.decision);
 const doc = await docs.extractPdf('invoice.pdf', { template: 'fields: [{ name: total, label: Total }]' });
 ```
 
-Every module is available as a namespace (`docs`, `insights`, `identity`, `data`, `surfaces`, `perf`, `lenses`, `ado`, …) and as a subpath import (`@mohammed-a-khan/eztest/docs`).
+Every module is available as a namespace (`docs`, `insights`, `identity`, `data`, `surfaces`, `perf`, `lenses`, `ado`, …) and as a subpath import (`@eztech/eztest/docs`).
 
-### Code journeys (`@mohammed-a-khan/eztest/sdk`)
+### Code journeys (`@eztech/eztest/sdk`)
 
 When a journey needs loops over query rows, `switch`, date math or file round trips, write it in TypeScript:
 
 ```ts
 // journeys/orders.journey.ts
-import { journey, step, expect } from '@mohammed-a-khan/eztest/sdk';
+import { journey, step, expect } from '@eztech/eztest/sdk';
 import { NewOrder, Order } from '../screens/shop.js';
 
 journey('Order for every EU customer', { tags: ['@orders'] }, async ({ ui, db }) => {
@@ -183,13 +183,13 @@ What you get with code journeys:
 
 Importer plugins can write logic that `.ez` cannot express as SDK code. See [docs/sdk.md](docs/sdk.md).
 
-### Gherkin features, run natively (`@mohammed-a-khan/eztest/bdd`)
+### Gherkin features, run natively (`@eztech/eztest/bdd`)
 
 BDD teams keep their `.feature` files and run them as they are, with step definitions in TypeScript:
 
 ```ts
 // steps/orders.steps.ts
-import { Given, Then } from '@mohammed-a-khan/eztest/bdd';
+import { Given, Then } from '@eztech/eztest/bdd';
 
 Given('the customer {string} has {int} orders', async ({ db, world }, name, n) => { /* ... */ });
 Then('the order total is {float}', async ({ expect }, total) => expect.ui.text('testid=order-total').toBe(total.toFixed(2)));
@@ -214,8 +214,8 @@ See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](https://github.com/moh
 | Area | Capabilities |
 |---|---|
 | Authoring | `.ez` plain-English grammar, YAML/JSON journeys, round-trip conversion |
-| BDD | Gherkin `.feature` files run natively with TypeScript step definitions (`@mohammed-a-khan/eztest/bdd`): EZTest's own Gherkin parser (Rule, Background, outlines with tagged Examples, doc strings, data tables, ten languages), step and tag expressions, the World, hooks, snippets for undefined steps, the plain-English fallback, external Examples, feature/rule/scenario reports and Studio support ([docs/bdd.md](docs/bdd.md)) |
-| Runner | Chrome, Edge, Chromium and Electron (CDP) and Firefox (WebDriver BiDi) on EZTest's own browser driver, `@mohammed-a-khan/eztest/browser` ([docs/browser-driver.md](docs/browser-driver.md)); Safari/WebKit is not supported; strict locators, all actions and post-conditions, retries, parallel journeys in worker processes with their own browsers (a crash or a CPU-bound journey affects only itself; [docs/scale.md](docs/scale.md#process-workers)), waits that adapt to machine load ([docs/reliability.md](docs/reliability.md#waits-under-load)), traces, downloads, run ledger |
+| BDD | Gherkin `.feature` files run natively with TypeScript step definitions (`@eztech/eztest/bdd`): EZTest's own Gherkin parser (Rule, Background, outlines with tagged Examples, doc strings, data tables, ten languages), step and tag expressions, the World, hooks, snippets for undefined steps, the plain-English fallback, external Examples, feature/rule/scenario reports and Studio support ([docs/bdd.md](docs/bdd.md)) |
+| Runner | Chrome, Edge, Chromium and Electron (CDP) and Firefox (WebDriver BiDi) on EZTest's own browser driver, `@eztech/eztest/browser` ([docs/browser-driver.md](docs/browser-driver.md)); Safari/WebKit is not supported; strict locators, all actions and post-conditions, retries, parallel journeys in worker processes with their own browsers (a crash or a CPU-bound journey affects only itself; [docs/scale.md](docs/scale.md#process-workers)), waits that adapt to machine load ([docs/reliability.md](docs/reliability.md#waits-under-load)), traces, downloads, run ledger |
 | Native mobile | `Platform: android\|ios` journeys on EZTest's own drivers: an ADB client (smart-socket protocol) plus the EZTest Android agent (androidx.test.uiautomator), and the EZTest iOS XCTest agent over usbmuxd; taps, typing, gestures (swipe-until, long press, pinch, drag), app lifecycle, deep links, permissions, connectivity, files, hybrid web views over the DevTools socket, verified healing over the page source, screenshots and page-source evidence, native time-travel traces and a Studio Device tab ([docs/mobile.md](docs/mobile.md)). *Test status: the Android driver and agent have never run on a real device or emulator (they are tested against EZTest's own stand-ins); the iOS agent has never been compiled.* |
 | Pages and frames | Tabs, windows and popups (open, follow, switch by number/title/URL, close, count), nested iframes by name/id/title/URL/selector with frame blocks; evidence, conditions and healing follow the current tab and frame |
 | Dialogs | Accept, dismiss or answer the next alert/confirm/prompt/beforeunload, expect and capture dialog text; unexpected dialogs are recorded, handled by policy and never hang a run |
@@ -243,13 +243,13 @@ See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](https://github.com/moh
 | Team server | Results server with dashboards, shared state, OIDC/PKCE sign-in, per-project RBAC, audit log and retention ([docs/server.md](docs/server.md)) |
 | Shared test data | A shared store (namespaces, expiry, secrets sealed and masked) and data pools claimed once across workers and machines; `Setup:` journeys with run-wide values; values handed to later pipeline stages as output variables ([docs/shared-data.md](docs/shared-data.md)) |
 | Pipelines | `pipelines:` maps PR, nightly and deployment stages to journeys; CI files for seven systems; deployment test records per environment and version; release gates ([docs/pipelines.md](docs/pipelines.md)) |
-| Extensibility | Typed plugin API (`@mohammed-a-khan/eztest/plugins`) with an API version check ([docs/plugins.md](docs/plugins.md)) |
+| Extensibility | Typed plugin API (`@eztech/eztest/plugins`) with an API version check ([docs/plugins.md](docs/plugins.md)) |
 | Operations | Docker image and compose example, `doctor --json`, JSON logs, OpenTelemetry traces, config schema versioning ([docs/operations.md](docs/operations.md)) |
 | Dynamics 365 | Metadata-aware steps (`Set "Account Name" to "Contoso" on the form`, lookups, save, process stages, views), Dataverse Web API cross-checks, release-wave impact analysis. *Test status: tested against EZTest's own stand-in for D365 and Dataverse, not a real environment.* |
 | Desktop and legacy | One journey language over a driver ladder: Electron (own CDP), Windows UI Automation and Java Swing through EZTest's own agents, SAP GUI Scripting (own bridge; VA01-style status-bar capture), TypeScript TN3270 and TN5250 clients (labels, row/column, AID/function keys, IBM Z TSO and IBM i sign-on, shared phrasings), and an image + OCR rung for Citrix/VDI and canvas (NCC template matching across DPI scales, tesseract.js, own VNC client); fingerprint healing verified by post-conditions, screen evidence with match boxes. See [docs/desktop-and-legacy.md](docs/desktop-and-legacy.md). *Test status: the Windows UI Automation and SAP GUI agents have never run (they are tested against EZTest's own stand-ins).* |
 | Salesforce | Lightning steps that see through shadow DOM (`Set Salesforce field "Industry" to "Energy"`, picklists and dependent picklists, strict lookups, path stages, toasts, validation errors, list views, related lists), SOQL cross-checks through a metadata-validated builder (no string-built queries), permission matrix per user via API and UI, release impact analysis. *Test status: tested against EZTest's own stand-in for Lightning and the Salesforce APIs, not a real org.* |
 | Packaged apps | Each pack has a role and permission matrix. **SAP Fiori/UI5**: OData-aware Smart Fields resolved through the page's UI5 bindings, value helps and the message popover; OData V2/V4 cross-checks; transport impact for Fiori and SAP GUI journeys. **ServiceNow**: UI16 forms by dictionary label, UI actions, related lists and Service Portal catalog variables; Table API cross-checks; update-set and skipped-upgrade impact. **Workday**: prompts, the date widget, related actions and the business process inbox; WQL, REST and SOAP cross-checks; tenant-preview impact. **Oracle**: Fusion Redwood LOVs and tables, EBS OA Framework LOVs; Fusion REST cross-checks; quarterly-update impact. **Power Apps canvas**: controls by name through the player's object model, galleries and Power Fx assertions; Dataverse cross-checks through the D365 add-on; app-version impact. *Test status: these packs are tested against EZTest's own stand-ins of each product, not real tenants.* See [docs/apps/sap.md](docs/apps/sap.md), [servicenow](docs/apps/servicenow.md), [workday](docs/apps/workday.md), [oracle](docs/apps/oracle.md) and [powerapps](docs/apps/powerapps.md) |
-| Components | Library-aware widget steps that work whatever renders the widget: virtualized and paged data grids (`In the Orders grid, click the row where Customer is "Contoso"`, edit, sort, filter, select, read all rows), combo boxes with async popups, locale-aware date pickers, trees, tabs, accordions, stacked dialogs, toasts, rich text (TinyMCE iframe, Quill, CKEditor), sliders, masked inputs, drop zones, canvas charts, infinite lists. Adapters for ag-Grid, MUI, Kendo, DevExtreme, PrimeNG/PrimeFaces, Angular Material, Oracle JET, SAP UI5 and WAI-ARIA; also a function API (`@mohammed-a-khan/eztest/components`). See [docs/components.md](docs/components.md). *Test status: the Kendo, DevExtreme, PrimeNG, Angular Material, SAP UI5 and Oracle JET adapters are tested against EZTest's own stand-ins of those libraries.* |
+| Components | Library-aware widget steps that work whatever renders the widget: virtualized and paged data grids (`In the Orders grid, click the row where Customer is "Contoso"`, edit, sort, filter, select, read all rows), combo boxes with async popups, locale-aware date pickers, trees, tabs, accordions, stacked dialogs, toasts, rich text (TinyMCE iframe, Quill, CKEditor), sliders, masked inputs, drop zones, canvas charts, infinite lists. Adapters for ag-Grid, MUI, Kendo, DevExtreme, PrimeNG/PrimeFaces, Angular Material, Oracle JET, SAP UI5 and WAI-ARIA; also a function API (`@eztech/eztest/components`). See [docs/components.md](docs/components.md). *Test status: the Kendo, DevExtreme, PrimeNG, Angular Material, SAP UI5 and Oracle JET adapters are tested against EZTest's own stand-ins of those libraries.* |
 | Migration | Importers with replay verification and a coverage-equivalence report |
 | Monitoring | Production-safe scheduled journeys, flap-guarded alerts, uptime and latency, status page |
 | Compliance | ed25519-signed evidence packs (generic, CSA/Part 11, SOX profiles) with requirement traceability |

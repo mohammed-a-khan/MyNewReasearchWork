@@ -8,7 +8,7 @@ EZTest follows [Semantic Versioning](https://semver.org/). The public surface is
 | `eztest.config.*` (`configVersion`) | fixes | new optional keys | a new `configVersion` with a migration in `eztest upgrade-config` |
 | CLI commands, flags and exit codes | fixes | new commands and flags | removed or renamed commands and flags |
 | Package exports (`eztest`, `eztest/<module>`) | fixes | additions | removals and signature changes |
-| Plugin API (`@mohammed-a-khan/eztest/plugins`, `PLUGIN_API_VERSION`) | fixes | additions | a new `PLUGIN_API_VERSION`; plugins for the old one are refused with a message |
+| Plugin API (`@eztech/eztest/plugins`, `PLUGIN_API_VERSION`) | fixes | additions | a new `PLUGIN_API_VERSION`; plugins for the old one are refused with a message |
 | Run artifacts (`run.json`, evidence manifest, reports, history) | fixes | additive fields | format changes, which older runs still verify and analyse |
 | Results server HTTP API (`/api/version` `apiVersion`) | fixes | additive endpoints and fields | a new `apiVersion` |
 

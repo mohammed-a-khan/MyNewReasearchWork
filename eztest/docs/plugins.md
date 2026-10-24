@@ -1,6 +1,6 @@
 # Plugins
 
-`@mohammed-a-khan/eztest/plugins` is the stable, typed surface for organisation-specific extensions. A plugin can add:
+`@eztech/eztest/plugins` is the stable, typed surface for organisation-specific extensions. A plugin can add:
 
 - custom steps with their own plain-English phrasing;
 - lenses, reporters, secret stores, test data providers and login recipes;
@@ -12,7 +12,7 @@
 
 ```js
 // plugins/acme.mjs  (or an npm package, e.g. @acme/eztest-erp)
-import { definePlugin } from '@mohammed-a-khan/eztest/plugins';
+import { definePlugin } from '@eztech/eztest/plugins';
 
 export default definePlugin({
   name: '@acme/eztest-erp',
@@ -115,8 +115,8 @@ An importer plugin teaches the Migration Factory a new source format, for exampl
 ```js
 // importers/acme-steps.mjs  (or an npm package, e.g. @acme/eztest-importer-steps)
 import { readFile } from 'node:fs/promises';
-import { definePlugin } from '@mohammed-a-khan/eztest/plugins';
-import { JourneyDraft, assembleReport } from '@mohammed-a-khan/eztest/importers';
+import { definePlugin } from '@eztech/eztest/plugins';
+import { JourneyDraft, assembleReport } from '@eztech/eztest/importers';
 
 export default definePlugin({
   name: '@acme/eztest-importer-steps',
@@ -160,10 +160,10 @@ eztest import tests/ --plugin ./importers/acme-steps.mjs --from acme-steps --imp
 - `import(paths, ctx)` gets the paths as given (directories included) and returns an `ImportReport`. `ctx` has `cwd`, `outDir`, `tags`, `ids` (journey ids already taken) and `options`: `importers.options.<name>` from config, overridden by `--importer-option key=value` (a bare `key` is `true`).
 - EZTest writes the journeys, `import-report.json` and `import-report.md`, and replays them with `--verify`, exactly as for the built-in importers. `report.assets` are extra files written next to the journeys, `report.diagnostics` are problems in the source suite, `report.summary` goes into the JSON report and `report.markdown` lines into the Markdown one. Credential-like literals in the journeys a plugin returns (passwords typed into fields, Authorization and API-key headers, tokens in bodies and query strings) are replaced by `${NAME}` variables when they are written, and listed under `credentials` in the report, like those of the built-in importers.
 - Without `--from` or `--kind`, every importer plugin with a `detect` function is asked first; the first that claims the paths imports all of them. Otherwise the built-in importers detect formats per file.
-- `@mohammed-a-khan/eztest/importers` exports the building blocks: `JourneyDraft` (EZ lines through the grammar, TODO lines with reasons, coverage), `importGherkin` with its `convertStep`, `rewrite` and `externalExamples` hooks (for Cucumber dialects), `assembleReport` / `mergeReports`, and `loadTypeScript` to read TypeScript sources with the compiler API.
+- `@eztech/eztest/importers` exports the building blocks: `JourneyDraft` (EZ lines through the grammar, TODO lines with reasons, coverage), `importGherkin` with its `convertStep`, `rewrite` and `externalExamples` hooks (for Cucumber dialects), `assembleReport` / `mergeReports`, and `loadTypeScript` to read TypeScript sources with the compiler API.
 - Studio lists plugin formats in the import page's Format menu (`GET /api/import/formats`) and loads `importers.plugins` when it starts.
 - A plugin may register an `eztest` command too (`registerCommand`), for example to convert the framework's configuration files. Commands of plugins listed in `importers.plugins` are available like any other.
 
 ## Testing a plugin
 
-Load it in a test with `loadPlugins([...], { cwd })`. Call `off()` when the test is done. `registries` exposes what the plugin registered. For an importer plugin, call `importFiles(paths, { from: '<name>' })` from `@mohammed-a-khan/eztest/importers`, or run `eztest import --plugin <path> --from <name>` (`test/importers/plugin-importer.test.ts` does both with a sample importer). The first-party publishers in `src/plugins/publishers/` are written against this same API and are tested against mock HTTP servers. They make good templates.
+Load it in a test with `loadPlugins([...], { cwd })`. Call `off()` when the test is done. `registries` exposes what the plugin registered. For an importer plugin, call `importFiles(paths, { from: '<name>' })` from `@eztech/eztest/importers`, or run `eztest import --plugin <path> --from <name>` (`test/importers/plugin-importer.test.ts` does both with a sample importer). The first-party publishers in `src/plugins/publishers/` are written against this same API and are tested against mock HTTP servers. They make good templates.

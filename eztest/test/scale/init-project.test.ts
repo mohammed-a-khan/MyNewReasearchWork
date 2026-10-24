@@ -71,9 +71,9 @@ describe('eztest init', () => {
 
   it('names the package to install when the project does not depend on it yet', async () => {
     const fresh = await tempDir('init-next');
-    expect((await initProject(fresh)).next[0]).toBe('npm install --save-dev @mohammed-a-khan/eztest   # the project\'s own EZTest, so npx eztest and CI use it');
+    expect((await initProject(fresh)).next[0]).toBe('npm install --save-dev @eztech/eztest   # the project\'s own EZTest, so npx eztest and CI use it');
     const has = await tempDir('init-next-dep');
-    await writeFile(join(has, 'package.json'), JSON.stringify({ devDependencies: { '@mohammed-a-khan/eztest': '^0.1.0' } }));
+    await writeFile(join(has, 'package.json'), JSON.stringify({ devDependencies: { '@eztech/eztest': '^0.1.0' } }));
     const r = await initProject(has);
     expect(r.next.some((n) => n.includes('npm install'))).toBe(false);
     expect(r.next.at(-1)).toContain('npx eztest run');

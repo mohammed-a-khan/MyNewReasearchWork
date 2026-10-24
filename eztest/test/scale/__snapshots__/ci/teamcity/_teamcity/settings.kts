@@ -1,5 +1,5 @@
 // EZTest on TeamCity: Kotlin DSL (written by eztest init --ci teamcity; docs/pipelines.md).
-// Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+// Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 // Commit as .teamcity/settings.kts and enable versioned settings (Kotlin) on the project.
 //
 //   EZTest smoke        VCS trigger on pull request branches       --pipeline pr

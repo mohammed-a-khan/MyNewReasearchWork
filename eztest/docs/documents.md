@@ -1,11 +1,11 @@
 # Documents: extraction, OCR, layout and visual comparison
 
-EZTest reads business documents (PDF) into one model, the Canonical Document Model (`@mohammed-a-khan/eztest/docs`). Pages hold lines, lines hold column segments, and segments hold positioned text items. On top of that sit named fields and typed tables. Every value keeps its page, its box, how it was read (`method`) and how sure the reader is (`confidence`). Reconciliation, three-way checks, the PDF diff and the reports all work on this model, whatever the source.
+EZTest reads business documents (PDF) into one model, the Canonical Document Model (`@eztech/eztest/docs`). Pages hold lines, lines hold column segments, and segments hold positioned text items. On top of that sit named fields and typed tables. Every value keeps its page, its box, how it was read (`method`) and how sure the reader is (`confidence`). Reconciliation, three-way checks, the PDF diff and the reports all work on this model, whatever the source.
 
 ## Extraction methods
 
 ```ts
-import { extractPdf } from '@mohammed-a-khan/eztest/docs';
+import { extractPdf } from '@eztech/eztest/docs';
 
 const doc = await extractPdf('invoice.pdf', { method: 'auto', template: 'templates/invoice.yaml' });
 ```
@@ -85,7 +85,7 @@ Evidence: a diff image for every compared page (differences in red, masked regio
 In code:
 
 ```ts
-import { compareDocumentsVisually, renderVisualHtml } from '@mohammed-a-khan/eztest/docs';
+import { compareDocumentsVisually, renderVisualHtml } from '@eztech/eztest/docs';
 
 const r = await compareDocumentsVisually('out/invoice.pdf', 'baselines/invoice.pdf', {
   dpi: 100, threshold: 0.1, maxDiffRatio: 0.005, masks: [{ page: 1, x: 400, y: 40, width: 150, height: 20 }],

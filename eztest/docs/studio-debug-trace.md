@@ -77,7 +77,7 @@ With `trace.browser: on` (or `on-failure` / `retain-on-failure`), EZTest's brows
 import {
   readTrace, listTraces, renderSnapshot, runDirSource,
   exportTraceBundle, readTraceBundle, diffTraces,
-} from '@mohammed-a-khan/eztest/runner';
+} from '@eztech/eztest/runner';
 
 const trace = await readTrace(runDir, 'bob-order', 1);
 const html = await renderSnapshot(runDirSource(runDir), trace, trace.steps[3].snapshots.before!); // inlined, CSP'd, target outlined
@@ -87,7 +87,7 @@ const diff = diffTraces(lastGreen, current);   // per step: status, locator, tim
 ```
 
 Serve rendered snapshots in a sandboxed iframe. `SNAPSHOT_CSP` (exported from
-`@mohammed-a-khan/eztest/studio`) is the header the trace routes use.
+`@eztech/eztest/studio`) is the header the trace routes use.
 
 ## 2. Live debugger
 

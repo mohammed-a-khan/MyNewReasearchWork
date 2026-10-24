@@ -1,5 +1,5 @@
 /** Page objects for ClaimDesk (back office). */
-import { screen } from '@mohammed-a-khan/eztest/sdk';
+import { screen } from '@eztech/eztest/sdk';
 
 export const ClaimDesk = screen('ClaimDesk', {
   search: { css: '#q', label: 'Find claim' },

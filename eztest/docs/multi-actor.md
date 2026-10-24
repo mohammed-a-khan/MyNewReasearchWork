@@ -109,7 +109,7 @@ block), `{ action: actor, value: <name> }` (Switch to user) and
 ## TypeScript SDK
 
 ```ts
-import { journey, as } from '@mohammed-a-khan/eztest/sdk';
+import { journey, as } from '@eztech/eztest/sdk';
 
 journey('Two users chat', { actors: { alice: {}, bob: 'chat-user' } }, async ({ actors, ui, expect }) => {
   await actors.alice.ui.open('/chat/login');

@@ -123,7 +123,7 @@ export const GITIGNORE = [
 export { CI_SYSTEMS, type CiSystemName };
 
 /** The npm package projects install (its command is `eztest`). */
-export const PACKAGE_NAME = '@mohammed-a-khan/eztest';
+export const PACKAGE_NAME = '@eztech/eztest';
 
 export async function initProject(dir: string, opts: { ci?: CiSystemName } = {}): Promise<{ created: string[]; skipped: string[]; next: string[] }> {
   const created: string[] = [];

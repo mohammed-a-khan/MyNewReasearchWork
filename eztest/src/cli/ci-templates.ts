@@ -20,7 +20,7 @@ export type CiSystemName = (typeof CI_SYSTEMS)[number];
 const RUN = 'npx eztest run --reporter html,json,junit';
 
 const GITHUB = `# EZTest on GitHub Actions (written by eztest init --ci github; docs/pipelines.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   pull_request        -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   schedule (nightly)  -> regression: --pipeline nightly in duration-balanced shards, merged into one verified run
@@ -180,7 +180,7 @@ jobs:
 `;
 
 const AZURE = `# EZTest on Azure Pipelines (written by eztest init --ci azure; docs/pipelines.md, docs/azure-devops.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   PR                 -> Smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget), PR status
 #   schedules          -> Regression: --pipeline nightly in duration-balanced shards, merged into one verified run
@@ -362,7 +362,7 @@ stages:
 `;
 
 const GITLAB = `# EZTest on GitLab CI/CD (written by eztest init --ci gitlab; docs/pipelines.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   merge requests  -> eztest:smoke    --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   schedules       -> eztest:regression (parallel: 4, EZTest shards by historical duration) -> eztest:merge
@@ -479,7 +479,7 @@ const SHARD_STAGE = (i: number) => `          stage('Shard ${i}/4') {
           }`;
 
 const JENKINS = `// EZTest on Jenkins: a declarative pipeline (written by eztest init --ci jenkins; docs/pipelines.md).
-// Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+// Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 //
 //   pull requests (multibranch)  -> Smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 //   cron (nightly)               -> Regression: 4 parallel shards (EZTest balances them), merged into one verified run
@@ -590,7 +590,7 @@ ${[1, 2, 3, 4].map(SHARD_STAGE).join('\n')}
 `;
 
 const TEAMCITY = `// EZTest on TeamCity: Kotlin DSL (written by eztest init --ci teamcity; docs/pipelines.md).
-// Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+// Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 // Commit as .teamcity/settings.kts and enable versioned settings (Kotlin) on the project.
 //
 //   EZTest smoke        VCS trigger on pull request branches       --pipeline pr
@@ -741,7 +741,7 @@ object TestUat : BuildType({
 `;
 
 const BITBUCKET = `# EZTest on Bitbucket Pipelines (written by eztest init --ci bitbucket; docs/pipelines.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   pull requests    -> smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   custom: nightly  -> 4 parallel shards (EZTest balances them) merged into one verified run.
@@ -836,7 +836,7 @@ pipelines:
 `;
 
 const CIRCLECI = `# EZTest on CircleCI (written by eztest init --ci circleci; docs/pipelines.md).
-# Needs the EZTest package in package.json (npm install --save-dev @mohammed-a-khan/eztest): npm ci installs it and the eztest command that npx runs.
+# Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
 #
 #   pull requests / branches -> pr workflow: smoke, --pipeline pr (@smoke, impacted journeys, 10 min budget)
 #   nightly                  -> regression workflow: parallelism 4 (EZTest balances the shards itself; no

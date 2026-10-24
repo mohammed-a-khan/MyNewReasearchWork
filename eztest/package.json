@@ -1,6 +1,6 @@
 {
-  "name": "@mohammed-a-khan/eztest",
-  "version": "0.1.0",
+  "name": "@eztech/eztest",
+  "version": "0.1.0-beta.1",
   "description": "EZTest - one-stop, verified test automation: web, API, DB, documents, identity, data, performance, accessibility, visual, security and release readiness in a single package.",
   "type": "module",
   "engines": {
@@ -16,7 +16,8 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "demo": "tsx examples/demo-app/server.ts",
     "notices": "node scripts/third-party-notices.mjs",
-    "build:load-agent": "node scripts/build-load-agent.mjs"
+    "build:load-agent": "node scripts/build-load-agent.mjs",
+    "publish:feed": "node scripts/publish-feed.mjs"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "6.20.4",

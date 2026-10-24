@@ -1,5 +1,5 @@
 /** Page objects for MyCover (customer portal), shared by the code journeys and code steps. */
-import { screen } from '@mohammed-a-khan/eztest/sdk';
+import { screen } from '@eztech/eztest/sdk';
 
 export const Nav = screen('Nav', {
   home: { role: 'link', name: 'Home' },

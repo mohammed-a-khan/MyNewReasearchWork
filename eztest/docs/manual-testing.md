@@ -197,8 +197,8 @@ cycle membership carry on. Writing it replaces the case after a confirmation
 ## API
 
 ```ts
-import { runJourneys, parseEzScript } from '@mohammed-a-khan/eztest';
-import { manual } from '@mohammed-a-khan/eztest';
+import { runJourneys, parseEzScript } from '@eztech/eztest';
+import { manual } from '@eztech/eztest';
 
 const run = await runJourneys([parseEzScript(text)], {
   outputDir: 'eztest-results',
