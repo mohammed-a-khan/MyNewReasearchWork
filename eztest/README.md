@@ -32,7 +32,7 @@ npx eztest doctor                      # which browsers were found, and how to i
 
 | What other tools do | What EZTest does |
 |---|---|
-| A framework layered on another tool's browser library | **Its own browser driver.** Chrome, Edge, Chromium and Electron over CDP, Firefox over WebDriver BiDi, with EZTest's own selector engine, auto-wait and tracing. EZTest depends on no other testing tool (no Playwright, Selenium, Puppeteer, WebdriverIO, Appium, Cypress), and a test (`test/legal/no-testing-tools.test.ts`) keeps it that way. |
+| A framework layered on another tool's browser library | **Its own browser driver.** Chrome, Edge, Chromium and Electron over CDP, Firefox over WebDriver BiDi, with EZTest's own selector engine, auto-wait and tracing. EZTest depends on no other testing tool (no Playwright, Selenium, Puppeteer, WebdriverIO, Appium, Cypress), and a test ([`test/legal/no-testing-tools.test.ts`](https://github.com/mohammed-a-khan/MyNewReasearchWork/tree/main/eztest/test/legal/no-testing-tools.test.ts)) keeps it that way. |
 | "Self-healing" quietly patches a broken locator | **Verified healing.** A heal counts only if the step's expected outcome still happens. Healed steps get their own status, `passed-healed`, and a reviewable proposal file. If the element is found but the outcome is wrong, the step fails as a **suspected regression** rather than being hidden. |
 | Screenshots in a folder | **Evidence Vault.** Every artifact is hashed into a tamper-evident chain. `eztest evidence verify` proves nothing was changed. |
 | PDF checks are a separate tool | **Document Assurance.** Compares a downloaded PDF against the values shown on screen and the database, field by field and line by line, and names which one is wrong (for example "document generation defect"). Also PDF-to-PDF diffs, bulk comparison with clustered differences, and PII checks. |
@@ -207,7 +207,7 @@ What you get:
 - **The World and hooks.** Before, After, BeforeStep and AfterStep hooks, tag-filtered. Undefined steps print a snippet to paste; ambiguous steps list the matching definitions.
 - **Reports and Studio.** Reports group results by feature, rule and scenario; JUnit has one suite per feature. The Studio edits features with Gherkin highlighting and step diagnostics, and runs and debugs a scenario.
 
-See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](examples/bdd-project).
+See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](https://github.com/mohammed-a-khan/MyNewReasearchWork/tree/main/eztest/examples/bdd-project).
 
 ## What's inside
 
@@ -256,6 +256,8 @@ See [docs/bdd.md](docs/bdd.md) and [examples/bdd-project](examples/bdd-project).
 | Service virtualization | Record/replay mock servers, fault injection, drift detection |
 
 ## Try it on the demo app
+
+The demo app and the example projects are in the repository, not in the npm package: [examples/](https://github.com/mohammed-a-khan/MyNewReasearchWork/tree/main/eztest/examples).
 
 ```bash
 npm run demo                          # EZ Shop on http://127.0.0.1:4600

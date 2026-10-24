@@ -36,7 +36,7 @@ export const JavaAppSchema = z.object({
 });
 
 export const JavaSchema = z.object({
-  /** The agent jar (build it with agents/java/build.sh, or let EZTest compile it with javac on first use). */
+  /** The agent jar (default: EZTest compiles the shipped agent sources with javac on first use; agents/java/build.sh in a clone of the repository builds one). */
   agentJar: z.string().optional(),
   token: SecretOrText.optional(),
   apps: z.record(z.string(), JavaAppSchema).default({}),

@@ -323,11 +323,16 @@
   "license": "UNLICENSED",
   "files": [
     "dist",
+    "!dist/**/*.map",
     "README.md",
     "docs",
     "THIRD_PARTY_NOTICES.md",
     "integrations/azure-devops/templates",
     "agents",
+    "!agents/java/sample",
+    "!agents/java/build.sh",
+    "!agents/android/app/src/test",
+    "!agents/**/.gitignore",
     "CHANGELOG.md"
   ],
   "peerDependencies": {

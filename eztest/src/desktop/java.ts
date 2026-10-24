@@ -26,7 +26,7 @@ export function javaAgentSourceDir(): string {
 /** The agent jar: `configured` when given, else built once into `cacheDir` with javac + jar. */
 export async function ensureJavaAgentJar(o: { configured?: string; cacheDir: string; javaHome?: string }): Promise<string> {
   if (o.configured) {
-    if (!existsSync(o.configured)) throw new AgentError(`desktop.java.agentJar ${o.configured} does not exist (build it with agents/java/build.sh)`, 'no-agent');
+    if (!existsSync(o.configured)) throw new AgentError(`desktop.java.agentJar ${o.configured} does not exist (leave desktop.java.agentJar unset and EZTest compiles the agent with javac on first use, or build a jar from a clone of the repository with agents/java/build.sh)`, 'no-agent');
     return o.configured;
   }
   const jar = join(o.cacheDir, `ez-java-agent-${JAVA_AGENT_VERSION}.jar`);
