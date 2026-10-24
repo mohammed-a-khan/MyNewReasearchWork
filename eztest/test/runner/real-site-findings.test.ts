@@ -10,6 +10,7 @@ import { evaluateConditionOnce, resolveTarget } from '../../src/runner/index.js'
 import { frameSelectorCandidates } from '../../src/runner/pages.js';
 import { Ledger } from '../../src/runner/ledger.js';
 import { describeElement } from '../../src/recorder/index.js';
+import { nativeInvalidFields } from '../../src/runner/reliability/diagnose.js';
 
 let browser: Browser;
 let page: Page;
@@ -195,6 +196,17 @@ describe('FINDING (rahulshettyacademy.com, automationexercise.com): how the reco
       expect(r.locator, `${d}: ${r.notes.join('; ')}`).toBeDefined();
       expect(await r.locator!.evaluate((e) => e.id || e.getAttribute('href'))).toBe(want);
     }
+  });
+});
+
+describe('FINDING (automationexercise.com on Firefox): a failed link click blamed the footer\'s empty e-mail field', () => {
+  it('reports no form field for a link, and only the fields of the clicked button\'s own form', async () => {
+    await page.setContent(`<!doctype html><a href="/products" id="nav"><i>x</i> Products</a>
+      <form id="search"><input name="q" aria-label="Search" required><button id="go">Search</button></form>
+      <form id="news"><input type="email" name="susbscribe_email" required><button id="sub">Subscribe</button></form>`);
+    expect(await nativeInvalidFields(page, page.locator('#nav i'))).toEqual([]);
+    expect(await nativeInvalidFields(page, page.locator('#go'))).toEqual([expect.stringMatching(/^Search: /)]);
+    expect((await nativeInvalidFields(page)).length).toBe(2);
   });
 });
 

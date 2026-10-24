@@ -999,10 +999,31 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (R.listening) return;
       R.listening = true;
       watchShown();
-      try {
-        var closeWindow = W.close;
-        W.close = function () { send({ kind: 'closing' }); return closeWindow.apply(W, arguments); };
-      } catch (e) { /* not replaceable */ }
+      if (!R.wrapped) {
+        R.wrapped = true;
+        try {
+          var closeWindow = W.close;
+          W.close = function () { send({ kind: 'closing' }); return closeWindow.apply(W, arguments); };
+        } catch (e) { /* not replaceable */ }
+        // document.open() erases the listeners of the document and, in Firefox, of its window too (a rich-text
+        // editor writes its iframe that way): listen again when the probe listener below no longer answers.
+        try {
+          var DP = W.Document && W.Document.prototype;
+          var openDocument = DP && DP.open;
+          if (openDocument) {
+            DP.open = function () {
+              var out = openDocument.apply(this, arguments);
+              if (this === W.document && arguments.length < 3 && R.binding) {
+                R.alive = false;
+                try { W.dispatchEvent(new Event('__ezrec_probe')); } catch (e) { /* ignore */ }
+                if (!R.alive) { R.listening = false; R.attach(); }
+              }
+              return out;
+            };
+          }
+        } catch (e) { /* not replaceable */ }
+      }
+      W.addEventListener('__ezrec_probe', function () { R.alive = true; });
       W.addEventListener('pointerover', function (e) {
         if (!e.isTrusted) return;
         lastOver = targetOf(e);
@@ -1084,8 +1105,10 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
         nativeDrag = true;
         dragFrom = { info: info(src), t: Date.now() };
       }, true);
+      // The drop may be untrusted while the drag a person started is: Firefox driven by WebDriver ends the drag
+      // without a drop, and the driver fires it.
       W.addEventListener('drop', function (e) {
-        if (!e.isTrusted || !dragFrom) return;
+        if (!dragFrom) return;
         var to = dropTarget(targetOf(e));
         if (to && to.tagName) send({ kind: 'drag', el: dragFrom.info, to: info(to), t: dragFrom.t });
         dragFrom = null;

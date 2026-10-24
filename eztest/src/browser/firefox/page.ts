@@ -131,6 +131,9 @@ interface Holder {
   page?: FirefoxPage;
 }
 
+
+/** An HTML5 drag the page is doing (FirefoxPage.watchDrag). */
+type DragState = { active: boolean; source: Element | null; data: [string, string][]; effect: string; over: Element | null; accepted: boolean; dropped: boolean };
 export class FirefoxPage extends ChromiumPage {
   readonly ffNetwork: FirefoxNetwork;
   /** Realms by id (all frames of this page, and workers). */
@@ -156,6 +159,9 @@ export class FirefoxPage extends ChromiumPage {
       insertText: (t) => holder.page!.insertTextAtCaret(t),
       viewport: () => holder.page!.viewportSize(),
       pointerLeft: (x, y, edge) => holder.page!.pointerLeft(x, y, edge),
+      watchDrag: () => holder.page!.watchDrag(),
+      dropIfDragging: (x, y) => holder.page!.dropIfDragging(x, y),
+      endDrag: (x, y) => holder.page!.endDrag(x, y),
     };
     const slowMo = () => ffCtx.browser().slowMo;
     const keyboard = new FirefoxKeyboard(target, slowMo);
@@ -565,6 +571,61 @@ export class FirefoxPage extends ChromiumPage {
       under.dispatchEvent(new MouseEvent('mouseout', { ...init, bubbles: true, cancelable: true, composed: true }));
       for (let el: Element | null = under; el; el = el.parentElement) el.dispatchEvent(new MouseEvent('mouseleave', { ...init, bubbles: false, cancelable: false }));
     }, [x, y, edge.x, edge.y]);
+  }
+
+  /** See InputTarget.watchDrag: records the dragged data and whether the element under the pointer accepts a drop. */
+  async watchDrag(): Promise<void> {
+    await (this.mainFrame() as FirefoxFrame).inEngine(() => {
+      const w = window as unknown as { __ezDrag?: DragState };
+      if (w.__ezDrag) return;
+      const st: DragState = { active: false, source: null, data: [], effect: 'all', over: null, accepted: false, dropped: false };
+      w.__ezDrag = st;
+      // Bubble listeners on the window: they run after the page's own handlers (data set, dragover cancelled).
+      window.addEventListener('dragstart', (e) => {
+        const dt = e.dataTransfer;
+        st.active = !e.defaultPrevented;
+        st.source = e.target as Element;
+        st.data = dt ? [...dt.types].filter((t) => t !== 'Files').map((t) => [t, dt.getData(t)] as [string, string]) : [];
+        st.effect = dt?.effectAllowed ?? 'all';
+        st.over = null;
+        st.accepted = false;
+        st.dropped = false;
+      });
+      window.addEventListener('dragover', (e) => {
+        st.over = e.target as Element;
+        st.accepted = e.defaultPrevented;
+      });
+      window.addEventListener('drop', () => { st.dropped = true; }, true);
+      window.addEventListener('dragend', () => { st.active = false; }, true);
+    }, []);
+  }
+
+  /** See InputTarget.dropIfDragging. */
+  async dropIfDragging(x: number, y: number): Promise<void> {
+    await (this.mainFrame() as FirefoxFrame).inEngine((_e, _h, px, py) => {
+      const st = (window as unknown as { __ezDrag?: DragState }).__ezDrag;
+      if (!st || !st.active || st.dropped || !st.accepted || !st.over) return;
+      const under = document.elementFromPoint(px as number, py as number);
+      if (!under || !(st.over === under || st.over.contains(under) || under.contains(st.over))) return;
+      const dt = new DataTransfer();
+      for (const [t, v] of st.data) dt.setData(t, v);
+      try {
+        dt.effectAllowed = st.effect as DataTransfer['effectAllowed'];
+        dt.dropEffect = st.effect === 'copy' || st.effect === 'link' ? st.effect : 'move';
+      } catch { /* read-only in some states */ }
+      st.dropped = true;
+      st.over.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, clientX: px as number, clientY: py as number, dataTransfer: dt }));
+    }, [x, y]);
+  }
+
+  /** After the release: the "dragend" of a drag that Firefox ended without one. */
+  async endDrag(x: number, y: number): Promise<void> {
+    await (this.mainFrame() as FirefoxFrame).inEngine((_e, _h, px, py) => {
+      const st = (window as unknown as { __ezDrag?: DragState }).__ezDrag;
+      if (!st || !st.active) return;
+      st.active = false;
+      st.source?.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: false, composed: true, clientX: px as number, clientY: py as number }));
+    }, [x, y]);
   }
 
   async insertTextAtCaret(text: string): Promise<boolean> {

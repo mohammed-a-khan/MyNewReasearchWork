@@ -263,6 +263,35 @@ describe.skipIf(!executable)('firefox driver', () => {
       });
     });
 
+    it('drops an HTML5 drag where the mouse is released (Firefox ends the drag without a drop)', async () => {
+      await withPage(async (page) => {
+        await page.setContent(`<!doctype html>
+          <div id="a" draggable="true" style="width:100px;height:100px;background:#ccc">A</div>
+          <div id="b" style="width:100px;height:100px;margin-top:50px;background:#eee">B</div>
+          <div id="c" style="width:100px;height:100px;background:#ddd">C</div><script>
+          window.seen = [];
+          a.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'from-a'));
+          b.addEventListener('dragover', (e) => e.preventDefault());
+          b.addEventListener('drop', (e) => { e.preventDefault(); seen.push('drop ' + e.dataTransfer.getData('text/plain')); });
+          c.addEventListener('drop', () => seen.push('drop on c'));
+          a.addEventListener('dragend', () => seen.push('dragend'));
+        </script>`);
+        const drag = async (to: string) => {
+          await page.mouse.move(50, 50);
+          await page.mouse.down();
+          await page.mouse.move(60, 60, { steps: 3 });
+          const box = (await page.locator(to).boundingBox())!;
+          await page.mouse.move(box.x + 50, box.y + 50, { steps: 8 });
+          await page.mouse.up();
+        };
+        await drag('#b');
+        expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['drop from-a', 'dragend']);
+        // #c does not cancel dragover: it does not accept the drop.
+        await drag('#c');
+        expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['drop from-a', 'dragend', 'dragend']);
+      });
+    });
+
     it('types with the keyboard (modifiers, chords) and drives mouse, wheel and touch', async () => {
       await withPage(async (page) => {
         await page.goto(`${demo.url}/lab/keys`);

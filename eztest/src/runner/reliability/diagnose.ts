@@ -8,7 +8,7 @@
  *  - console errors and failed network calls during the step.
  * Read-only on the page except for a temporary outline drawn for the screenshot.
  */
-import type { Page } from '../../browser/index.js';
+import type { Locator, Page } from '../../browser/index.js';
 import type { CandidateDiagnosis, Condition, ConditionResult, ElementFingerprint, FailureDiagnosis, SimilarElement, Step, Target } from '../../core/index.js';
 import { poolSelector, robustCandidates, scanElements, scoreFingerprint, textSimilarity } from '../../heal/index.js';
 import { describeCandidate, interpolateCandidate, rootFor, toLocator } from '../locate.js';
@@ -134,24 +134,36 @@ export async function removeOutlines(page: Page): Promise<void> {
 }
 
 
-/** Visible form controls the browser's constraint validation rejects, as "label: message" (at most 5). */
-export async function nativeInvalidFields(page: Page): Promise<string[]> {
-  return page
-    .evaluate(() => {
-      const out: string[] = [];
-      for (const el of Array.from(document.querySelectorAll('input:invalid, select:invalid, textarea:invalid'))) {
-        const f = el as HTMLInputElement;
-        const r = f.getBoundingClientRect();
-        if (!r.width || !r.height || f.type === 'hidden') continue;
-        // A form with novalidate submits anyway: its fields' native validity does not explain anything.
-        if (f.form?.noValidate) continue;
-        const label = (f.labels && f.labels[0] ? f.labels[0].textContent : '') || f.getAttribute('aria-label') || f.name || f.id || f.tagName.toLowerCase();
-        out.push(`${label.trim()}: ${f.validationMessage || 'invalid'}`.slice(0, 200));
-        if (out.length >= 5) break;
-      }
-      return out;
-    })
-    .catch(() => []);
+/** In the page: the invalid fields that can explain why clicking `target` did nothing (see nativeInvalidFields). */
+function invalidFieldsIn(target: Element | null): string[] {
+  // A link does not submit a form; a submit control is checked against its own form only.
+  let scope: ParentNode = document;
+  if (target) {
+    const control = target.closest('button, input, select, textarea') as HTMLButtonElement | null;
+    if (!control && target.closest('a[href]')) return [];
+    const form = control?.form ?? target.closest('form');
+    if (form) scope = form;
+  }
+  const out: string[] = [];
+  for (const el of Array.from(scope.querySelectorAll('input:invalid, select:invalid, textarea:invalid'))) {
+    const f = el as HTMLInputElement;
+    const r = f.getBoundingClientRect();
+    if (!r.width || !r.height || f.type === 'hidden') continue;
+    // A form with novalidate submits anyway: its fields' native validity does not explain anything.
+    if (f.form?.noValidate) continue;
+    const label = (f.labels && f.labels[0] ? f.labels[0].textContent : '') || f.getAttribute('aria-label') || f.name || f.id || f.tagName.toLowerCase();
+    out.push(`${label.trim()}: ${f.validationMessage || 'invalid'}`.slice(0, 200));
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+/**
+ * Visible form controls the browser's constraint validation rejects, as "label: message" (at most 5). With the
+ * element that was clicked: none for a link, else the fields of its form.
+ */
+export async function nativeInvalidFields(page: Page, clicked?: Locator): Promise<string[]> {
+  return (clicked ? clicked.evaluate(invalidFieldsIn) : page.evaluate(invalidFieldsIn, null)).catch(() => []);
 }
 
 /** Build the diagnosis of a failed step. Never throws (a diagnosis must not hide the failure). */
@@ -190,7 +202,20 @@ export async function diagnoseFailure(d: DiagnoseInput): Promise<FailureDiagnosi
         .filter((n) => n.stepId === step.id && ((n.status ?? 0) >= 400 || n.failure))
         .map((n) => `${n.method} ${shortUrl(n.url)} -> ${n.failure ?? `HTTP ${n.status}`}`),
     ])].slice(-10);
-    const invalidFields = /^(?:click|dblclick|press|check|uncheck|submit)$/.test(step.action) ? await nativeInvalidFields(page) : [];
+    let invalidFields: string[] = [];
+    if (/^(?:click|dblclick|press|check|uncheck|submit)$/.test(step.action)) {
+      // The element acted on, when exactly one matches: its own form (a link has none) explains the failure.
+      let clicked: Locator | undefined;
+      const root = step.target ? rootFor(page, [...(ctx.session?.frames ?? []), ...(step.target.frames ?? [])]) : undefined;
+      for (const raw of root && step.target ? step.target.locators : []) {
+        const l = toLocator(root!, interpolateCandidate(raw, ctx.vars()));
+        if ((await l.count().catch(() => 0)) === 1) {
+          clicked = l;
+          break;
+        }
+      }
+      invalidFields = await nativeInvalidFields(page, clicked);
+    }
     let outlined = 0;
     if (d.outline !== false) {
       const root = target ? rootFor(page, [...(ctx.session?.frames ?? []), ...(target.frames ?? [])]) : undefined;

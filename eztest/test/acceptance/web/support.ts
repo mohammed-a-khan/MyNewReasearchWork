@@ -122,7 +122,7 @@ export function settle(ms = 700): Promise<void> {
 
 /** Record on a visible browser, doing `act` like a person; returns the recording. */
 export async function record(url: string, act: (page: Page, rec: Recorder) => Promise<void>, opts: { name?: string } = {}): Promise<RecordingResult> {
-  const rec = await startRecording({ url, headless: false, viewport: { width: 1280, height: 900 }, project: {}, ...(opts.name ? { name: opts.name } : {}) });
+  const rec = await startRecording({ url, browser: BROWSER, headless: false, viewport: { width: 1280, height: 900 }, project: {}, ...(opts.name ? { name: opts.name } : {}) });
   try {
     // A person looks at the page before using it: it has loaded and its scripts have started.
     await rec.page.waitForLoadState('load', { timeout: 60_000 }).catch(() => undefined);

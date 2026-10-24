@@ -186,6 +186,13 @@ Every EZTest module that touches a page imports it.
   a browser fires when the pointer leaves the document, with the requested
   coordinates; they are untrusted events. Chromium fires them itself.
 
+- **HTML5 drag and drop with the mouse (Firefox).** Firefox starts the drag
+  and fires `dragover` as the mouse moves, but its WebDriver ends the drag on
+  release without a `drop`. On release the driver fires the `drop` (with the
+  data the page put in the drag) on the element under the pointer when its
+  last `dragover` was cancelled, and then the `dragend`; both are untrusted
+  events. Drags inside a child frame are not covered. Chromium drops by itself.
+
 - **Client certificates.** Chromium has no protocol command to present a
   TLS client certificate. Requests to an origin with a configured certificate
   are intercepted and performed from Node (with the certificate), and the
