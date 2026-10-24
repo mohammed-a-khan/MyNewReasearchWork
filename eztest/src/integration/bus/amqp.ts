@@ -11,6 +11,7 @@
  * taken for a missing queue.
  */
 import { randomUUID } from 'node:crypto';
+import type { TlsOptions } from '../tls.js';
 import { BusError, BusSubscription, decodePayload, loadClient, payloadText, type BusDestination, type BusDriver, type BusMessage, type OutgoingMessage, type PublishReceipt, type SubscribeOptions } from './types.js';
 
 export interface AmqpOptions {
@@ -22,6 +23,8 @@ export interface AmqpOptions {
   declare?: boolean;
   /** Older name of `declare`. */
   assertQueues?: boolean;
+  /** TLS for amqps://: extra CA, client certificate and key, servername (verification stays on). */
+  tls?: TlsOptions;
   client?: unknown;
 }
 
@@ -41,7 +44,7 @@ export class AmqpBusDriver implements BusDriver {
     if (this.conn) return this.conn;
     const amqp = (this.opts.client ?? (await loadClient('amqplib', 'AMQP (RabbitMQ)'))) as Any;
     try {
-      this.conn = await amqp.connect(this.opts.url);
+      this.conn = await amqp.connect(this.opts.url, this.opts.tls ? { ...this.opts.tls, rejectUnauthorized: true } : undefined);
     } catch (e) {
       throw new BusError(`Cannot connect to AMQP broker "${this.name}": ${(e as Error).message}`, 'BUS_CONNECT');
     }

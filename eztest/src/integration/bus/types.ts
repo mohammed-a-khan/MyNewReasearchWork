@@ -42,6 +42,11 @@ export interface BusMessage {
   offset?: string;
   /** AMQP routing key / MQTT topic of the delivery. */
   routingKey?: string;
+  /** Kafka with a schema registry: how the payload was decoded (avro, protobuf, json) and the schema id. */
+  format?: string;
+  schemaId?: number;
+  /** Why a framed payload could not be decoded (the payload stays raw). */
+  decodeError?: string;
 }
 
 export interface PublishReceipt {

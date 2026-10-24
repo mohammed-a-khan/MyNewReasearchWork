@@ -25,7 +25,7 @@ export interface IntegrationFromConfig {
 
 type Secretish = Record<string, unknown>;
 
-const SECRET_KEYS = new Set(['password', 'passphrase', 'token', 'privateKey', 'sharedAccessKey']);
+const SECRET_KEYS = new Set(['password', 'passphrase', 'token', 'privateKey', 'sharedAccessKey', 'clientSecret', 'secretAccessKey', 'sessionToken', 'accessKeyId']);
 
 /** Resolve secret references in the given keys of a nested object (copy). */
 async function resolveSecrets<T>(v: T, resolveSecret: (ref: string) => Promise<string>, mask: (s: string) => void, all = false): Promise<T> {

@@ -4,6 +4,7 @@
 import type { Actor, Emulation } from '../core/index.js';
 import type { Ui } from './ui.js';
 import type { ApiSurface } from './api.js';
+import type { GraphQLSurface } from './graphql.js';
 import type { DbSurface } from './db.js';
 import type { DataSurface } from './data.js';
 import type { FilesSurface } from './files.js';
@@ -63,6 +64,7 @@ export interface JourneyOptions {
 export interface SdkContext {
   ui: Ui;
   api: ApiSurface;
+  graphql: GraphQLSurface;
   db: DbSurface;
   data: DataSurface;
   files: FilesSurface;

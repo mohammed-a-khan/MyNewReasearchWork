@@ -1,5 +1,9 @@
 /** Build secret registries and an Identity Vault from validated EZTest config. */
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createTlsFetch } from '../surfaces/api-tls.js';
+import { awsCredentials } from './aws-sigv4.js';
+import { AwsSecretsManagerStore, CyberArkCcpStore, GcpSecretManagerStore, HashiCorpVaultSecretStore, readGcpKeyFile } from './stores-cloud.js';
 import { EzTestError, type Logger } from '../core/index.js';
 import { defaultMasker, MASTER_KEY_ENV, type EzTestConfig, type SecretMasker, type SecretStoreConfig } from '../config/index.js';
 import { SecretRegistry } from './handle.js';
@@ -17,6 +21,12 @@ export function createSecretRegistry(
   const masker = o.masker ?? defaultMasker;
   const env = o.env ?? process.env;
   const reg = new SecretRegistry([], masker);
+  // A credential in a store's config may itself be a reference to another (earlier) store.
+  const lazy = (v: string): (() => Promise<string>) => {
+    if (v.startsWith('secret://')) return () => reg.resolve(v);
+    masker.add(v);
+    return async () => v;
+  };
   // The env store is always available as secret://env/NAME unless configured otherwise.
   if (!stores.some((s) => (s.name ?? s.type) === 'env')) reg.register(new EnvSecretStore({ env }));
   for (const s of stores) {
@@ -33,6 +43,37 @@ export function createSecretRegistry(
         masker.add(typeof secret === 'string' ? secret : undefined);
         const tp = azureAdTokenProvider({ tenantId: s.tenantId, clientId: s.clientId, clientSecret: secret, authorityUrl: s.authorityUrl, masker });
         reg.register(new AzureKeyVaultSecretStore({ vaultUrl: s.vaultUrl, tokenProvider: tp, name: s.name ?? 'azure-keyvault', masker }));
+        break;
+      }
+      case 'hashicorp-vault': {
+        const caFetch = s.ca ? createTlsFetch({ origin: new URL(s.address).origin, ca: readFileSync(resolve(o.cwd ?? process.cwd(), s.ca)) }) : undefined;
+        const auth = s.auth.method === 'token'
+          ? { method: 'token' as const, token: lazy(s.auth.token) }
+          : { method: 'approle' as const, roleId: lazy(s.auth.roleId), secretId: lazy(s.auth.secretId), ...(s.auth.mount ? { mount: s.auth.mount } : {}) };
+        reg.register(new HashiCorpVaultSecretStore({ address: s.address, mount: s.mount, namespace: s.namespace, auth, name: s.name ?? s.type, masker, ...(caFetch ? { fetch: caFetch } : {}) }));
+        break;
+      }
+      case 'aws-secrets-manager': {
+        const given = { accessKeyId: s.accessKeyId, secretAccessKey: s.secretAccessKey, sessionToken: s.sessionToken };
+        reg.register(new AwsSecretsManagerStore({
+          region: s.region, endpoint: s.endpoint, versionStage: s.versionStage, name: s.name ?? s.type, masker,
+          credentials: async () => awsCredentials({
+            accessKeyId: given.accessKeyId ? await lazy(given.accessKeyId)() : undefined,
+            secretAccessKey: given.secretAccessKey ? await lazy(given.secretAccessKey)() : undefined,
+            sessionToken: given.sessionToken ? await lazy(given.sessionToken)() : undefined,
+          }, env),
+        }));
+        break;
+      }
+      case 'gcp-secret-manager': {
+        const file = s.credentialsFile ? resolve(o.cwd ?? process.cwd(), s.credentialsFile) : undefined;
+        reg.register(new GcpSecretManagerStore({ project: s.project, endpoint: s.endpoint, name: s.name ?? s.type, masker, credentials: file ? async () => readGcpKeyFile(file) : lazy(s.credentials!) }));
+        break;
+      }
+      case 'cyberark-ccp': {
+        const read = (p?: string) => (p ? readFileSync(resolve(o.cwd ?? process.cwd(), p)) : undefined);
+        const tls = s.clientCert || s.ca ? { ...(s.clientCert ? { cert: read(s.clientCert) } : {}), ...(s.clientKey ? { key: read(s.clientKey) } : {}), ...(s.ca ? { ca: read(s.ca) } : {}), ...(s.passphrase ? { passphrase: s.passphrase } : {}) } : undefined;
+        reg.register(new CyberArkCcpStore({ url: s.url, appId: s.appId, safe: s.safe, folder: s.folder, name: s.name ?? s.type, masker, ...(tls ? { tls } : {}) }));
         break;
       }
       default:

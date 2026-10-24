@@ -200,10 +200,10 @@ const SENSITIVE_KEY = /(password|passwd|secret|token|apikey|api_key|pat|credenti
 
 const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG', 'EZTEST_PROJECT', 'EZTEST_CODE_LOADER', 'EZTEST_ADO_PAT', 'EZTEST_ADO_PLAN']);
 /**
- * Live-database test switches (docs/databases.md), results-server and shard variables, and the
+ * Live-database test switches and driver folders (docs/databases.md), results-server and shard variables, and the
  * browser driver's own variables (docs/browser-driver.md): not config keys.
  */
-const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|MSSQL|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT|CANCEL)_|^EZTEST_TEMP_SWEEP(?:_HOURS)?$|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
+const RESERVED_ENV_PREFIX = /^EZTEST_(?:ORACLE|ORACLEDB|MSSQL|PG|KAFKAJS|PROTOBUFJS|REPORT)_|^EZTEST_SERVER_(?!_)|^EZTEST_SHARD(?:_|$)|^EZTEST_(?:FIREFOX|CFT|CANCEL)_|^EZTEST_TEMP_SWEEP(?:_HOURS)?$|^EZTEST_(?:CHROMIUM_PATH|CHROMIUM_SANDBOX|BROWSERS_PATH|HEADLESS_SHELL|TEST_BROWSER_DIRS)$/;
 
 /**
  * Names accepted for settings besides their canonical EZTEST_<SECTION>__<KEY> form (docs/configuration.md,

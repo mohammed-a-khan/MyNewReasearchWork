@@ -514,6 +514,8 @@ export const ADVANCED_RULES: IntentRule[] = [
     { name: 'wait-event', keywords: ['wait'], example: 'Wait for the "cart-updated" event and capture it as cart',
       re: new RegExp(String.raw`^wait\s+(?:for|until)\s+(?:the\s+|an?\s+)?(${Q}|[\w:-]+)\s+event(?:\s+(?:on|from)\s+((?:the\s+)?(?:window|document)|.+?))?(?:\s+(?:fires|is\s+fired|happens))?${STORE}?$`, 'i'),
       build: (m, q) => {
+        // "Wait for a GraphQL event on <subscription>" is the GraphQL subscription step.
+        if (/^graphql$/i.test(m[1])) return undefined;
         const where = m[2]?.trim();
         const global = !where || /^(?:the\s+)?(?:window|document)$/i.test(where);
         return { action: 'wait', ...(global ? {} : { target: T(where!, q) }), args: { for: 'event', event: V(m[1], q), ...(global && where ? { on: where.replace(/^the\s+/i, '').toLowerCase() } : {}) }, ...(m[3] ? { captureAs: m[3] } : {}) };
@@ -733,9 +735,82 @@ export const ADVANCED_RULES: IntentRule[] = [
     { name: 'soap', keywords: ['call', 'send'], example: 'Call SOAP action "GetOrder" on /soap with body "<GetOrder><Id>1</Id></GetOrder>" and store as order',
       re: new RegExp(String.raw`^(?:call|send|invoke)\s+(?:the\s+)?soap\s+(?:action|operation|request)\s+(${Q})\s+(?:on|to|at)\s+(${Q}|\S+)\s+with\s+(?:the\s+)?body\s+(${Q})(?:\s+using\s+soap\s+(1\.[12]))?(?:\s+as\s+([\w-]+)(?=\s|$))?${STORE}?$`, 'i'),
       build: (m, q) => ({ action: 'api', api: { method: 'POST', url: V(m[2], q), soap: { action: V(m[1], q), body: V(m[3], q), ...(m[4] ? { version: m[4] as '1.1' | '1.2' } : {}) }, ...(m[5] ? { asRole: m[5] } : {}) }, captureAs: m[6] ?? 'response' }) },
-    { name: 'ws-connect', keywords: ['connect', 'open'], example: 'Connect to websocket "/ws" as feed',
-      re: new RegExp(String.raw`^(?:connect\s+to|open)\s+(?:a\s+|the\s+)?web\s*socket\s+(?:at\s+|to\s+)?(${Q}|\S+)(?:\s+as\s+(\w+))?$`, 'i'),
-      build: (m, q) => ({ action: 'ws', args: { op: 'connect', url: V(m[1], q), socket: m[2] ?? 'ws' } }) },
+    { name: 'ws-connect', keywords: ['connect', 'open'], example: 'Connect to websocket "/ws" as feed using role manager with headers "X-Tenant" = "eu" with protocol "chat.v2"',
+      re: new RegExp(String.raw`^(?:connect\s+to|open)\s+(?:a\s+|the\s+)?web\s*socket\s+(?:at\s+|to\s+)?(${Q}|\S+)(?:\s+as\s+(\w+))?((?:\s+(?:using|with)\s+.*)?)$`, 'i'),
+      build: (m, q) => {
+        const args: Record<string, unknown> = { op: 'connect', url: V(m[1], q), socket: m[2] ?? 'ws' };
+        for (const raw of (m[3] ?? '').split(/\s+(?=(?:using|with)\s)/i)) {
+          const c = raw.trim();
+          if (!c) continue;
+          let x: RegExpExecArray | null;
+          if ((x = /^(?:using|with)\s+(?:the\s+)?role\s+([\w.-]+)$/i.exec(c))) args.asRole = x[1];
+          else if ((x = new RegExp(String.raw`^with\s+(?:the\s+)?(?:sub)?protocols?\s+(${Q}(?:\s*,\s*${Q})*)$`, 'i').exec(c))) args.protocols = x[1].split(/\s*,\s*/).map((p) => V(p, q));
+          else if ((x = new RegExp(String.raw`^with\s+(?:the\s+)?client\s+certificate\s+(${Q})$`, 'i').exec(c))) args.clientCertificate = V(x[1], q);
+          else if ((x = /^with\s+(?:a\s+)?ping\s+every\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?)$/i.exec(c))) args.pingIntervalMs = /^ms|^milli/i.test(x[2]) ? Number(x[1]) : Math.round(Number(x[1]) * 1000);
+          else if ((x = /^with\s+headers?\s+(.+)$/i.exec(c))) {
+            const headers: Record<string, string> = {};
+            for (const h of x[1].split(/\s*,\s*/)) {
+              const hm = new RegExp(String.raw`^(${Q}|[\w-]+)\s*(?:=|:)\s*(${Q}|\$\{[\w.]+\}|\S+)$`).exec(h.trim());
+              if (!hm) throw Object.assign(new Error(`Expected header "name" = "value", got "${h}"`), { fatal: true });
+              headers[V(hm[1], q)] = V(hm[2], q);
+            }
+            args.headers = headers;
+          } else throw Object.assign(new Error(`Unknown websocket option "${c}" (using role <role>, with headers "Name" = "value", with protocol "name", with client certificate "name", with ping every 10 s)`), { fatal: true });
+        }
+        return { action: 'ws', args };
+      } },
+    { name: 'graphql-subscribe', keywords: ['subscribe'], example: 'Subscribe to GraphQL "subscription { orderUpdated(id: 7) { id status } }" at /graphql as updates using role trader',
+      re: new RegExp(String.raw`^(?:subscribe|listen)\s+to\s+(?:the\s+)?graphql\s+(?:subscription\s+)?(${Q})\s+(?:at|on|via)\s+(${Q}|\S+)\s+as\s+(\w+)((?:\s+(?:using|with)\s+.*)?)$`, 'i'),
+      build: (m, q) => {
+        const args: Record<string, unknown> = { op: 'gql-subscribe', url: V(m[2], q), query: V(m[1], q), socket: m[3] };
+        for (const raw of (m[4] ?? '').split(/\s+(?=(?:using|with)\s)/i)) {
+          const c = raw.trim();
+          if (!c) continue;
+          let x: RegExpExecArray | null;
+          if ((x = /^(?:using|with)\s+(?:the\s+)?role\s+([\w.-]+)$/i.exec(c))) args.asRole = x[1];
+          else if ((x = new RegExp(String.raw`^with\s+variables\s+(${Q})$`, 'i').exec(c))) {
+            const v: unknown = JSON.parse(V(x[1], q));
+            if (!v || typeof v !== 'object' || Array.isArray(v)) throw Object.assign(new Error('GraphQL variables must be a JSON object'), { fatal: true });
+            args.variables = v;
+          } else if ((x = new RegExp(String.raw`^with\s+(?:the\s+)?client\s+certificate\s+(${Q})$`, 'i').exec(c))) args.clientCertificate = V(x[1], q);
+          else if ((x = /^with\s+headers?\s+(.+)$/i.exec(c))) {
+            const headers: Record<string, string> = {};
+            for (const h of x[1].split(/\s*,\s*/)) {
+              const hm = new RegExp(String.raw`^(${Q}|[\w-]+)\s*(?:=|:)\s*(${Q}|\$\{[\w.]+\}|\S+)$`).exec(h.trim());
+              if (!hm) throw Object.assign(new Error(`Expected header "name" = "value", got "${h}"`), { fatal: true });
+              headers[V(hm[1], q)] = V(hm[2], q);
+            }
+            args.headers = headers;
+          } else throw Object.assign(new Error(`Unknown GraphQL subscription option "${c}" (using role <role>, with variables '{...}', with headers "Name" = "value", with client certificate "name")`), { fatal: true });
+        }
+        return { action: 'ws', args };
+      } },
+    { name: 'graphql-event', keywords: ['wait'], example: 'Wait for a GraphQL event on updates where "$.data.orderUpdated.status" = "SHIPPED" within 10 s and store it as shipped',
+      re: new RegExp(String.raw`^wait\s+for\s+(?:a|the\s+next|an?)\s+graphql\s+(?:event|update|message)\s+(?:on|from|in)\s+(\w+)((?:\s+where\s+.+?)?)(?:\s+within\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?|m|minutes?))?${STORE}?$`, 'i'),
+      build: (m, q) => {
+        const filters: Array<{ path: string; op: string; value: string }> = [];
+        const where = (m[2] ?? '').trim().replace(/^where\s+/i, '');
+        if (where) {
+          for (const part of where.split(/\s+and\s+/i)) {
+            const fm = new RegExp(String.raw`^(${Q})\s*(=|==|!=|contains)\s*(${Q}|\$\{[\w.]+\}|\S+)$`, 'i').exec(part.trim());
+            if (!fm) throw Object.assign(new Error(`Cannot read the GraphQL event filter "${part}" (try "$.data.orderUpdated.status" = "SHIPPED")`), { fatal: true });
+            const path = V(fm[1], q);
+            if (!path.startsWith('$')) throw Object.assign(new Error(`An event field must be a JSONPath starting with $ (got "${path}")`), { fatal: true });
+            filters.push({ path, op: fm[2] === '==' ? '=' : fm[2].toLowerCase(), value: V(fm[3], q) });
+          }
+        }
+        const timeoutMs = m[3] ? Math.round(Number(m[3]) * (/^ms|^milli/i.test(m[4]) ? 1 : /^m(?:in|$)/i.test(m[4]) ? 60_000 : 1000)) : undefined;
+        return { action: 'ws', args: { op: 'gql-event', socket: m[1], ...(filters.length ? { filters } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) }, captureAs: m[5] ?? 'event' };
+      } },
+    { name: 'graphql-unsubscribe', keywords: ['stop', 'unsubscribe'], example: 'Stop GraphQL subscription updates',
+      re: /^(?:stop|end|close)\s+(?:the\s+)?graphql\s+subscription\s+(\w+)$|^unsubscribe\s+(?:from\s+)?(?:graphql\s+)?(\w+)$/i,
+      build: (m) => ({ action: 'ws', args: { op: 'gql-stop', socket: m[1] ?? m[2] } }) },
+    { name: 'graphql-validate', keywords: ['validate', 'check'], example: 'Validate GraphQL query "{ orders { id status } }" against the schema of /graphql',
+      re: new RegExp(String.raw`^(?:validate|check)\s+(?:the\s+)?graphql\s+(?:query|mutation|subscription|operation|document)\s+(${Q})\s+against\s+(?:the\s+)?(?:schema\s+(?:of|at)\s+)?(${Q}|\S+)(?:\s+as\s+([\w-]+))?$`, 'i'),
+      build: (m, q) => ({ action: 'ws', args: { op: 'gql-validate', query: V(m[1], q), url: V(m[2], q), ...(m[3] ? { asRole: m[3] } : {}) } }) },
+    { name: 'graphql-introspect', keywords: ['introspect'], example: 'Introspect the GraphQL schema at /graphql and store it as schema',
+      re: new RegExp(String.raw`^introspect\s+(?:the\s+)?graphql\s+(?:schema\s+)?(?:at|of|on)\s+(${Q}|\S+)(?:\s+as\s+([\w-]+)(?=\s|$))?${STORE}?$`, 'i'),
+      build: (m, q) => ({ action: 'ws', args: { op: 'gql-introspect', url: V(m[1], q), ...(m[2] ? { asRole: m[2] } : {}) }, captureAs: m[3] ?? 'schema' }) },
     { name: 'ws-send', keywords: ['send'], example: 'Send "ping" on websocket feed',
       re: new RegExp(String.raw`^send\s+(?:the\s+)?(?:web\s*socket\s+message\s+)?(${Q})\s+(?:on|over|to|through|via)\s+(?:the\s+)?web\s*socket(?:\s+(\w+))?$|^send\s+web\s*socket\s+message\s+(${Q})(?:\s+on\s+(\w+))?$`, 'i'),
       build: (m, q) => ({ action: 'ws', value: V(m[1] ?? m[3], q), args: { op: 'send', socket: m[2] ?? m[4] ?? 'ws' } }) },

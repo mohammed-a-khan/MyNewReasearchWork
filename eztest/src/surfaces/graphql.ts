@@ -1,6 +1,7 @@
 /** GraphQL over HTTP POST. GraphQL `errors` are always surfaced, never swallowed. */
 import { EzTestError } from '../core/index.js';
 import type { ApiClient, ApiResponse, RequestOptions } from './api.js';
+import { INTROSPECTION_QUERY, validateGraphQL, type GqlError, type IntrospectionSchema } from './graphql-schema.js';
 
 export interface GraphQLErrorItem {
   message: string;
@@ -50,6 +51,24 @@ export class GraphQLClient {
     }
     return { data: body.data, errors: Array.isArray(body.errors) ? body.errors : [], response: res };
   }
+
+  /** The server's schema by introspection (cached by the client; `refresh` asks again). */
+  async introspect(o: { refresh?: boolean } & Pick<RequestOptions, 'headers' | 'timeoutMs'> = {}): Promise<IntrospectionSchema> {
+    if (!this.schema || o.refresh) {
+      const r = await this.query<{ __schema: IntrospectionSchema }>(INTROSPECTION_QUERY, undefined, { operationName: 'EZTestIntrospection', headers: o.headers, timeoutMs: o.timeoutMs }).catch((e: Error) => {
+        throw new EzTestError(`GraphQL introspection of ${this.path} failed (is introspection disabled on the server?): ${e.message}`, 'GRAPHQL_INTROSPECTION');
+      });
+      this.schema = r.__schema;
+    }
+    return this.schema;
+  }
+
+  /** Validate a document against the introspected schema; empty = valid. */
+  async validate(query: string, o: Pick<RequestOptions, 'headers' | 'timeoutMs'> = {}): Promise<GqlError[]> {
+    return validateGraphQL(query, await this.introspect(o));
+  }
+
+  private schema?: IntrospectionSchema;
 
   /** Execute and return data; throws GraphQLRequestError when there are errors or no data. */
   async query<T = Record<string, unknown>>(

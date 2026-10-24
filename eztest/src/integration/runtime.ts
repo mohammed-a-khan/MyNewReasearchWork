@@ -19,7 +19,11 @@ import type { StepContext } from '../runner/types.js';
 import { AmqpBusDriver } from './bus/amqp.js';
 import { Amqp10BusDriver } from './bus/amqp10.js';
 import { IbmMqBusDriver } from './bus/ibmmq.js';
-import { KafkaBusDriver } from './bus/kafka.js';
+import { KafkaBusDriver, type KafkaOptions, type KafkaSasl } from './bus/kafka.js';
+import { OAuth2TokenProvider } from '../identity/oauth.js';
+import { awsCredentials } from '../identity/aws-sigv4.js';
+import { SchemaRegistryClient, SchemaRegistrySerde } from './schema-registry.js';
+import { loadTls } from './tls.js';
 import { MemoryBusDriver } from './bus/memory.js';
 import { MqttBusDriver } from './bus/mqtt.js';
 import { BusError, type BusDestination, type BusDriver, type BusMessage, type BusSubscription } from './bus/types.js';
@@ -58,12 +62,28 @@ interface JourneyState {
 
 const KIND_TEXT: Record<string, string> = { kafka: 'Kafka', amqp: 'RabbitMQ', amqp10: 'AMQP 1.0', mqtt: 'MQTT', ibmmq: 'IBM MQ', memory: 'memory' };
 
+/** Kafka driver options from broker config: TLS files, SASL (OAUTHBEARER through EZTest's OAuth client, MSK IAM), schema registry. */
+export function kafkaOptions(c: Extract<BrokerConfig, { type: 'kafka' }>, baseDir: string): KafkaOptions {
+  const { ssl, sasl, schemaRegistry, type: _type, ...rest } = c;
+  let s: KafkaSasl | undefined;
+  if (sasl?.mechanism === 'oauthbearer') {
+    s = { mechanism: 'oauthbearer', tokenProvider: new OAuth2TokenProvider({ tokenUrl: sasl.tokenUrl, clientId: sasl.clientId, clientSecret: sasl.clientSecret, scope: sasl.scope, audience: sasl.audience, authMethod: sasl.authMethod }), ...(sasl.extensions ? { extensions: sasl.extensions } : {}) };
+  } else if (sasl?.mechanism === 'aws-msk-iam') {
+    const given = { accessKeyId: sasl.accessKeyId, secretAccessKey: sasl.secretAccessKey, sessionToken: sasl.sessionToken };
+    s = { mechanism: 'aws-msk-iam', region: sasl.region, credentials: () => awsCredentials(given) };
+  } else if (sasl) s = sasl;
+  const serde = schemaRegistry
+    ? new SchemaRegistrySerde(new SchemaRegistryClient({ url: schemaRegistry.url, username: schemaRegistry.username, password: schemaRegistry.password, token: schemaRegistry.token, tls: loadTls(schemaRegistry.tls, baseDir) }))
+    : undefined;
+  return { ...rest, ...(ssl === undefined ? {} : { ssl: typeof ssl === 'boolean' ? ssl : (loadTls(ssl, baseDir) ?? true) }), ...(s ? { sasl: s } : {}), ...(serde ? { serde } : {}) };
+}
+
 export function createBusDriver(name: string, c: BrokerConfig, baseDir: string): BusDriver {
   switch (c.type) {
-    case 'kafka': return new KafkaBusDriver(name, c);
-    case 'amqp': return new AmqpBusDriver(name, c);
+    case 'kafka': return new KafkaBusDriver(name, kafkaOptions(c, baseDir));
+    case 'amqp': return new AmqpBusDriver(name, { ...c, ...(c.tls ? { tls: loadTls(c.tls, baseDir) } : {}) });
     case 'amqp10': return new Amqp10BusDriver(name, { ...c, ...(['ca', 'cert', 'key'] as const).reduce((o, k) => (c[k] ? { ...o, [k]: isAbsolute(c[k]!) ? c[k] : resolve(baseDir, c[k]!) } : o), {}) });
-    case 'mqtt': return new MqttBusDriver(name, c);
+    case 'mqtt': return new MqttBusDriver(name, { ...c, ...(c.tls ? { tls: loadTls(c.tls, baseDir) } : {}) });
     case 'ibmmq': return new IbmMqBusDriver(name, { ...c, ...(c.ca ? { ca: isAbsolute(c.ca) ? c.ca : resolve(baseDir, c.ca) } : {}) });
     case 'memory': return new MemoryBusDriver(name);
   }
@@ -246,11 +266,24 @@ export class Integration implements IntegrationRuntime {
         ...(a.contentType !== undefined ? { contentType: String(a.contentType) } : asJson(payload) !== undefined ? { contentType: 'application/json' } : {}),
         ...(a.qos !== undefined ? { qos: Number(a.qos) as 0 | 1 | 2 } : {}), ...(a.retain ? { retain: true } : {}),
       };
+      let encoded: { schemaId: number; format: string; subject: string } | undefined;
+      if (a.encoding !== undefined) {
+        const serde = driver instanceof KafkaBusDriver ? driver.opts.serde : undefined;
+        if (!serde) throw new EzTestError(`"as ${String(a.encoding)}" needs a schema registry: set messaging.brokers.${driver.name}.schemaRegistry (Kafka brokers only)`, 'BUS_CONFIG');
+        const value = asJson(payload);
+        if (value === undefined) throw new EzTestError(`The message to encode as ${String(a.encoding)} is not JSON: ${mask(payload).slice(0, 200)}`, 'BUS_PAYLOAD');
+        const subject = ctx.interpolate(String(a.subject));
+        const e = await serde.encode(subject, value, { ...(a.schemaVersion !== undefined ? { version: Number(a.schemaVersion) } : {}), ...(a.messageType !== undefined ? { message: String(a.messageType) } : {}) });
+        if (e.format !== a.encoding) throw new EzTestError(`Subject "${subject}" holds a ${e.format} schema, but the step says ${String(a.encoding)}`, 'BUS_CONFIG');
+        (msg as { payload: string | Uint8Array }).payload = e.bytes;
+        if (a.contentType === undefined) delete (msg as { contentType?: string }).contentType;
+        encoded = { schemaId: e.schemaId, format: e.format, subject };
+      }
       const receipt = await driver.publish(dest, msg);
-      const record = { direction: 'published', broker: driver.name, kind: driver.kind, destination: dest.name, ...(dest.routingKey ? { routingKey: dest.routingKey } : {}), key: msg.key, headers: msg.headers, correlationId: msg.correlationId, payload: asJson(payload) ?? payload, receipt };
+      const record = { direction: 'published', broker: driver.name, kind: driver.kind, destination: dest.name, ...(dest.routingKey ? { routingKey: dest.routingKey } : {}), key: msg.key, headers: msg.headers, correlationId: msg.correlationId, payload: asJson(payload) ?? payload, ...(encoded ? { encoded } : {}), receipt };
       const ref = await ctx.evidence.store('data', `messages/${safeName(ctx.journey.id)}/${safeName(step.id)}.json`, JSON.stringify(record, null, 2), { journeyId: ctx.journey.id, stepId: step.id, description: `published to ${where}` });
       if (step.captureAs) {
-        const v = maskDeep({ destination: dest.name, ...receipt, ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.correlationId ? { correlationId: msg.correlationId } : {}) }, mask);
+        const v = maskDeep({ destination: dest.name, ...receipt, ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.correlationId ? { correlationId: msg.correlationId } : {}), ...(encoded ? { schemaId: encoded.schemaId, format: encoded.format } : {}) }, mask);
         ctx.ledger.set(step.captureAs, v);
         return { captured: { [step.captureAs]: v }, evidence: [ref.id] };
       }
@@ -299,7 +332,9 @@ export class Integration implements IntegrationRuntime {
         }
         if (got.length < count) {
           const others = sub.messages.filter((m) => !got.includes(m));
-          const seen = others.length ? `; ${others.length} other message(s) arrived, e.g. ${others.slice(-3).map((m) => mask(m.payload).slice(0, 160)).join(' | ')}` : '; no messages arrived at all';
+          const undecoded = others.find((m) => m.decodeError);
+          const seen = (others.length ? `; ${others.length} other message(s) arrived, e.g. ${others.slice(-3).map((m) => mask(m.payload).slice(0, 160)).join(' | ')}` : '; no messages arrived at all')
+            + (undecoded ? `; a schema-registry payload could not be decoded: ${undecoded.decodeError}` : '');
           if (sub.error && !sub.closed) throw sub.error;
           throw new EzTestError(`No${count > 1 ? ` ${count}` : ''} message${count > 1 ? 's' : ''} on ${where}${filters.length ? ` matched ${this.filterText(filters.map((f) => ({ ...f, value: f.value === undefined ? undefined : ctx.interpolate(f.value) })))}` : ''} within ${msText(timeout)}${got.length ? ` (found ${got.length})` : ''}${seen}`, 'BUS_TIMEOUT');
         }
@@ -314,6 +349,7 @@ export class Integration implements IntegrationRuntime {
           broker: driver.name, kind: driver.kind, destination: m.destination, ...(m.key !== undefined ? { key: m.key } : {}), headers: m.headers,
           ...(m.correlationId ? { correlationId: m.correlationId } : {}), ...(m.messageId ? { messageId: m.messageId } : {}), timestamp: new Date(m.timestamp).toISOString(),
           ...(m.partition !== undefined ? { partition: m.partition } : {}), ...(m.offset !== undefined ? { offset: m.offset } : {}), ...(m.routingKey ? { routingKey: m.routingKey } : {}),
+          ...(m.format ? { format: m.format } : {}), ...(m.schemaId !== undefined ? { schemaId: m.schemaId } : {}),
         }));
         const key = step.captureAs ?? 'message';
         const value = maskDeep(count > 1 ? payloads : payloads[0], mask);

@@ -62,7 +62,7 @@ async function rolesView(app: StudioApp): Promise<Record<string, unknown>> {
     environment: c.environment,
     baseUrl: c.baseUrl ? loaded.masker.mask(c.baseUrl) : undefined,
     sessionDir: c.identity.sessionDir,
-    stores: [{ type: 'env', name: 'env', implicit: !c.identity.secretStores.some((s) => (s.name ?? s.type) === 'env') }, ...c.identity.secretStores.map((s) => ({ type: s.type, name: s.name ?? s.type, ...(s.type === 'env' ? { prefix: s.prefix } : s.type === 'file' ? { path: s.path } : { vaultUrl: s.vaultUrl }) }))].filter((s, i, all) => all.findIndex((x) => x.name === s.name) === i),
+    stores: [{ type: 'env', name: 'env', implicit: !c.identity.secretStores.some((s) => (s.name ?? s.type) === 'env') }, ...c.identity.secretStores.map((s) => ({ type: s.type, name: s.name ?? s.type, ...(s.type === 'env' ? { prefix: s.prefix } : s.type === 'file' ? { path: s.path } : s.type === 'azure-keyvault' ? { vaultUrl: s.vaultUrl } : s.type === 'hashicorp-vault' ? { vaultUrl: s.address } : s.type === 'cyberark-ccp' ? { vaultUrl: s.url } : s.type === 'aws-secrets-manager' ? { vaultUrl: s.endpoint ?? `aws:${s.region}` } : { vaultUrl: s.endpoint ?? `gcp:${s.project ?? ''}` }) }))].filter((s, i, all) => all.findIndex((x) => x.name === s.name) === i),
     masterKey: !!app.ctx.env[MASTER_KEY_ENV],
     roles,
   };

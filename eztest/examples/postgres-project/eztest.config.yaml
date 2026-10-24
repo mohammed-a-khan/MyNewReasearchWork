@@ -1,0 +1,44 @@
+# EZTest example: the EZ Shop demo app (examples/demo-app) plus a PostgreSQL
+# "customer ledger" that mirrors the shop's customers. Fictional data only.
+#
+#   docker run -d --name ez-postgres -p 5432:5432 -e POSTGRES_USER=eztest \
+#     -e POSTGRES_PASSWORD=EzPg_Pass1 -e POSTGRES_DB=eztest postgres:16-alpine
+#   psql postgres://eztest:EzPg_Pass1@localhost:5432/eztest -f examples/postgres-project/setup.sql
+#   export SHOP_PG_PASSWORD=EzPg_Pass1
+#   npx eztest queries check          # EXPLAIN every catalogue query in a read-only transaction
+#   npx eztest run journeys
+baseUrl: ${SHOP_URL:-http://127.0.0.1:4600}
+journeysDir: journeys
+outputDir: eztest-results
+reporters: [console, json]
+healing:
+  enabled: false
+
+identity:
+  secretStores:
+    - type: env
+      prefix: SHOP_
+  roles:
+    manager:
+      loginUrl: /login
+      username: bob
+      password: secret://env/BOB_PASSWORD
+      successUrl: /dashboard
+      api:
+        tokenUrl: /api/token
+        clientId: ez-client
+        clientSecret: secret://env/API_CLIENT_SECRET
+
+db:
+  connections:
+    ledger:
+      type: postgres
+      host: ${PG_HOST:-localhost}
+      port: ${PG_PORT:-5432}
+      database: ${PG_DATABASE:-eztest}
+      user: ${PG_USER:-eztest}
+      password: secret://env/PG_PASSWORD
+  queries:
+    dir: queries
+    inline:
+      LEDGER_CUSTOMER_COUNT: SELECT COUNT(*)::int AS customer_count FROM ezt_ledger_customers

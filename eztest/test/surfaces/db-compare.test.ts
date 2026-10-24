@@ -83,13 +83,34 @@ describe('SqliteDbClient', () => {
 
 describe('optional drivers and registry', () => {
   it('fails clearly when pg / mssql are not installed', async () => {
-    const pg = await PostgresDbClient.connect({ host: 'localhost' }).catch((e) => e);
-    expect(pg).toBeInstanceOf(DbError);
-    expect(pg.code).toBe('DB_DRIVER_MISSING');
-    expect(pg.message).toMatch(/npm install pg/);
-    const ms = await MssqlDbClient.connect({ server: 'localhost' }).catch((e) => e);
-    expect(ms.code).toBe('DB_DRIVER_MISSING');
-    expect(ms.message).toMatch(/npm install mssql/);
+    // The live suites point EZTEST_PG_DRIVER / EZTEST_MSSQL_DRIVER at drivers installed elsewhere.
+    const saved = { pg: process.env.EZTEST_PG_DRIVER, ms: process.env.EZTEST_MSSQL_DRIVER };
+    delete process.env.EZTEST_PG_DRIVER;
+    delete process.env.EZTEST_MSSQL_DRIVER;
+    try {
+      const pg = await PostgresDbClient.connect({ host: 'localhost' }).catch((e) => e);
+      expect(pg).toBeInstanceOf(DbError);
+      expect(pg.code).toBe('DB_DRIVER_MISSING');
+      expect(pg.message).toMatch(/npm install pg/);
+      const ms = await MssqlDbClient.connect({ server: 'localhost' }).catch((e) => e);
+      expect(ms.code).toBe('DB_DRIVER_MISSING');
+      expect(ms.message).toMatch(/npm install mssql/);
+      // A driver folder that holds no such package is named in the error.
+      process.env.EZTEST_PG_DRIVER = '/nonexistent/node_modules/pg';
+      const bad = await PostgresDbClient.connect({ host: 'localhost' }).catch((e) => e);
+      expect(bad.code).toBe('DB_DRIVER_LOAD');
+      expect(bad.message).toMatch(/EZTEST_PG_DRIVER=\/nonexistent\/node_modules\/pg does not hold the "pg" package/);
+    } finally {
+      if (saved.pg === undefined) delete process.env.EZTEST_PG_DRIVER;
+      else process.env.EZTEST_PG_DRIVER = saved.pg;
+      if (saved.ms !== undefined) process.env.EZTEST_MSSQL_DRIVER = saved.ms;
+    }
+  });
+  it('PostgreSQL named binds become $1..$n; literals, casts and comments are left alone', () => {
+    expect(PostgresDbClient.bind("SELECT * FROM t WHERE a = :a AND b::text = :b AND c = ':a' -- :zz\n AND d = :a", { a: 1, ':b': 'x' }))
+      .toEqual({ text: "SELECT * FROM t WHERE a = $1 AND b::text = $2 AND c = ':a' -- :zz\n AND d = $3", values: [1, 'x', 1] });
+    expect(PostgresDbClient.bind('SELECT $1', [5])).toEqual({ text: 'SELECT $1', values: [5] });
+    expect(() => PostgresDbClient.bind('SELECT :missing', { other: 1 })).toThrow(/no value for bind :missing \(binds given: other\)/);
   });
   it('opens named connections lazily and rejects unknown names', async () => {
     const reg = new DbRegistry({ mem: { driver: 'sqlite', file: ':memory:' } });

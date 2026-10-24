@@ -13,7 +13,7 @@ import {
 } from '../core/index.js';
 import { parseCsv } from '../docs/csv.js';
 import { readXlsxTable } from '../importers/xlsx.js';
-import { buildSoapEnvelope, caseInsensitiveRow, compareRows, getPath, parseSoapResponse, placeholder, scanSql, WsClient, type CompareOptions, type SqlDialect } from '../surfaces/index.js';
+import { ApiClient, buildSoapEnvelope, caseInsensitiveRow, compareRows, formatGraphQLErrors, getPath, GraphQLClient, GraphQLWsClient, parseSoapResponse, placeholder, scanSql, selectClientCertificate, validateGraphQL, WsClient, type CompareOptions, type GraphQLEvent, type GraphQLSubscription, type SqlDialect } from '../surfaces/index.js';
 import type { ActionOutcome } from './actions.js';
 import { regex } from './conditions-advanced.js';
 import { maskDeep } from './dom.js';
@@ -274,7 +274,7 @@ export async function dbAction(step: Step, ctx: StepContext, opts: RunOptions): 
 
 // ------------------------------------------------------------------ WebSocket
 
-export async function wsAction(step: Step, ctx: StepContext, timeout: number): Promise<ActionOutcome> {
+export async function wsAction(step: Step, ctx: StepContext, timeout: number, opts?: Pick<RunOptions, 'apiAuth' | 'clientCertificates'>): Promise<ActionOutcome> {
   const a = step.args ?? {};
   const session = ctx.session;
   if (!session) throw new EzTestError('websocket steps need a browser session', 'NO_SESSION');
@@ -290,7 +290,21 @@ export async function wsAction(step: Step, ctx: StepContext, timeout: number): P
       let url = ctx.interpolate(String(a.url));
       if (!/^wss?:/i.test(url)) url = resolveUrl(url, ctx.baseUrl).replace(/^http/i, 'ws');
       await session.sockets.get(name)?.close().catch(() => undefined);
-      session.sockets.set(name, await WsClient.connect(url, { timeoutMs: timeout }));
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries((a.headers ?? {}) as Record<string, string>)) {
+        headers[k] = ctx.interpolate(v);
+      }
+      if (a.asRole !== undefined) {
+        if (!opts?.apiAuth) throw new EzTestError(`Websocket as role "${String(a.asRole)}" needs API credentials for the role (identity.roles.${String(a.asRole)}.api)`, 'NO_API_AUTH');
+        Object.assign(headers, await opts.apiAuth(String(a.asRole), ctx));
+      }
+      const cert = selectClientCertificate(opts?.clientCertificates, url.replace(/^ws/i, 'http'), a.clientCertificate !== undefined ? String(a.clientCertificate) : undefined);
+      session.sockets.set(name, await WsClient.connect(url, {
+        timeoutMs: timeout, headers,
+        ...(Array.isArray(a.protocols) ? { protocols: (a.protocols as string[]).map((p) => ctx.interpolate(p)) } : {}),
+        ...(cert ? { tls: { ...(cert.pfx ? { pfx: cert.pfx } : {}), ...(cert.cert ? { cert: cert.cert } : {}), ...(cert.key ? { key: cert.key } : {}), ...(cert.passphrase !== undefined ? { passphrase: cert.passphrase } : {}), ...(cert.ca ? { ca: cert.ca } : {}) } } : {}),
+        ...(a.pingIntervalMs !== undefined ? { pingIntervalMs: Number(a.pingIntervalMs) } : {}),
+      }));
       return {};
     }
     case 'send': {
@@ -316,8 +330,117 @@ export async function wsAction(step: Step, ctx: StepContext, timeout: number): P
       await get().close();
       session.sockets.delete(name);
       return {};
+    case 'gql-subscribe': case 'gql-event': case 'gql-stop': case 'gql-validate': case 'gql-introspect':
+      return graphqlAction(step, ctx, timeout, opts);
     default:
       throw new NotSupportedError(`websocket op "${op}"`);
+  }
+}
+
+// ------------------------------------------------------------------ GraphQL (subscriptions, introspection, validation)
+
+const GQL = new WeakMap<object, Map<string, { client: GraphQLWsClient; sub: GraphQLSubscription }>>();
+
+/** Auth headers and the client certificate for a GraphQL endpoint (as API steps get them). */
+async function endpointAuth(a: Record<string, unknown>, url: string, ctx: StepContext, opts?: Pick<RunOptions, 'apiAuth' | 'clientCertificates'>) {
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries((a.headers ?? {}) as Record<string, string>)) headers[k] = ctx.interpolate(v);
+  if (a.asRole !== undefined) {
+    if (!opts?.apiAuth) throw new EzTestError(`GraphQL as role "${String(a.asRole)}" needs API credentials for the role (identity.roles.${String(a.asRole)}.api)`, 'NO_API_AUTH');
+    Object.assign(headers, await opts.apiAuth(String(a.asRole), ctx));
+  }
+  const cert = selectClientCertificate(opts?.clientCertificates, url.replace(/^ws/i, 'http'), a.clientCertificate !== undefined ? String(a.clientCertificate) : undefined);
+  return { headers, cert };
+}
+
+async function graphqlAction(step: Step, ctx: StepContext, timeout: number, opts?: Pick<RunOptions, 'apiAuth' | 'clientCertificates'>): Promise<ActionOutcome> {
+  const a = step.args ?? {};
+  const session = ctx.session!;
+  let subs = GQL.get(session);
+  if (!subs) {
+    subs = new Map();
+    GQL.set(session, subs);
+    const own = subs;
+    session.cleanups.push(async () => {
+      for (const s of own.values()) await s.client.close().catch(() => undefined);
+      own.clear();
+    });
+  }
+  const name = String(a.socket ?? '');
+  switch (String(a.op)) {
+    case 'gql-subscribe': {
+      let url = ctx.interpolate(String(a.url));
+      if (!/^wss?:/i.test(url)) url = resolveUrl(url, ctx.baseUrl).replace(/^http/i, 'ws');
+      const { headers, cert } = await endpointAuth(a, url, ctx, opts);
+      await subs.get(name)?.client.close().catch(() => undefined);
+      const client = await GraphQLWsClient.connect(url, {
+        timeoutMs: timeout, headers,
+        // Servers that authenticate in connection_init read the same header there.
+        ...(headers.authorization || headers.Authorization ? { connectionParams: { authorization: headers.authorization ?? headers.Authorization } } : {}),
+        ...(cert ? { tls: { ...(cert.pfx ? { pfx: cert.pfx } : {}), ...(cert.cert ? { cert: cert.cert } : {}), ...(cert.key ? { key: cert.key } : {}), ...(cert.passphrase !== undefined ? { passphrase: cert.passphrase } : {}), ...(cert.ca ? { ca: cert.ca } : {}) } } : {}),
+      });
+      const variables = a.variables ? interpolateDeep(a.variables as Record<string, unknown>, (s) => ctx.interpolate(s)) as Record<string, unknown> : undefined;
+      const sub = client.subscribe(ctx.interpolate(String(a.query)), variables);
+      subs.set(name, { client, sub });
+      return {};
+    }
+    case 'gql-event': {
+      const s = subs.get(name);
+      if (!s) throw new EzTestError(`No GraphQL subscription "${name}" (start it first: Subscribe to GraphQL "subscription { ... }" at /graphql as ${name})`, 'NO_SUBSCRIPTION');
+      const filters = ((a.filters ?? []) as Array<{ path: string; op: string; value: string }>).map((f) => ({ ...f, value: ctx.interpolate(f.value) }));
+      const pred = (e: GraphQLEvent) => filters.every((f) => {
+        let v: unknown;
+        try {
+          v = getPath(e, f.path);
+        } catch {
+          return false;
+        }
+        const text = v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return f.op === '!=' ? text !== f.value : f.op === 'contains' ? text.includes(f.value) : text === f.value;
+      });
+      const wait = Number(a.timeoutMs ?? timeout);
+      const e = await s.sub.next(pred, wait);
+      if (!e) {
+        if (s.sub.error) throw new EzTestError(`GraphQL subscription "${name}" failed: ${s.sub.error.map((x) => x.message).join('; ')}`, 'GRAPHQL_SUBSCRIPTION');
+        const seen = s.sub.events.length ? `; ${s.sub.events.length} event(s) arrived, the last: ${session.mask(JSON.stringify(s.sub.events.at(-1)?.data ?? null)).slice(0, 200)}` : '; no events arrived';
+        throw new EzTestError(`No GraphQL event on "${name}"${filters.length ? ` matched ${filters.map((f) => `${f.path} ${f.op} ${f.value}`).join(' and ')}` : ''} within ${wait} ms${s.sub.completed ? ' (the server completed the subscription)' : ''}${seen}`, 'GRAPHQL_TIMEOUT');
+      }
+      if (e.errors?.length) throw new EzTestError(`GraphQL event on "${name}" has errors: ${e.errors.map((x) => x.message).join('; ')}`, 'GRAPHQL_ERROR');
+      session.wsFrames.push({ seq: session.nextSeq(), url: name, direction: 'received', payload: session.mask(JSON.stringify(e.data ?? null)), at: new Date(e.receivedAt).toISOString(), socket: name });
+      const key = step.captureAs ?? 'event';
+      const v = maskDeep({ data: e.data ?? null, ...(e.extensions ? { extensions: e.extensions } : {}) }, session.mask);
+      ctx.ledger.set(key, v);
+      return { captured: { [key]: v } };
+    }
+    case 'gql-stop': {
+      const s = subs.get(name);
+      if (!s) throw new EzTestError(`No GraphQL subscription "${name}"`, 'NO_SUBSCRIPTION');
+      s.sub.unsubscribe();
+      await s.client.close().catch(() => undefined);
+      subs.delete(name);
+      return {};
+    }
+    case 'gql-validate': case 'gql-introspect': {
+      const url = resolveUrl(ctx.interpolate(String(a.url)), ctx.baseUrl);
+      const { headers, cert } = await endpointAuth(a, url, ctx, opts);
+      const gql = new GraphQLClient(new ApiClient({ headers, timeoutMs: timeout, ...(cert ? { clientCertificates: [{ origin: new URL(url).origin, ...(cert.pfx ? { pfx: cert.pfx } : {}), ...(cert.cert ? { cert: cert.cert } : {}), ...(cert.key ? { key: cert.key } : {}), ...(cert.passphrase !== undefined ? { passphrase: cert.passphrase } : {}), ...(cert.ca ? { ca: cert.ca } : {}) }] } : {}) }), url);
+      const schema = await gql.introspect();
+      if (a.op === 'gql-introspect') {
+        const v = {
+          queryType: schema.queryType?.name ?? null, mutationType: schema.mutationType?.name ?? null, subscriptionType: schema.subscriptionType?.name ?? null,
+          types: schema.types.filter((t) => !t.name.startsWith('__')).map((t) => t.name).sort(),
+          fields: Object.fromEntries(schema.types.filter((t) => !t.name.startsWith('__') && t.fields).map((t) => [t.name, t.fields!.map((f) => f.name)])),
+        };
+        const key = step.captureAs ?? 'schema';
+        ctx.ledger.set(key, v);
+        return { captured: { [key]: v } };
+      }
+      const errors = validateGraphQL(ctx.interpolate(String(a.query)), schema);
+      if (errors.length) throw new EzTestError(`GraphQL document is not valid against the schema of ${url} (${errors.length} problem${errors.length === 1 ? '' : 's'}): ${formatGraphQLErrors(errors).join(' | ')}`, 'GRAPHQL_INVALID', { errors });
+      return {};
+    }
+    default:
+      throw new NotSupportedError(`GraphQL op "${String(a.op)}"`);
   }
 }
 

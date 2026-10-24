@@ -277,7 +277,7 @@ export const ActionType = z.enum([
   'sms',
   /** Phone calls: args.op place | wait | expectSaid | expectDigits (configured voice provider). */
   'voice',
-  /** WebSocket from the test: args.op connect | send | expect | close. */
+  /** WebSocket from the test: args.op connect | send | expect | close; GraphQL gql-subscribe | gql-event | gql-stop | gql-validate | gql-introspect. */
   'ws',
   /** Compare two captured datasets (DB rows, API body, UI table) by key. */
   'compareData',

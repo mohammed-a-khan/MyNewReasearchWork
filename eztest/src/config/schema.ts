@@ -60,9 +60,34 @@ export const RoleFieldsSchema = z.object({
 export const RoleApiSchema = z.object({
   tokenUrl: z.string().min(1),
   clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
+  /** Secret reference; not needed with clientAuth private_key_jwt or none. */
+  clientSecret: z.string().min(1).optional(),
   scope: z.string().optional(),
   audience: z.string().optional(),
+  /** OAuth grant (docs/api-contracts.md, "OAuth for API steps"); default client_credentials. */
+  grant: z.enum(['client_credentials', 'password', 'authorization_code', 'device_code', 'jwt_bearer', 'refresh_token']).optional(),
+  clientAuth: z.enum(['client_secret_basic', 'client_secret_post', 'private_key_jwt', 'none']).optional(),
+  /** private_key_jwt client authentication: a PEM key (secret reference). */
+  clientKey: z.object({ privateKey: z.string().min(1), alg: z.enum(['RS256', 'PS256', 'ES256']).optional(), kid: z.string().optional() }).optional(),
+  /** jwt_bearer grant: the assertion's key and claims. */
+  assertion: z.object({ privateKey: z.string().min(1), subject: z.string().min(1), issuer: z.string().optional(), audience: z.string().optional(), alg: z.enum(['RS256', 'PS256', 'ES256']).optional(), kid: z.string().optional() }).optional(),
+  /** authorization_code grant (PKCE): EZTest's browser signs in as the role at authorizeUrl; the redirect is intercepted. */
+  authorizeUrl: z.string().min(1).optional(),
+  redirectUri: z.string().url().optional(),
+  /** device_code grant: approved in EZTest's browser as the role. */
+  deviceAuthorizationUrl: z.string().min(1).optional(),
+  /** refresh_token grant: a stored refresh token (secret reference). */
+  refreshToken: z.string().min(1).optional(),
+  /** Refresh tokens this many seconds before they expire (default 60). */
+  skewSeconds: z.number().int().min(0).optional(),
+}).superRefine((a, ctx) => {
+  const grant = a.grant ?? 'client_credentials';
+  if (grant === 'authorization_code' && (!a.authorizeUrl || !a.redirectUri)) ctx.addIssue({ code: 'custom', message: 'the authorization_code grant needs authorizeUrl and redirectUri' });
+  if (grant === 'device_code' && !a.deviceAuthorizationUrl) ctx.addIssue({ code: 'custom', message: 'the device_code grant needs deviceAuthorizationUrl' });
+  if (grant === 'jwt_bearer' && !a.assertion) ctx.addIssue({ code: 'custom', message: 'the jwt_bearer grant needs assertion: { privateKey, subject }' });
+  if (grant === 'refresh_token' && !a.refreshToken) ctx.addIssue({ code: 'custom', message: 'the refresh_token grant needs refreshToken' });
+  if (a.clientAuth === 'private_key_jwt' && !a.clientKey) ctx.addIssue({ code: 'custom', message: 'clientAuth private_key_jwt needs clientKey: { privateKey }' });
+  if (grant === 'client_credentials' && !a.clientSecret && a.clientAuth !== 'private_key_jwt') ctx.addIssue({ code: 'custom', message: 'client credentials need clientSecret (or clientAuth: private_key_jwt with clientKey)' });
 });
 
 /** Which login recipe the vault uses for a role. */
@@ -117,7 +142,8 @@ export const RoleSchema = z
       return;
     }
     if (r.username === undefined) ctx.addIssue({ code: 'custom', path: ['username'], message: 'a role that signs in to a browser needs "username"' });
-    if (r.loginUrl === undefined) ctx.addIssue({ code: 'custom', path: ['loginUrl'], message: 'a role that signs in to a browser needs "loginUrl"' });
+    const idpSignIn = ['password', 'authorization_code', 'device_code'].includes(r.api?.grant ?? '');
+    if (r.loginUrl === undefined && !idpSignIn) ctx.addIssue({ code: 'custom', path: ['loginUrl'], message: 'a role that signs in to a browser needs "loginUrl"' });
     if (r.password === undefined && r.passwordRotation === undefined) ctx.addIssue({ code: 'custom', path: ['password'], message: 'a role needs "password" or "passwordRotation"' });
   });
 
@@ -132,6 +158,54 @@ export const SecretStoreConfigSchema = z.discriminatedUnion('type', [
     clientId: z.string().min(1),
     clientSecret: z.string().min(1),
     authorityUrl: z.string().url().optional(),
+  }),
+  /** HashiCorp Vault KV v2: secret://<name>/path/to/secret#field. Credentials may be secret:// references to earlier stores. */
+  z.object({
+    type: z.literal('hashicorp-vault'),
+    name: z.string().optional(),
+    address: z.string().url(),
+    mount: z.string().min(1).optional(),
+    namespace: z.string().min(1).optional(),
+    auth: z.discriminatedUnion('method', [
+      z.object({ method: z.literal('token'), token: z.string().min(1) }),
+      z.object({ method: z.literal('approle'), roleId: z.string().min(1), secretId: z.string().min(1), mount: z.string().min(1).optional() }),
+    ]),
+    /** Extra CA (PEM file) for a Vault with a private certificate. */
+    ca: z.string().min(1).optional(),
+  }),
+  /** AWS Secrets Manager: secret://<name>/secret-id[#jsonField]. Default credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. */
+  z.object({
+    type: z.literal('aws-secrets-manager'),
+    name: z.string().optional(),
+    region: z.string().min(1),
+    endpoint: z.string().url().optional(),
+    accessKeyId: z.string().min(1).optional(),
+    secretAccessKey: z.string().min(1).optional(),
+    sessionToken: z.string().min(1).optional(),
+    versionStage: z.string().min(1).optional(),
+  }),
+  /** GCP Secret Manager: secret://<name>/secret-name[@version]. The service-account key from a file or a secret reference. */
+  z.object({
+    type: z.literal('gcp-secret-manager'),
+    name: z.string().optional(),
+    project: z.string().min(1).optional(),
+    credentialsFile: z.string().min(1).optional(),
+    credentials: z.string().min(1).optional(),
+    endpoint: z.string().url().optional(),
+  }).refine((s) => !!s.credentialsFile !== !!s.credentials, { message: 'gcp-secret-manager needs exactly one of credentialsFile or credentials' }),
+  /** CyberArk Central Credential Provider: secret://<name>/Safe/Object (or a query Safe=..;Object=..). */
+  z.object({
+    type: z.literal('cyberark-ccp'),
+    name: z.string().optional(),
+    url: z.string().url(),
+    appId: z.string().min(1),
+    safe: z.string().min(1).optional(),
+    folder: z.string().min(1).optional(),
+    /** Client certificate and key (PEM files) for the CCP's mutual TLS; extra CA. */
+    clientCert: z.string().min(1).optional(),
+    clientKey: z.string().min(1).optional(),
+    passphrase: z.string().min(1).optional(),
+    ca: z.string().min(1).optional(),
   }),
 ]);
 
@@ -167,13 +241,39 @@ export const IdentitySchema = z.object({
   }).prefault({}),
 });
 
+/** A port: a number, or digits (a port from ${ENV} interpolation is text). */
+const dbPort = z.preprocess((v) => (typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : v), z.number().int().positive()).optional();
+
+/** Where EZTest gets Entra ID tokens for SQL Server: the driver's own Azure libraries, or EZTest's OAuth client. */
+const entraTokenSource = z.enum(['driver', 'eztest']).optional();
+
+/** SQL Server authentication (docs/databases.md, "SQL Server authentication"). Secrets may be secret:// references. */
+export const MssqlAuthSchema = z.discriminatedUnion('type', [
+  /** SQL Server login: user + password. */
+  z.object({ type: z.literal('sql') }),
+  /** Windows / NTLM: domain\user + password (tedious, any platform). */
+  z.object({ type: z.literal('ntlm'), domain: z.string().min(1).optional() }),
+  /** Windows integrated (Kerberos): the msnodesqlv8 driver with the Microsoft ODBC driver and a Kerberos ticket (kinit on Linux). */
+  z.object({ type: z.literal('kerberos'), odbcDriver: z.string().min(1).optional() }),
+  /** Microsoft Entra ID user + password. */
+  z.object({ type: z.literal('entra-password'), clientId: z.string().min(1), tenantId: z.string().min(1).optional(), tokenSource: entraTokenSource, authorityUrl: z.string().url().optional() }),
+  /** Microsoft Entra ID service principal with a client secret. */
+  z.object({ type: z.literal('entra-service-principal'), clientId: z.string().min(1), clientSecret: z.string().min(1), tenantId: z.string().min(1), tokenSource: entraTokenSource, authorityUrl: z.string().url().optional() }),
+  /** Microsoft Entra ID managed identity (system-assigned, or user-assigned with clientId). */
+  z.object({ type: z.literal('entra-managed-identity'), clientId: z.string().min(1).optional(), tokenSource: entraTokenSource, endpoint: z.string().url().optional() }),
+  /** A ready Microsoft Entra ID access token (e.g. secret://vault/SQL_TOKEN). */
+  z.object({ type: z.literal('entra-access-token'), token: z.string().min(1) }),
+  /** The Azure libraries' default credential chain (environment, managed identity, Azure CLI). */
+  z.object({ type: z.literal('entra-default'), clientId: z.string().min(1).optional() }),
+]);
+
 const DbConnectionUnion = z.discriminatedUnion('driver', [
   z.object({ driver: z.literal('sqlite'), file: z.string().min(1) }),
   z.object({
     driver: z.literal('postgres'),
     connectionString: z.string().min(1).optional(),
     host: z.string().optional(),
-    port: z.number().int().positive().optional(),
+    port: dbPort,
     database: z.string().optional(),
     user: z.string().optional(),
     password: z.string().optional(),
@@ -181,18 +281,25 @@ const DbConnectionUnion = z.discriminatedUnion('driver', [
   }),
   z.object({
     driver: z.literal('mssql'),
-    server: z.string().min(1),
-    port: z.number().int().positive().optional(),
+    /** mssql://user:pass@host:1433/db?encrypt=true or an ADO.NET string (Server=...;Database=...;Authentication=...); the fields below win over it. */
+    connectionString: z.string().min(1).optional(),
+    server: z.string().min(1).optional(),
+    port: dbPort,
+    instanceName: z.string().min(1).optional(),
     database: z.string().optional(),
     user: z.string().optional(),
     password: z.string().optional(),
-    encrypt: z.boolean().default(true),
-    trustServerCertificate: z.boolean().default(false),
+    /** Windows domain for NTLM (also "DOMAIN\\user" in user). */
+    domain: z.string().optional(),
+    /** TLS on (default true) and the certificate verified (trustServerCertificate default false). */
+    encrypt: z.boolean().optional(),
+    trustServerCertificate: z.boolean().optional(),
+    authentication: MssqlAuthSchema.optional(),
   }),
   z.object({
     driver: z.literal('oracle'),
     host: z.string().min(1).optional(),
-    port: z.number().int().positive().optional(),
+    port: dbPort,
     serviceName: z.string().min(1).optional(),
     sid: z.string().min(1).optional(),
     /** Easy Connect string ("host:1521/SERVICE") or a full descriptor; wins over host/serviceName/sid. */
@@ -229,6 +336,7 @@ export const DbConnectionSchema = z.preprocess((v) => {
     ctx.addIssue({ code: 'custom', message: 'oracle connections need connectString, or host with serviceName or sid' });
   }
   if (c.driver === 'oracle' && c.serviceName && c.sid) ctx.addIssue({ code: 'custom', message: 'oracle: use serviceName or sid, not both' });
+  if (c.driver === 'mssql' && !c.server && !c.connectionString) ctx.addIssue({ code: 'custom', message: 'mssql connections need server or connectionString' });
 }));
 
 /**

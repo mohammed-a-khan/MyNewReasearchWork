@@ -1,0 +1,19 @@
+Journey: An order for each EU ledger customer is priced from the ledger's price list
+Tags: @postgres @db @ui
+Risk: 2
+
+# One run per row of the query (the row's columns are variables)
+Log in as manager
+Open /orders/new
+Select "${customer_name}" from the Customer dropdown
+Select "Gadget (49.50)" from the Product dropdown
+Click the "Submit order" button
+Expect the page contains "created"
+Expect the page contains "${customer_name}"
+
+# UI <-> DB: the order lines table compares with the ledger's price list, cell by cell
+Capture the rows of the Order lines table as lines
+Run query "PRICE_LIST_ROW" on ledger with sku="SKU-200" and store the rows as priced
+Compare ${priced} with ${lines} by SKU
+
+Examples: from query "EU_CUSTOMERS" on ledger with region="EU"

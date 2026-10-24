@@ -28,7 +28,7 @@ describe('README', () => {
     expect(row('Salesforce')).toMatch(/EZTest's own stand-in/);
     expect(row('Packaged apps')).toMatch(/EZTest's own stand-ins of each product/);
     expect(row('Components')).toMatch(/Kendo, DevExtreme, PrimeNG, Angular Material, SAP UI5 and Oracle JET adapters are tested against EZTest's own stand-ins/);
-    expect(row('Surfaces')).toMatch(/Postgres is untested against a live server/);
+    expect(row('Surfaces')).toMatch(/PostgreSQL, Oracle and SQL Server run against live servers; SQL Server Kerberos and Entra ID are tested by mapping and against local token servers only/);
   });
 
   it('states the Node.js requirement of SQLite', () => {

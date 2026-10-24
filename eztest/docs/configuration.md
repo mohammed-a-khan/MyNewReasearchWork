@@ -71,6 +71,14 @@ identity:
     - { type: env, prefix: APP_ }                      # secret://env/X reads APP_X
     - { type: file, path: secrets.yaml }               # values may be ENC(...)
     - { type: azure-keyvault, vaultUrl: https://kv.vault.azure.net, ... }
+    # secret://hashicorp-vault/apps/shop/db#password (KV v2; token or AppRole)
+    - { type: hashicorp-vault, address: https://vault:8200, namespace: qa, auth: { method: approle, roleId: shop-ci, secretId: secret://env/VAULT_SECRET_ID } }
+    # secret://aws-secrets-manager/prod/shop/db#password (SigV4; keys from AWS_* or secret://)
+    - { type: aws-secrets-manager, region: eu-west-1 }
+    # secret://gcp-secret-manager/shop-db-password[@version] (service-account key; CRC32C checked)
+    - { type: gcp-secret-manager, project: shop-qa, credentialsFile: keys/qa-sa.json }
+    # secret://cyberark-ccp/QA-Safe/shop-db (Central Credential Provider; mutual TLS)
+    - { type: cyberark-ccp, url: https://ccp.corp, appId: EZTest_QA, clientCert: certs/ccp.pem, clientKey: certs/ccp-key.pem }
   roles:
     manager:
       loginUrl: /login
@@ -88,6 +96,8 @@ db:
     shop: { driver: sqlite, file: ./shop.db }
     erp:  { driver: postgres, connectionString: "${ERP_DB_URL}" }   # needs the `pg` package
     crm:  { driver: mssql, server: sql.test, database: crm, user: qa, password: secret://env/CRM_PW }  # needs `mssql`
+    # SQL Server from a connection string, Windows (NTLM) or Entra ID authentication: docs/databases.md
+    hr:   { driver: mssql, connectionString: "Server=tcp:hr.corp,1433;Database=hr;User ID=CORP\\qa;Password=secret://env/HR_PW;Integrated Security=true" }
     ledger:                                   # needs `oracledb` (Thin mode: no Oracle Client install)
       type: oracle                            # `type:` is accepted as an alias of `driver:`
       host: ora.test
@@ -401,6 +411,54 @@ Expression functions for business days and time zones:
 
 - `addBusinessDays(date, n[, holidays])`, `isBusinessDay(date[, holidays])`, `nextBusinessDay(date[, holidays])` and `previousBusinessDay(date[, holidays])` use the holiday calendar. A calendar file may be a YAML/JSON list of dates, `{ holidays: [...] }` (entries may be `{ date, name }`), or one date per line.
 - `now("America/New_York")`, `today("Asia/Tokyo")` and `format(date, "YYYY-MM-DD HH:mm", "Europe/London")` use the IANA zone database built into Node, with no extra dependency. A date-only value is a calendar date, so a time zone does not shift it.
+
+## Identity: secret stores
+
+`identity.secretStores` lists the stores `secret://<name>/<key>` resolves through; `name` defaults to the type. A store's own credentials may be `secret://` references to a store listed before it (an AppRole secret id from the environment, an AWS key from a file store). Resolved values are cached for 5 minutes and masked everywhere.
+
+| Type | Key | Authentication | Settings |
+|---|---|---|---|
+| `env` | variable name (after `prefix`) | - | `prefix` |
+| `file` | dotted path in a JSON/YAML file | values may be `ENC(...)` | `path` |
+| `azure-keyvault` | secret name[/version] | Entra client credentials | `vaultUrl`, `tenantId`, `clientId`, `clientSecret`, `authorityUrl` |
+| `hashicorp-vault` | `path/to/secret#field` (field default `value`) | `auth: { method: token, token }` or `{ method: approle, roleId, secretId, mount }`; an AppRole token is renewed by logging in again when it expires or is refused | `address`, `mount` (default `secret`, KV v2), `namespace`, `ca` |
+| `aws-secrets-manager` | `secret-id` or `secret-id#jsonField` | SigV4 with `accessKeyId` / `secretAccessKey` / `sessionToken`, default `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` | `region`, `endpoint` (VPC endpoint), `versionStage` |
+| `gcp-secret-manager` | `secret-name` or `secret-name@version` | a service-account key (`credentialsFile`, or `credentials` as a secret reference holding the JSON) signs the token request | `project` (default: the key's), `endpoint` |
+| `cyberark-ccp` | `Safe/Object`, `Object` (with `safe`), or a query `Safe=S;UserName=u` | AppID, mutual TLS with `clientCert` / `clientKey` (and `ca`) | `url`, `appId`, `safe`, `folder` |
+
+No vendor SDK is used: each store talks to its service's REST API, AWS requests are signed with EZTest's own SigV4, and GCP tokens with EZTest's own JWT signing. The test suite checks each store against a local fake that verifies the signature or authentication; none was run against the real cloud services.
+
+## Identity: OAuth for API steps
+
+A role's `api:` block gets the token for `... as <role>` API, GraphQL and WebSocket steps:
+
+```yaml
+identity:
+  roles:
+    service:                                   # client credentials with a signed client assertion
+      api: { tokenUrl: https://idp/oauth2/token, clientId: orders-svc, clientAuth: private_key_jwt, clientKey: { privateKey: secret://vault/ORDERS_SVC_KEY, kid: k1 } }
+    alice:                                     # authorization code + PKCE: EZTest's headless browser signs in as alice
+      username: alice@corp.test
+      password: secret://vault/ALICE_PW
+      api: { grant: authorization_code, tokenUrl: https://idp/oauth2/token, authorizeUrl: https://idp/oauth2/authorize, redirectUri: https://app.test/callback, clientId: spa, clientAuth: none, scope: "openid orders.read" }
+    kiosk:                                     # device code, approved in the browser as the role
+      username: kiosk-op
+      password: secret://vault/KIOSK_PW
+      api: { grant: device_code, tokenUrl: https://idp/oauth2/token, deviceAuthorizationUrl: https://idp/oauth2/devicecode, clientId: kiosk, clientAuth: none }
+    batch:                                     # JWT bearer (RFC 7523)
+      api: { grant: jwt_bearer, tokenUrl: https://idp/oauth2/token, clientId: batch, clientSecret: secret://vault/BATCH, assertion: { privateKey: secret://vault/BATCH_KEY, subject: batch-user } }
+    legacy:                                    # resource-owner password: the role's own username and password
+      username: legacy-user
+      password: secret://vault/LEGACY_PW
+      api: { grant: password, tokenUrl: https://idp/oauth2/token, clientId: legacy, clientSecret: secret://vault/LEGACY_CLIENT }
+```
+
+- `grant`: `client_credentials` (default), `password`, `authorization_code`, `device_code`, `jwt_bearer`, `refresh_token` (with `refreshToken:`).
+- `clientAuth`: `client_secret_post` (default with a secret), `client_secret_basic`, `private_key_jwt` (RS256, PS256 or ES256 by the key; `clientKey.alg` overrides), `none` (public clients).
+- Authorization code: the browser opens the authorize URL with a PKCE S256 challenge, a state and a nonce, fills the identity provider's sign-in form as the role (username, password, TOTP; the same field rules as a form login), and the redirect to `redirectUri` is intercepted, so the redirect URI need not serve anything. The state is checked before the code is exchanged.
+- Device code: polled as RFC 8628 says (`authorization_pending`, `slow_down` adds 5 s); the verification page is opened in the browser and signed in as the role.
+- Tokens are cached per role until 60 s (`skewSeconds`) before they expire; concurrent steps share one request. A refresh token in a response is used (and rotated) when the token expires; if the refresh is refused, the grant runs again.
+- A role used only for tokens with `password`, `authorization_code` or `device_code` needs no `loginUrl`.
 
 ## Identity: Microsoft Entra ID and password rotation
 

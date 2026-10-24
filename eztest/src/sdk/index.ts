@@ -25,6 +25,8 @@ export type { Ui, Download, ReadOptions } from './ui.js';
 export type { ActionOptions, ExpectSpec, ExpectSpecObject } from './internal.js';
 export { api, jsonPath } from './api.js';
 export type { ApiSurface, ApiResponse, ApiOptions } from './api.js';
+export { graphql } from './graphql.js';
+export type { GraphQLSurface, GraphQLOptions, GraphQLSubscriptionHandle } from './graphql.js';
 export { db } from './db.js';
 export type { DbSurface, DbOptions, BindValue } from './db.js';
 export { data } from './data.js';

@@ -211,7 +211,8 @@ describe('triage', () => {
   it('"no such table" (the database lacks the schema: wrong file or connection, missing seed) is an environment issue, not unknown', async () => {
     const fx = await makeRunFixture();
     const art = await loadRunArtifacts(fx.runDir);
-    const messages = ['SqliteError: no such table: orders', 'no such column: o.created_by', 'relation "orders" does not exist', 'ORA-00942: table or view does not exist', "Invalid object name 'dbo.Orders'."];
+    const messages = ['SqliteError: no such table: orders', 'no such column: o.created_by', 'relation "orders" does not exist', 'ORA-00942: table or view does not exist', "Invalid object name 'dbo.Orders'.",
+      'column "created_by" does not exist (SQLSTATE 42703)', 'column "x" of relation "orders" does not exist', 'ORA-00904: "CREATED_BY": invalid identifier', "Invalid column name 'created_by'."];
     for (const msg of messages) {
       const run = structuredClone(art.run);
       const j = run.journeys.find((x) => x.journeyId === 'data-import')!;

@@ -262,10 +262,36 @@ export function advancedStepToText(s: Step): string {
       return `Get the latest SMS${a.to ? ` to ${q(a.to)}` : ''}${a.from ? ` from ${q(a.from)}` : ''}${a.contains ? ` containing ${q(a.contains)}` : ''}${a.timeoutMs ? ` within ${a.timeoutMs} ms` : ''} as ${s.captureAs ?? 'sms'}`;
     case 'ws':
       switch (a.op) {
-        case 'connect': return `Connect to websocket ${q(a.url)} as ${String(a.socket ?? 'ws')}`;
+        case 'connect': {
+          const opts = [
+            a.asRole !== undefined ? ` using role ${String(a.asRole)}` : '',
+            a.headers ? ` with headers ${Object.entries(a.headers as Record<string, string>).map(([k, v]) => `${q(k)} = ${q(v)}`).join(', ')}` : '',
+            Array.isArray(a.protocols) && a.protocols.length ? ` with protocol ${(a.protocols as string[]).map((p) => q(p)).join(', ')}` : '',
+            a.clientCertificate !== undefined ? ` with client certificate ${q(a.clientCertificate)}` : '',
+            a.pingIntervalMs !== undefined ? ` with ping every ${Number(a.pingIntervalMs) % 1000 === 0 ? `${Number(a.pingIntervalMs) / 1000} s` : `${String(a.pingIntervalMs)} ms`}` : '',
+          ].join('');
+          return `Connect to websocket ${q(a.url)} as ${String(a.socket ?? 'ws')}${opts}`;
+        }
         case 'send': return `Send ${q(v)} on websocket ${String(a.socket ?? 'ws')}`;
         case 'expect': return `Wait for a websocket message containing ${q(a.contains)} on ${String(a.socket ?? 'ws')}${store(s.captureAs)}`;
         case 'close': return `Close websocket ${String(a.socket ?? 'ws')}`;
+        case 'gql-subscribe': {
+          const opts = [
+            a.asRole !== undefined ? ` using role ${String(a.asRole)}` : '',
+            a.variables ? ` with variables ${q(JSON.stringify(a.variables))}` : '',
+            a.headers ? ` with headers ${Object.entries(a.headers as Record<string, string>).map(([k, v]) => `${q(k)} = ${q(v)}`).join(', ')}` : '',
+            a.clientCertificate !== undefined ? ` with client certificate ${q(a.clientCertificate)}` : '',
+          ].join('');
+          return `Subscribe to GraphQL ${q(a.query)} at ${q(a.url)} as ${String(a.socket)}${opts}`;
+        }
+        case 'gql-event': {
+          const f = (a.filters as Array<{ path: string; op: string; value: string }> | undefined) ?? [];
+          const t = a.timeoutMs !== undefined ? (Number(a.timeoutMs) % 1000 === 0 ? ` within ${Number(a.timeoutMs) / 1000} s` : ` within ${String(a.timeoutMs)} ms`) : '';
+          return `Wait for a GraphQL event on ${String(a.socket)}${f.length ? ` where ${f.map((x) => `${q(x.path)} ${x.op} ${q(x.value)}`).join(' and ')}` : ''}${t}${store(s.captureAs)}`;
+        }
+        case 'gql-stop': return `Stop GraphQL subscription ${String(a.socket)}`;
+        case 'gql-validate': return `Validate GraphQL query ${q(a.query)} against the schema of ${q(a.url)}${a.asRole !== undefined ? ` as ${String(a.asRole)}` : ''}`;
+        case 'gql-introspect': return `Introspect the GraphQL schema at ${q(a.url)}${a.asRole !== undefined ? ` as ${String(a.asRole)}` : ''}${store(s.captureAs)}`;
       }
       return cannot(s, `websocket op ${String(a.op)}`);
     case 'compareData': {

@@ -7,6 +7,8 @@
  *     (or EZTEST_ORACLE_HOST, _PORT, _SERVICE, _USER, _PASSWORD)
  *   EZTEST_MSSQL_URL=mssql://sa:EzSql_Pass1@localhost:1433/master
  *     (+ EZTEST_MSSQL_DRIVER=/path/to/node_modules/mssql when mssql is not installed here)
+ *   EZTEST_PG_URL=postgres://eztest:EzPg_Pass1@localhost:5432/eztest
+ *     (+ EZTEST_PG_DRIVER=/path/to/node_modules/pg when pg is not installed here)
  */
 import type { OracleOptions } from '../../src/surfaces/index.js';
 
@@ -64,4 +66,32 @@ export async function loadMssql(path?: string): Promise<unknown | undefined> {
 /** Print the skip reason once per file so a green CI run says what did not run. */
 export function announceSkip(on: boolean, message: string): void {
   if (!on) console.warn(`[eztest] ${message}`);
+}
+
+export interface PgEnv {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  connectionString: string;
+}
+
+export function pgEnv(env: NodeJS.ProcessEnv = process.env): PgEnv | undefined {
+  if (!env.EZTEST_PG_URL) return undefined;
+  const u = new URL(env.EZTEST_PG_URL);
+  return { host: u.hostname, port: Number(u.port || 5432), database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'postgres', user: decodeURIComponent(u.username), password: decodeURIComponent(u.password), connectionString: env.EZTEST_PG_URL };
+}
+
+export const PG_SKIP = 'PostgreSQL tests skipped: set EZTEST_PG_URL=postgres://user:password@host:5432/db (+ EZTEST_PG_DRIVER when pg is not installed here; docs/databases.md)';
+
+/** Whether the pg driver loads (installed here, or from EZTEST_PG_DRIVER). */
+export async function pgDriverAvailable(): Promise<boolean> {
+  const { loadDriver } = await import('../../src/surfaces/db.js');
+  try {
+    await loadDriver('pg', 'PostgreSQL');
+    return true;
+  } catch {
+    return false;
+  }
 }
