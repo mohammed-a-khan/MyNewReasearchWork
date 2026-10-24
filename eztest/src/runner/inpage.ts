@@ -46,6 +46,24 @@ export const viewportRatio = onElement<undefined, number>(String.raw`(el) => {
 /** A table as header-mapped records. */
 export const tableRows = onElement<undefined, Array<Record<string, string>>>(String.raw`(table) => {
   var clean = function (s) { return (s || '').replace(/\s+/g, ' ').trim(); };
+  // An ARIA table built from divs (role=table / grid with role=row, columnheader and cell), as Vue and React
+  // component kits render them: rows and cells by role, rows of nested tables left out.
+  if (!table.querySelector('tr') && table.querySelector('[role=row]')) {
+    var owner = function (el) { return el.parentElement ? el.parentElement.closest('[role=table], [role=grid], [role=treegrid], table') : null; };
+    var mine = function (el) { return owner(el) === table || (owner(el) === null && table.contains(el)); };
+    var arows = Array.from(table.querySelectorAll('[role=row]')).filter(mine);
+    var cellsOf = function (r) { return Array.from(r.querySelectorAll('[role=columnheader], [role=cell], [role=gridcell], [role=rowheader]')).filter(function (c) { return c.closest('[role=row]') === r; }); };
+    var head = arows.find(function (r) { return r.querySelector('[role=columnheader]'); });
+    if (!head) return [];
+    var names = cellsOf(head).map(function (c, i) { return clean(c.innerText || c.textContent) || ('col' + (i + 1)); });
+    var count = {};
+    names = names.map(function (h) { if (count[h]) { count[h]++; return h + '_' + count[h]; } count[h] = 1; return h; });
+    return arows.filter(function (r) { return r !== head && !r.querySelector('[role=columnheader]'); }).map(function (r) {
+      var rec = {};
+      cellsOf(r).forEach(function (c, i) { rec[names[i] || ('col' + (i + 1))] = clean(c.innerText || c.textContent); });
+      return rec;
+    });
+  }
   var rows = Array.from(table.querySelectorAll('tr'));
   var headRow = table.querySelector('thead tr') || rows.find(function (r) { return r.querySelector('th'); }) || rows[0];
   if (!headRow) return [];

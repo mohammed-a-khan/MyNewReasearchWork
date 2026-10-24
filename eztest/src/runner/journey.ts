@@ -8,6 +8,7 @@ import type { Browser, BrowserContext, Page } from '../browser/index.js';
 import {
   interpolate,
   journeyStatusFrom,
+  resolveVariableRefs,
   nowIso,
   type Journey,
   type JourneyResult,
@@ -198,7 +199,9 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   const baseUrl = journey.baseUrl ?? opts.baseUrl;
   let clockContext: BrowserContext | undefined;
   // today() / now() follow the journey's browser clock once one is installed.
-  const vars = (): Record<string, unknown> => ({ ...journey.variables, ...(opts.variables ?? {}), ...ledger.view(), ...clockVars(clockContext) });
+  // Journey variables may refer to run and config variables, and to each other (`last=Okafor${tag}`).
+  const startVars = resolveVariableRefs({ ...journey.variables, ...(opts.variables ?? {}) });
+  const vars = (): Record<string, unknown> => ({ ...startVars, ...ledger.view(), ...clockVars(clockContext) });
   const videoMode = opts.video ?? 'off';
   const videoDir = join(env.runDir, 'videos', `${safeName(jid)}-attempt${attempt}`);
   // mTLS from the browser: one certificate per origin (the context option clientCertificates).
@@ -313,7 +316,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
     const j = scope?.journey ?? journey;
     const l = scope?.ledger ?? ledger;
     const v = scope && scope.ledger !== ledger
-      ? (): Record<string, unknown> => ({ ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}), ...l.view(), ...clockVars(clockContext) })
+      ? (): Record<string, unknown> => ({ ...resolveVariableRefs({ ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}) }), ...l.view(), ...clockVars(clockContext) })
       : vars;
     const slot = slotOf(scope);
     const s = slot.session ?? session;

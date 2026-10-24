@@ -136,7 +136,7 @@ export function candidatesFor(kind: TargetKind, name?: string): LocatorCandidate
     case 'list':
       return [role(r!, name)];
     case 'generic':
-      return [by('text', name), by('label', name), by('placeholder', name), by('title', name)];
+      return [by('text', name), by('label', name), by('placeholder', name), by('title', name), by('altText', name)];
   }
 }
 

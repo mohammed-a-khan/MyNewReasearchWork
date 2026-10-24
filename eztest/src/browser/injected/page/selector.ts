@@ -202,7 +202,50 @@ function labelAll(root: Root, m: TextMatch, exact?: boolean): Element[] {
     if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !(el as HTMLInputElement).labels?.length) continue;
     if (labelTexts(el).some(match)) out.push(el);
   }
-  return out;
+  return out.length ? out : visualLabelAll(root, match);
+}
+
+/** Form controls (and custom widgets that take focus) a visual label can name. */
+const FIELD_CSS = [
+  'input:not([type=hidden]):not([type=button]):not([type=submit]):not([type=reset]):not([type=image])',
+  'select', 'textarea', '[contenteditable=""]', '[contenteditable=true]',
+  '[role=textbox]', '[role=combobox]', '[role=listbox]', '[role=spinbutton]', '[role=searchbox]', '[role=slider]',
+  '[tabindex]:not([tabindex="-1"]):not(button):not(a):not(label)',
+].join(',');
+
+/**
+ * Labels that only sit next to their field: a `<label>` with no `for` and no control inside, in the same small group as exactly one field, the way component libraries (OrangeHRM's oxd, many
+ * Vue and React kits) lay out forms:
+ *
+ *   <div class="input-group"><div><label>Employee Id</label></div><div><input></div></div>
+ *
+ * Used only when no element is labelled the standard way, so real label associations always win. A group
+ * that holds several fields, or several such labels, names none of them.
+ */
+function visualLabelAll(root: Root, match: (s: string) => boolean): Element[] {
+  const out: Element[] = [];
+  for (const label of cssAll(root, 'label')) {
+    if ((label as HTMLLabelElement).htmlFor || (label as HTMLLabelElement).control) continue;
+    if (!match(elementText(label))) continue;
+    let group = label.parentElement;
+    for (let depth = 0; group && depth < 5; depth++, group = group.parentElement) {
+      const labels = Array.from(group.querySelectorAll('label')).filter((l) => !(l as HTMLLabelElement).htmlFor && !(l as HTMLLabelElement).control && elementText(l));
+      if (labels.length > 1) break;
+      const fields = Array.from(group.querySelectorAll(FIELD_CSS)).filter((f) => !f.contains(label) && !label.contains(f) && !insideAnotherField(f));
+      if (fields.length === 1) {
+        if (!out.includes(fields[0])) out.push(fields[0]);
+        break;
+      }
+      if (fields.length > 1) break;
+    }
+  }
+  return sortDocumentOrder(out);
+}
+
+/** A focusable element inside another field (a custom select's inner parts) is not a field of its own. */
+function insideAnotherField(f: Element): boolean {
+  const parent = f.parentElement?.closest(FIELD_CSS);
+  return !!parent;
 }
 
 function attrAll(root: Root, attr: string, m: TextMatch, exact?: boolean, strict = false): Element[] {

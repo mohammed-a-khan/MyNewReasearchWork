@@ -185,6 +185,9 @@ export interface Resolution {
  * Try each candidate in order until one resolves to exactly one element,
  * polling until `timeoutMs` (elements may still be loading).
  */
+/** A file input, or a container with one inside, a few levels up from an element: the nearest one. */
+export const NEAR_FILE_INPUT = "xpath=ancestor-or-self::*[position() <= 6][self::input[@type='file'] or .//input[@type='file']][1]/descendant-or-self::input[@type='file']";
+
 export async function resolveTarget(
   root: LocatorRoot,
   target: Target,
@@ -192,6 +195,11 @@ export async function resolveTarget(
   timeoutMs: number,
   /** Adaptive deadline (reliability/load.ts): the page to probe, and who to tell when the wait was extended. */
   adapt?: { probe?: Probeable; onExtend?: (e: Extension) => void; enabled?: boolean },
+  /**
+   * What the step will do with the element. `upload`: a description that matches several elements (two
+   * "profile picture" images, one in the header) resolves to the one file input that exactly one of them sits next to.
+   */
+  purpose?: { upload?: boolean },
 ): Promise<Resolution> {
   const deadline = new AdaptiveDeadline(timeoutMs, { what: `locate ${target.description}`, ...adapt });
   let notes: string[] = [];
@@ -229,6 +237,13 @@ export async function resolveTarget(
       }
       tried.push({ candidate: c, count: n });
       if (n === 1) return { locator: loc, candidate: c, notes, ambiguous, tried, ...(scope ? { scope } : {}) };
+      if (n > 1 && purpose?.upload) {
+        const input = loc.locator(NEAR_FILE_INPUT);
+        if ((await input.count().catch(() => 0)) === 1) {
+          notes.push(`${describeCandidate(c)}: ${n} matches, one next to a file input`);
+          return { locator: input, candidate: c, notes, ambiguous, tried, ...(scope ? { scope } : {}) };
+        }
+      }
       if (n > 1) ambiguous = true;
       notes.push(n === 0 ? `${describeCandidate(c)}: no match` : `${describeCandidate(c)}: ${n} matches (ambiguous, skipped)`);
     }

@@ -40,6 +40,31 @@ export function interpolate(
   });
 }
 
+/**
+ * Variables whose values refer to other variables (`Variables: last=Okafor${tag}` with `tag` from the config or
+ * the run) resolved against each other and `scope`, a few passes deep. References that nothing sets stay as
+ * written, so the step that uses them still reports the missing variable.
+ */
+export function resolveVariableRefs(vars: Record<string, unknown>, scope: Record<string, unknown> = {}): Record<string, unknown> {
+  let out: Record<string, unknown> = { ...vars };
+  for (let pass = 0; pass < 5; pass++) {
+    let changed = false;
+    const all = { ...scope, ...out };
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(out)) {
+      if (typeof v === 'string' && v.includes('${')) {
+        // A value never refers to itself (x=${x}): that reference is left for the run-time lookup.
+        const r = interpolate(v, { ...all, [k]: undefined });
+        if (r !== v) changed = true;
+        next[k] = r;
+      } else next[k] = v;
+    }
+    out = next;
+    if (!changed) break;
+  }
+  return out;
+}
+
 /** Names of `${name}` placeholders (not escaped, no `:-default`) that `vars` has no value for. */
 export function unresolvedNames(template: string, vars: Record<string, unknown>): string[] {
   const out: string[] = [];

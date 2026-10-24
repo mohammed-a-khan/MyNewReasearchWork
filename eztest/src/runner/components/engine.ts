@@ -834,10 +834,16 @@ E.dialogControl = function (el, a) {
 E.toastWatch = function (el, a) {
   if (window.__ezcToasts && window.__ezcToasts.sel === a.selector) return true;
   var seen = window.__ezcToasts = { sel: a.selector, items: [] };
+  // A toast shown just before the app navigates ("Saved", then the details page loads) is kept in this tab's
+  // sessionStorage for a minute, so the next page still knows it was seen.
+  var KEY = '__eztest_toasts';
+  try { (JSON.parse(sessionStorage.getItem(KEY) || '[]') || []).forEach(function (x) { if (x && typeof x.text === 'string' && Date.now() - x.at < 60000) seen.items.push(x); }); } catch (e) {}
+  function keep() { try { sessionStorage.setItem(KEY, JSON.stringify(seen.items.slice(-50))); } catch (e) {} }
+  function push(t) { if (t && !seen.items.some(function (x) { return x.text === t && Date.now() - x.at < 50; })) { seen.items.push({ text: t, at: Date.now() }); if (seen.items.length > 200) seen.items.shift(); keep(); } }
   function rec(n) {
     if (n.nodeType !== 1) return;
     var hits = matches(n, a.selector) ? [n] : qa(n, a.selector);
-    hits.forEach(function (h) { setTimeout(function () { var t = text(h); if (t && !seen.items.some(function (x) { return x.text === t && Date.now() - x.at < 50; })) seen.items.push({ text: t, at: Date.now() }); if (seen.items.length > 200) seen.items.shift(); }, 30); });
+    hits.forEach(function (h) { push(text(h)); setTimeout(function () { push(text(h)); }, 30); });
   }
   new MutationObserver(function (ms) { ms.forEach(function (m) { if (m.type === 'childList') m.addedNodes.forEach(rec); else if (m.type === 'characterData' && m.target.parentElement) rec(m.target.parentElement.closest(a.selector) || document.createElement('i')); }); })
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });

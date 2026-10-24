@@ -169,7 +169,7 @@ export async function executeStepCore(rawStep: Step, ctx: StepContext, rt: StepR
       const n = await toLocator(root, interpolateCandidate(cachedHeal.locator, ctx.vars())).count().catch(() => 0);
       if (n !== 1) res = await resolveTarget(root, target, ctx.vars(), locateMs - QUICK_LOCATE_MS, adaptFor(ctx));
     }
-  } else res = await resolveTarget(root, target, ctx.vars(), locateMs, adaptFor(ctx));
+  } else res = await resolveTarget(root, target, ctx.vars(), locateMs, adaptFor(ctx), { upload: step.action === 'upload' });
   const hooks = stepHooksFor(ctx.page);
   hooks?.located?.(res);
   if (res.locator && res.candidate) {

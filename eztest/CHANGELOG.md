@@ -4,6 +4,19 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Real enterprise apps: OrangeHRM UI and database together
+
+Found by acceptance tests on a real OrangeHRM 5.7 and its MariaDB (`test/acceptance/enterprise/orangehrm-ui-db.test.ts`), each fixed in EZTest:
+
+- Fields whose `<label>` sits next to the input instead of naming it (`<label>` without `for`, no control inside, as Vue/React kits such as OrangeHRM's oxd render forms) were not found by `Type ... into the "Employee Id" field`. Such a label now names the one field of its small group, when nothing is labelled the standard way; groups with several fields stay ambiguous.
+- `Upload "photo.png" to the "profile picture"` failed: uploads only worked on a visible `<input type=file>`. The step now uses the file input the named element holds or sits next to (the nearest group, a few levels up), and a name that matches several elements (the header avatar and the form picture) resolves to the one next to a file input. Images are found by their `alt` text.
+- A toast shown right before the app navigates ("Successfully Saved", then the details page loads) was never seen: the recorded toasts lived in the page that unloaded. They are now kept in the tab's sessionStorage for a minute. OrangeHRM's `.oxd-toast` is recognised.
+- `Variables: last=Okafor${tag}` typed `Okafor${tag}` literally: journey variables were not resolved against run, config and each other. They are now (a few passes deep; unknown names still stop the step that uses them).
+- Custom radio buttons and checkboxes (a styled span over a hidden input inside the same `<label>`) were treated as covered by an overlay, so `Check the "Female" radio button` waited out the whole timeout before the driver clicked. A decoration inside the control's own label is now part of the control.
+- `Capture the rows of the table` returned nothing for div-based ARIA tables (`role=table` / `row` / `columnheader` / `cell`); they are read by role now, with hidden header text (sort menus) left out.
+- `Expect query "SELECT ..." on hr returns 3 rows` with inline SQL was read as a post-condition of the previous step and failed to parse; it is now a step of its own, like the catalogue form.
+- OrangeHRM adapters: oxd-select and oxd-autocomplete (`Choose "Nigerian" in the Nationality select box`, `Choose "Bruno K Seeded" in the "Employee Name" combobox`) and the oxd date input (`Pick 1990-04-15 in the "Date of Birth" date picker`).
+
 ### MySQL and MariaDB
 
 - **MySQL and MariaDB databases** (`driver: mysql` or `driver: mariadb` under `db.connections`) on EZTest's own implementation of the MySQL protocol: no driver package. Handshake v10, TLS with the certificate verified, `mysql_native_password`, `caching_sha2_password` (fast path; full authentication over TLS or with the server's RSA key, configured or fetched with `allowPublicKeyRetrieval`), `sha256_password`, auth switches; text protocol for SQL without values (several statements, several results), prepared statements in the binary protocol for SQL with values, cached per connection; DECIMAL, BIGINT, DATETIME(6), DATE, TIME, BLOB, BIT, JSON, utf8mb4 and NULL decoded the same way in both protocols; payloads over 16 MB; a pool per connection; read-only transactions; `queries check` by server-side prepare; `doctor`; the load test's database monitor; the results server's store. Proven against MariaDB 10.11 and MySQL 8.4 ([docs/databases.md](docs/databases.md#mysql-and-mariadb)).
