@@ -6,6 +6,10 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Fixed: real websites
 
+- A link or button with an icon-font glyph (Material Icons, Font Awesome) was not `the "Products" link`: its name started with an invisible Private Use Area character. Names and text now leave those glyphs out (automationexercise.com).
+- `Expect the page contains "Searched Products"` failed on a heading shown in capitals by CSS (`text-transform`); page and element text checks hold for the words as written in the page or as shown, and hidden text still does not count.
+- `testid=x` matched only `data-testid`; it now matches the attributes teams use (`data-testid`, `data-test-id`, `data-test`, `data-qa`, `data-cy`), still strictly one element, and the recorder writes `testid=` for any of them (saucedemo.com uses `data-test`). `selectors.setTestIdAttribute()` still picks a single attribute.
+
 - **The recorder records what people do on real sites** ([docs/recording.md](docs/recording.md)). Before, actions in a popup or new tab were dropped with a warning, a recording with an iframe could not be saved as `.ez`, frames of a `<frameset>` were not found, alerts and confirms were dismissed by the recorder before the person could answer them (so a confirm was always "Cancel"), and hover menus, drag and drop, keys other than Enter, typing in rich-text editors and downloads were not recorded at all. Now:
   - a click that opens a tab or popup becomes `Click … and switch to the new tab` with the address it landed on; later steps run there; `Switch back to the main tab`, `Switch to tab 2` and `Close the tab` follow what the person did;
   - steps in an iframe or frame go into an `In frame "name" > "inner"` … `End` block, the frame named by its name, title, id or address;

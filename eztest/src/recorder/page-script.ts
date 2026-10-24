@@ -117,7 +117,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (!k) { seq += 1; k = docId + ':' + seq; keys.set(el, k); }
       return k;
     };
-    var norm = function (s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); };
+    // Icon-font glyphs (Private Use Area characters) are not words: the runner ignores them in names and text too.
+    var norm = function (s) { return String(s == null ? '' : s).replace(/[\uE000-\uF8FF]|[\uDB80-\uDBFF][\uDC00-\uDFFF]/g, '').replace(/\s+/g, ' ').trim(); };
     var lower = function (el) { return el.tagName ? el.tagName.toLowerCase() : ''; };
     // Open shadow roots are searched as well: the runner's role, label, text and CSS locators pierce them.
     var rootsCache = null;
@@ -401,6 +402,18 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       return hits.reverse();
     };
     var countText = function (text) { return textHits(text).length; };
+    // The test-id attributes a testid= target matches (the runner looks for all of them).
+    var TEST_ID_ATTRS = ['data-testid', 'data-test-id', 'data-test', 'data-qa', 'data-cy'];
+    var TEST_ID_SEL = '[data-testid],[data-test-id],[data-test],[data-qa],[data-cy]';
+    var testIdAttr = function (el) {
+      for (var i = 0; i < TEST_ID_ATTRS.length; i++) if (el.hasAttribute(TEST_ID_ATTRS[i])) return TEST_ID_ATTRS[i];
+      return '';
+    };
+    var countTestId = function (v) {
+      var n = 0;
+      for (var i = 0; i < TEST_ID_ATTRS.length; i++) n += countAttr(TEST_ID_ATTRS[i], v);
+      return n;
+    };
     var safeAttr = function (v) { return typeof v === 'string' && v.length > 0 && v.length <= 120 && !/["'\x60\\“”\n\r]/.test(v); };
     var attrSel = function (name, v) { return '[' + name + '="' + v + '"]'; };
     var cssId = function (id) { return (W.CSS && W.CSS.escape) ? W.CSS.escape(id) : id.replace(/([^\w-])/g, '\\$1'); };
@@ -419,8 +432,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var baseSel = function (el) {
       var tag = lower(el);
       if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) return tag + '#' + el.id;
-      var tid = el.getAttribute('data-testid');
-      if (safeAttr(tid)) return tag + attrSel('data-testid', tid);
+      var ta = testIdAttr(el);
+      if (ta && safeAttr(el.getAttribute(ta))) return tag + attrSel(ta, el.getAttribute(ta));
       var attrs = ['name', 'aria-label', 'href', 'for', 'placeholder', 'title', 'type', 'role'];
       for (var i = 0; i < attrs.length; i++) {
         var v = el.getAttribute(attrs[i]);
@@ -434,8 +447,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       if (a.id && /^[A-Za-z][\w-]*$/.test(a.id)) return '#' + a.id;
       var al = a.getAttribute('aria-label');
       if (safeAttr(al)) return tag + attrSel('aria-label', al);
-      var tid = a.getAttribute('data-testid');
-      if (safeAttr(tid)) return tag + attrSel('data-testid', tid);
+      var tb = testIdAttr(a);
+      if (tb && safeAttr(a.getAttribute(tb))) return tag + attrSel(tb, a.getAttribute(tb));
       var cls = classesOf(a);
       return cls.length ? tag + '.' + cls[0] : tag;
     };
@@ -619,7 +632,8 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
       // In a web component the rendered text comes through slots and shadow trees, which innerText leaves out.
       if (!field && tag !== 'select' && (inShadow(el) || el.shadowRoot || el.querySelector('slot'))) text = norm(flatText(el, new Map()));
       if (text.length > 200) text = text.slice(0, 200);
-      var testId = el.getAttribute('data-testid') || '';
+      var testAttr = testIdAttr(el);
+      var testId = testAttr ? el.getAttribute(testAttr) || '' : '';
       var r = el.getBoundingClientRect();
       var out = {
         key: keyOf(el), tag: tag, classes: classesOf(el), css: cssPath(el), field: field, secret: secret,
@@ -629,7 +643,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
           placeholder: placeholder ? countAttr('placeholder', el.getAttribute('placeholder')) : 0,
           placeholderAsLabel: placeholder ? countLabel(placeholder) : 0,
           text: text && text.length <= 80 && !role ? countText(text) : 0,
-          testId: testId ? countAttr('data-testid', testId) : 0,
+          testId: testId ? countTestId(testId) : 0,
           id: el.id ? countAttr('id', el.id) : 0
         },
         box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
@@ -669,7 +683,7 @@ export const PAGE_SCRIPT_SOURCE = String.raw`function (BINDING) {
     var actionable = function (target) {
       var el = target && target.nodeType === 1 ? target : (target && target.parentElement);
       if (!el || !el.closest) return null;
-      return el.closest(ACTIONABLE) || el.closest('[data-testid]') || el;
+      return el.closest(ACTIONABLE) || el.closest(TEST_ID_SEL) || el;
     };
     R.info = info;
     R.roleOf = roleOf;

@@ -544,7 +544,7 @@ A description like `the "Sign in" button` becomes an ordered list of locators: r
 2. **T1 fingerprint:** compares a stored element fingerprint (role, name, text, id, classes, label, position and more) against the current page, with an ambiguity margin.
 3. **T2 semantic:** matches the description words against accessible names and labels.
 
-You can also give an exact selector: `#id`, `css=…`, `xpath=…`, `testid=…`, `text=…` or `role=button[name="Save"]`; on native apps also `accessibility id=…` (or `~…`), `id=…` (resource id), `class=…` and `predicate=…` (iOS). Targets resolve in the current tab and frame; healing searches there too.
+You can also give an exact selector: `#id`, `css=…`, `xpath=…`, `testid=…` (any of `data-testid`, `data-test-id`, `data-test`, `data-qa`, `data-cy`), `text=…` or `role=button[name="Save"]`; on native apps also `accessibility id=…` (or `~…`), `id=…` (resource id), `class=…` and `predicate=…` (iOS). Targets resolve in the current tab and frame; healing searches there too.
 
 ### Relative and scoped targets
 
