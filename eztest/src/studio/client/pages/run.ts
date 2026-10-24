@@ -10,7 +10,7 @@ import { follow } from '../core/events.js';
 import { ms, pct, plural, splitList } from '../core/format.js';
 import { registerCommand, registerPage } from '../core/registry.js';
 import { link, navigate, type Route } from '../core/router.js';
-import { activeRun, journeys, refreshJourneys } from '../core/state.js';
+import { activeRun, journeys, refreshJourneys, session } from '../core/state.js';
 import { badge, button, card, emptyState, stat, statusIcon, tag } from '../ui/badge.js';
 import { icon } from '../ui/icons.js';
 import { createSplit } from '../ui/split.js';
@@ -65,11 +65,13 @@ export function registerRunPage(): void {
       const selCount = h('p', { class: 'help', role: 'status' });
       const ids = { tags: uid('run-tags'), browser: uid('run-browser'), workers: uid('run-workers'), retries: uid('run-retries') };
       const tagsIn = h('input', { id: ids.tags, class: 'input', placeholder: 'smoke, orders' });
-      const browserSel = h('select', { id: ids.browser, class: 'input' }, h('option', { value: '', text: 'From config' }), ['chromium', 'firefox', 'webkit'].map((b) => h('option', { value: b, text: b })));
+      // The browsers come from the server (EZTest's supported browsers, /api/session): filled once the session is loaded.
+      const browserSel = h('select', { id: ids.browser, class: 'input' }, h('option', { value: '', text: 'From config' }));
       const workersIn = h('input', { id: ids.workers, class: 'input', type: 'number', min: '1', max: '16', placeholder: 'config' });
       const retriesIn = h('input', { id: ids.retries, class: 'input', type: 'number', min: '0', max: '5', placeholder: 'config' });
       // Cross-browser run: ticking browsers runs every journey on each of them (journey x browser units).
-      const browserBoxes = ['chromium', 'firefox', 'msedge', 'chrome'].map((b) => h('input', { type: 'checkbox', name: 'run-browsers', value: b, id: uid(`browsers-${b}`) }));
+      let browserBoxes: HTMLInputElement[] = [];
+      const browserRow = h('div', { class: 'row wrap' });
       const headed = h('input', { type: 'checkbox', id: uid('headed') });
       const heal = h('input', { type: 'checkbox', id: uid('heal'), checked: true });
       const lensBoxes = ['a11y', 'security', 'visual'].map((l) => h('input', { type: 'checkbox', name: 'lens', value: l, id: uid(`lens-${l}`) }));
@@ -107,7 +109,7 @@ export function registerRunPage(): void {
           'fieldset',
           { class: 'fs', id: 'run-browsers' },
           h('legend', { text: 'Cross-browser run' }),
-          h('div', { class: 'row wrap' }, browserBoxes.map((b) => check(b, b.value))),
+          browserRow,
           h('p', { class: 'help', text: 'Tick two or more to run every journey on each browser; results, history and readiness are kept per browser. Overrides the Browser field.' }),
         ),
         h('div', { class: 'row wrap' }, check(headed, 'Show the browser (headed)'), check(heal, 'Self-healing')),
@@ -122,6 +124,15 @@ export function registerRunPage(): void {
         h('div', { class: 'row form-actions' }, startBtn, cancelBtn),
       );
       startBtn.type = 'submit';
+      session.subscribe((s) => {
+        if (!s?.browsers) return;
+        const keep = browserSel.value;
+        clear(browserSel).append(h('option', { value: '', text: 'From config' }), ...s.browsers.engines.map((b) => h('option', { value: b, text: b })));
+        browserSel.value = s.browsers.engines.includes(keep) ? keep : '';
+        const ticked = new Set(browserBoxes.filter((b) => b.checked).map((b) => b.value));
+        browserBoxes = s.browsers.targets.map((b) => h('input', { type: 'checkbox', name: 'run-browsers', value: b, id: uid(`browsers-${b}`), checked: ticked.has(b) }));
+        clear(browserRow).append(...browserBoxes.map((b) => check(b, b.value)));
+      });
 
       const selected = new Set<string>();
       const renderChecklist = () => {
@@ -179,6 +190,8 @@ export function registerRunPage(): void {
       ctx.root.appendChild(split.el);
 
       let jv: JourneyView[] = [];
+      /** Why the followed run failed (the `run-error` event); kept when `done` arrives. */
+      let runError: string | undefined;
       const byId = new Map<string, JourneyView>();
       let total = 0;
       let done = 0;
@@ -257,6 +270,7 @@ export function registerRunPage(): void {
 
       const reset = () => {
         jv = [];
+        runError = undefined;
         byId.clear();
         total = 0;
         done = 0;
@@ -341,12 +355,18 @@ export function registerRunPage(): void {
             renderSummary(e);
             break;
           case 'run-error':
-            status.textContent = `Run failed: ${String(e.message)}`;
+            runError = String(e.message);
+            status.textContent = `Run failed: ${runError}`;
             break;
           case 'done': {
             const state = String(e.state);
+            const reason = runError ?? (typeof e.error === 'string' ? e.error : undefined);
             status.setAttribute('data-state', state === 'done' ? 'complete' : state);
-            status.textContent = state === 'done' ? `Run ${id} complete.` : state === 'cancelled' ? `Run ${id} cancelled.` : `Run ${id} ended with an error.`;
+            status.textContent = state === 'done' ? `Run ${id} complete.` : state === 'cancelled' ? `Run ${id} cancelled.` : `Run ${id} failed: ${reason ?? 'unknown error'}`;
+            if (state === 'error') {
+              clear(summary);
+              summary.appendChild(card('Run failed', h('div', null, h('p', { class: 'bad-text', id: 'run-error', text: reason ?? 'The run ended with an error.' }), h('div', { class: 'row' }, button('View in Results', { icon: 'results', onclick: () => navigate(link('runs', String(id))) })))));
+            }
             announce(status.textContent);
             setButtons(false);
             break;

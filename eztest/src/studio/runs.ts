@@ -5,9 +5,9 @@
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { EventBus, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
+import { BROWSER_ENGINES, BROWSER_TARGET_RE, BROWSER_TARGETS, EventBus, isBrowserEngine, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
 import { loadConfig, createMaskedLogger, type LoadedConfig, type SecretMasker } from '../config/index.js';
 import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, type AnalyzeResult } from '../engine/index.js';
 import { journeyKind, type ManualVerdictProvider } from '../runner/manual.js';
@@ -27,7 +27,7 @@ export interface RunRequest {
   /** Journey ids to run (default: all, filtered by tags). */
   journeys?: string[];
   tags?: string[];
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: (typeof BROWSER_ENGINES)[number];
   /** Cross-browser run: every journey on each of these (chromium, firefox, msedge, chrome); overrides `browser`. */
   browsers?: string[];
   headed?: boolean;
@@ -90,6 +90,11 @@ export interface ActiveRun {
 }
 
 const RUN_ID = /^[A-Za-z0-9][\w.-]{0,120}$/;
+
+/** Run ids of Studio debug sessions. */
+export function isDebugRunId(id: string): boolean {
+  return id.startsWith('debug-');
+}
 
 export function assertRunId(id: string): void {
   if (!RUN_ID.test(id) || id.includes('..')) throw new HttpError(400, 'Invalid run id');
@@ -180,12 +185,12 @@ export class RunManager {
     if (this.current) throw new HttpError(409, `A run is already in progress (${this.current.id})`);
     const overrides: Record<string, unknown> = {};
     if (req.browser !== undefined) {
-      if (!['chromium', 'firefox', 'webkit'].includes(req.browser)) throw new HttpError(400, 'browser must be chromium, firefox or webkit');
+      if (!isBrowserEngine(req.browser)) throw new HttpError(400, `browser must be ${BROWSER_ENGINES.join(' or ')}`);
       overrides.browser = req.browser;
     }
     if (req.browsers !== undefined) {
-      if (!Array.isArray(req.browsers) || req.browsers.some((b) => typeof b !== 'string' || !/^(?:chromium|firefox|chrome|msedge)(?:-(?:beta|dev|canary))?$/.test(b))) {
-        throw new HttpError(400, 'browsers must be a list of chromium, firefox, chrome, msedge (or a chrome/msedge channel such as msedge-beta)');
+      if (!Array.isArray(req.browsers) || req.browsers.some((b) => typeof b !== 'string' || !BROWSER_TARGET_RE.test(b))) {
+        throw new HttpError(400, `browsers must be a list of ${BROWSER_TARGETS.join(', ')} (or a chrome/msedge channel such as msedge-beta)`);
       }
       if (new Set(req.browsers).size !== req.browsers.length) throw new HttpError(400, 'browsers lists a browser twice');
       if (req.browsers.length) overrides.browsers = req.browsers;
@@ -226,10 +231,14 @@ export class RunManager {
     if (this.recent.size > 20) this.recent.delete(this.recent.keys().next().value as string);
     this.emit(run, 'queued', { runId: id, journeys: journeys.map((j) => ({ id: j.id, name: j.name, steps: j.steps.map((s) => ({ id: s.id, intent: s.intent })) })) });
 
-    void this.execute(run, loaded, journeys, lenses).catch((e: unknown) => {
+    void this.execute(run, loaded, journeys, lenses).catch(async (e: unknown) => {
       run.state = 'error';
-      this.emit(run, 'run-error', { message: loaded.masker.mask((e as Error)?.message ?? String(e)) });
-      this.emit(run, 'done', { runId: id, state: 'error' });
+      const message = loaded.masker.mask((e as Error)?.message ?? String(e));
+      run.result = { runId: id, error: message };
+      // Keep the failed run in the Results history with its error (it may have no run.json).
+      await writeRunError(resolve(this.ctx.cwd, cfg.outputDir), { runId: id, startedAt: run.startedAt, finishedAt: new Date().toISOString(), error: message, journeys: run.journeys.length }).catch(() => undefined);
+      this.emit(run, 'run-error', { message });
+      this.emit(run, 'done', { runId: id, state: 'error', error: message });
     });
     return run;
   }
@@ -314,8 +323,40 @@ export async function outputDirOf(ctx: StudioContext): Promise<string> {
   }
 }
 
+/** Written into the run folder when a Studio run fails before it could finish (no or partial run.json). */
+export const RUN_ERROR_FILE = 'run-error.json';
+
+export interface RunErrorRecord {
+  runId: string;
+  startedAt: string;
+  finishedAt: string;
+  error: string;
+  journeys: number;
+}
+
+export async function writeRunError(outputDir: string, rec: RunErrorRecord): Promise<void> {
+  assertRunId(rec.runId);
+  const dir = join(outputDir, rec.runId);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, RUN_ERROR_FILE), JSON.stringify(rec, null, 2));
+}
+
+async function readRunError(dir: string): Promise<RunErrorRecord | undefined> {
+  const f = join(dir, RUN_ERROR_FILE);
+  if (!existsSync(f)) return undefined;
+  try {
+    return JSON.parse(await readFile(f, 'utf8')) as RunErrorRecord;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface RunListItem {
   runId: string;
+  /** "error": the run failed before it finished; `error` says why. */
+  state?: 'error';
+  /** Studio debug sessions (run ids "debug-..."): shown in Results, left out of the quality analytics. */
+  debug?: boolean;
   startedAt?: string;
   durationMs?: number;
   summary?: RunResult['summary'];
@@ -336,15 +377,21 @@ export async function listRuns(outputDir: string): Promise<RunListItem[]> {
     const dir = join(outputDir, name);
     if (!(await stat(dir)).isDirectory()) continue;
     const runJson = join(dir, 'run.json');
-    if (!existsSync(runJson)) continue;
+    const failed = await readRunError(dir);
+    const debug = isDebugRunId(name) || undefined;
+    const errored = failed ? { state: 'error' as const, error: failed.error } : {};
+    if (!existsSync(runJson)) {
+      if (failed) out.push({ runId: name, startedAt: failed.startedAt, durationMs: Date.parse(failed.finishedAt) - Date.parse(failed.startedAt), hasReport: false, ...errored, ...(debug ? { debug } : {}) });
+      continue;
+    }
     try {
       const run = JSON.parse(await readFile(runJson, 'utf8')) as RunResult;
       const cancelled = run.journeys?.some((j) => j.error?.name === 'CancelledError') || undefined;
       const branch = run.environment?.gitBranch;
       const commit = run.environment?.gitCommit;
-      out.push({ runId: name, startedAt: run.startedAt, durationMs: run.durationMs, summary: run.summary, hasReport: existsSync(join(dir, 'report.html')), cancelled, ...(branch ? { branch } : {}), ...(commit ? { commit } : {}) });
+      out.push({ runId: name, startedAt: run.startedAt, durationMs: run.durationMs, summary: run.summary, hasReport: existsSync(join(dir, 'report.html')), cancelled, ...errored, ...(debug ? { debug } : {}), ...(branch ? { branch } : {}), ...(commit ? { commit } : {}) });
     } catch (e) {
-      out.push({ runId: name, hasReport: false, error: `run.json unreadable: ${(e as Error).message}` });
+      out.push({ runId: name, hasReport: false, error: `run.json unreadable: ${(e as Error).message}`, ...(debug ? { debug } : {}) });
     }
   }
   return out.sort((a, b) => (b.startedAt ?? b.runId).localeCompare(a.startedAt ?? a.runId));
@@ -354,7 +401,11 @@ export async function runDetail(outputDir: string, runId: string, masker?: Secre
   assertRunId(runId);
   const dir = join(outputDir, runId);
   const runJson = join(dir, 'run.json');
-  if (!existsSync(runJson)) throw new HttpError(404, `Run ${runId} not found`);
+  const failed = await readRunError(dir);
+  if (!existsSync(runJson)) {
+    if (failed) return { runId, state: 'error', error: masker ? masker.mask(failed.error) : failed.error, startedAt: failed.startedAt, finishedAt: failed.finishedAt };
+    throw new HttpError(404, `Run ${runId} not found`);
+  }
   const run = JSON.parse(await readFile(runJson, 'utf8')) as RunResult;
   const evidence = await readEvidenceManifest(dir);
   const evidenceMap: Record<string, { kind: string; path: string; description?: string }> = {};
@@ -379,6 +430,7 @@ export async function runDetail(outputDir: string, runId: string, masker?: Secre
     healProposals,
     insights,
     report: existsSync(join(dir, 'report.html')) ? `/runs/${encodeURIComponent(runId)}/report.html` : undefined,
+    ...(failed ? { state: 'error', error: failed.error } : {}),
   };
   return masker ? masker.maskDeep(detail) : detail;
 }

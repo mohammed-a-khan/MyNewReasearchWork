@@ -10,7 +10,7 @@ import { dateTime, ms, pct, plural, relTime } from '../core/format.js';
 import { registerCommandProvider, registerPage, registerRunDetailTab, runDetailTabs, type RunDetail, type RunDetailContext } from '../core/registry.js';
 import { link, navigate, type Route } from '../core/router.js';
 import { runsVersion } from '../core/state.js';
-import { badge, button, copyText, emptyState, iconButton, stat, statusIcon } from '../ui/badge.js';
+import { badge, button, card, copyText, emptyState, iconButton, stat, statusIcon } from '../ui/badge.js';
 import { icon } from '../ui/icons.js';
 import { openModal } from '../ui/modal.js';
 import { createSplit } from '../ui/split.js';
@@ -27,10 +27,15 @@ export interface RunListItem {
   hasReport: boolean;
   cancelled?: boolean;
   error?: string;
+  /** The run failed before it finished (`error` says why). */
+  state?: 'error';
+  /** A Studio debug session (left out of the quality analytics). */
+  debug?: boolean;
 }
 
 export function outcomeOf(r: RunListItem): string {
   const s = r.summary;
+  if (r.state === 'error') return 'run-error';
   if (!s) return 'error';
   if (r.cancelled) return 'cancelled';
   if (s.failed + s.errors > 0) return 'failed';
@@ -348,7 +353,7 @@ export function registerResultsPage(): void {
       const statusSel = h(
         'select',
         { class: 'input input-sm', 'aria-label': 'Filter by outcome' },
-        [['', 'All outcomes'], ['passed', 'Passed'], ['passed-healed', 'Healed'], ['failed', 'Failed'], ['cancelled', 'Cancelled'], ['error', 'Unreadable']].map(([v, t]) => h('option', { value: v, text: t })),
+        [['', 'All outcomes'], ['passed', 'Passed'], ['passed-healed', 'Healed'], ['failed', 'Failed'], ['cancelled', 'Cancelled'], ['run-error', 'Run errors'], ['error', 'Unreadable']].map(([v, t]) => h('option', { value: v, text: t })),
       );
       const count = h('p', { class: 'explorer-count', role: 'status', 'aria-live': 'polite' });
       let selectedId: string | undefined;
@@ -364,7 +369,7 @@ export function registerResultsPage(): void {
             width: 'minmax(9rem, 1.6fr)',
             sortable: true,
             value: (r) => r.startedAt ?? r.runId,
-            render: (r) => h('div', { class: 'run-cell' }, h('span', { class: 'run-when', text: r.startedAt ? relTime(r.startedAt) : r.runId, title: dateTime(r.startedAt) }), h('span', { class: 'run-id mono', text: r.runId })),
+            render: (r) => h('div', { class: 'run-cell' }, h('span', { class: 'run-when', text: r.startedAt ? relTime(r.startedAt) : r.runId, title: dateTime(r.startedAt) }), h('span', { class: 'run-id mono' }, r.runId, r.debug ? h('span', { class: 'tag tag-debug', title: 'A Studio debug session: not counted in triage, readiness, compare, flaky or trends', text: 'debug' }) : null)),
           },
           {
             id: 'outcome',
@@ -373,13 +378,15 @@ export function registerResultsPage(): void {
             sortable: true,
             value: (r) => outcomeOf(r),
             render: (r) =>
-              r.summary
-                ? h('div', { class: 'run-cell' }, badge(outcomeOf(r)), h('span', { class: 'muted small', text: `${r.summary.passed} passed · ${r.summary.passedHealed} healed · ${r.summary.failed + r.summary.errors} failed` }))
-                : h('span', { class: 'muted', text: r.error ?? 'unknown' }),
+              r.state === 'error'
+                ? h('div', { class: 'run-cell' }, badge('error', 'Run error'), h('span', { class: 'muted small run-error-text', title: r.error, text: r.error ?? 'unknown error' }))
+                : r.summary
+                  ? h('div', { class: 'run-cell' }, badge(outcomeOf(r)), h('span', { class: 'muted small', text: `${r.summary.passed} passed · ${r.summary.passedHealed} healed · ${r.summary.failed + r.summary.errors} failed` }))
+                  : h('span', { class: 'muted', text: r.error ?? 'unknown' }),
           },
           { id: 'duration', title: 'Duration', width: '5.5rem', sortable: true, align: 'end', value: (r) => r.durationMs, render: (r) => ms(r.durationMs) },
         ],
-        filter: (r, q) => [r.runId, r.startedAt, outcomeOf(r)].some((x) => x?.toLowerCase().includes(q)),
+        filter: (r, q) => [r.runId, r.startedAt, outcomeOf(r), r.error, r.debug ? 'debug' : undefined].some((x) => x?.toLowerCase().includes(q)),
         onActivate: (r) => navigate(link('runs', r.runId)),
         empty: 'No runs yet. Start one from the Run page.',
       });
@@ -429,7 +436,7 @@ export function registerResultsPage(): void {
           return;
         }
         detail.appendChild(h('p', { class: 'muted', role: 'status', text: `Loading run ${id}…` }));
-        let d: RunDetail & { state?: string };
+        let d: RunDetail & { state?: string; error?: string };
         try {
           d = await api.get(`/api/runs/${encodeURIComponent(id)}`);
         } catch (e) {
@@ -437,6 +444,13 @@ export function registerResultsPage(): void {
           return;
         }
         clear(detail);
+        if (!d.run && d.state === 'error') {
+          detail.append(
+            h('header', { class: 'detail-head' }, h('div', null, h('h2', { class: 'detail-title', id: 'run-detail-title', tabindex: '-1', text: `Run ${id}` }), h('p', { class: 'muted', text: dateTime((d as { startedAt?: string }).startedAt) }))),
+            card('Run failed', h('p', { class: 'bad-text', id: 'run-detail-error', text: d.error ?? 'The run ended with an error.' })),
+          );
+          return;
+        }
         if (!d.run) {
           detail.appendChild(emptyState(`Run ${id} is ${d.state ?? 'in progress'}`, 'Open it again when it has finished, or follow it live.', button('Follow live', { icon: 'activity', onclick: () => navigate(link('run', id)) })));
           return;

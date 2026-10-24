@@ -7,7 +7,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Page } from '../browser/index.js';
-import { EventBus, type EzEvent } from '../core/index.js';
+import { BROWSER_ENGINES, EventBus, isBrowserEngine, type EzEvent } from '../core/index.js';
 import { createMaskedLogger, type SecretMasker } from '../config/index.js';
 import { createEngine } from '../engine/index.js';
 import { loadJourneys, bddOptionsFrom, defaultJourneyPaths } from '../cli/journeys.js';
@@ -25,7 +25,7 @@ export interface DebugStartRequest {
   pauseAtStart?: boolean;
   /** Also record a time-travel trace. Default true. */
   timeTravel?: boolean;
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: (typeof BROWSER_ENGINES)[number];
   headed?: boolean;
 }
 
@@ -108,7 +108,7 @@ export class DebugSessionManager {
     if (typeof req.journey !== 'string' || !req.journey) throw new HttpError(400, '"journey" must be a journey id');
     const overrides: Record<string, unknown> = { concurrency: 1, retries: 0 };
     if (req.browser !== undefined) {
-      if (!['chromium', 'firefox', 'webkit'].includes(req.browser)) throw new HttpError(400, 'browser must be chromium, firefox or webkit');
+      if (!isBrowserEngine(req.browser)) throw new HttpError(400, `browser must be ${BROWSER_ENGINES.join(' or ')}`);
       overrides.browser = req.browser;
     }
     if (req.headed) overrides.headless = false;

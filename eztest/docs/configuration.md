@@ -25,7 +25,7 @@ Unknown keys produce warnings. Invalid values stop the run with the exact path a
 ```yaml
 environment: default
 baseUrl: https://app.test
-browser: chromium              # chromium | firefox | webkit
+browser: chromium              # chromium | firefox (Chrome and Edge: channel; Safari/WebKit is not supported)
 headless: true
 concurrency: 1                 # journeys in parallel
 retries: 0

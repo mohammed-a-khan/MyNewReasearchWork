@@ -7,7 +7,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve, join, extname } from 'node:path';
 import { stringify as toYaml } from 'yaml';
-import { EventBus, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
+import { BROWSER_ENGINES, EventBus, verifyEvidence, type EzEvent, type RunResult } from '../core/index.js';
 import { loadConfig, listProjects, encryptValue, createMaskedLogger, type LoadedConfig } from '../config/index.js';
 import { effectiveSummary } from './effective.js';
 import { journeyToEzScript, loadJourneyFile } from '../intent/index.js';
@@ -142,7 +142,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('-t, --tags <tags>', 'only journeys with any of these tags (comma separated), or a tag expression: "@smoke and not @wip"', list)
     .option('-x, --exclude-tags <tags>', 'skip journeys with any of these tags', list)
     .option('-g, --grep <pattern>', 'only journeys whose id or name matches')
-    .addOption(new Option('-b, --browser <name>').choices(['chromium', 'firefox', 'webkit']))
+    .addOption(new Option('-b, --browser <name>').choices([...BROWSER_ENGINES]))
     .option('--browsers <names>', 'cross-browser run: every journey on each browser (chromium,firefox,msedge,chrome,...); result ids end in @<browser>', list)
     .option('--headed', 'show the browser')
     .option('-w, --workers <n>', 'journeys in parallel', (v) => parseInt(v, 10))
@@ -663,7 +663,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .argument('<url>', 'start URL (absolute, or relative to --base-url)')
     .option('-o, --out <file>', 'output .ez file (YAML when the journey uses iframes)', 'journeys/recorded.ez')
     .option('--base-url <url>', 'origin recorded URLs are made relative to')
-    .addOption(new Option('-b, --browser <name>').choices(['chromium', 'firefox', 'webkit']))
+    .addOption(new Option('-b, --browser <name>').choices([...BROWSER_ENGINES]))
     .option('--headless', 'record without a visible browser (for scripted use)')
     .option('--name <name>', 'journey name')
     .option('--tags <tags>', 'journey tags', list)

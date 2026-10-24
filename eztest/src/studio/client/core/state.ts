@@ -17,6 +17,8 @@ export interface Session {
   node?: string;
   watching?: string;
   lastEventSeq: number;
+  /** Supported browsers (from the server): `engines` for a run's Browser field, `targets` for cross-browser runs. */
+  browsers?: { engines: string[]; targets: string[] };
 }
 
 export interface JourneyEntry {

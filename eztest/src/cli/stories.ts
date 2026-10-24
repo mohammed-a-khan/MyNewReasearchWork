@@ -4,7 +4,8 @@
  * of CSF files defines. The harness mounts each story in an isolated page
  * (see src/stories/harness.ts); journeys reach a story with a `Story:` header.
  */
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
+import { BROWSER_ENGINES } from '../core/index.js';
 import { resolve } from 'node:path';
 import { createEngine, lensesFromConfig } from '../engine/index.js';
 import { loadJourneys } from './journeys.js';
@@ -43,7 +44,7 @@ export function registerStoriesCommands(program: Command, io: CliIO, load: Loade
     .option('-s, --stories <globs>', 'story file globs', list)
     .option('--renderer <module>', 'a renderer module exporting mount(root, component, args) (default: the built-in DOM renderer)')
     .option('--head <files>', 'CSS files or HTML injected into every story page head', list)
-    .option('-b, --browser <name>', 'chromium (default), firefox or webkit')
+    .addOption(new Option('-b, --browser <name>', 'chromium (default) or firefox').choices([...BROWSER_ENGINES]))
     .option('--lens <names>', 'lenses after every step (default: a11y, visual)', list)
     .action(async (paths: string[], o: { config?: string; env?: string; project?: string; stories?: string[]; renderer?: string; head?: string[]; browser?: string; lens?: string[] }) => {
       const loaded = await load(o);
@@ -61,7 +62,7 @@ export function registerStoriesCommands(program: Command, io: CliIO, load: Loade
       const engine = await createEngine(loaded, {
         cwd: io.cwd,
         runOptions: {
-          ...(o.browser ? { browser: o.browser as 'chromium' | 'firefox' | 'webkit' } : {}),
+          ...(o.browser ? { browser: o.browser as (typeof BROWSER_ENGINES)[number] } : {}),
           screenshots: 'on-failure',
           lenses: lensesFromConfig(lensNames, io.cwd, { branchBaselines: cfg.vcs.branchScope.baselines, defaultBranch: cfg.vcs.branchScope.defaultBranch }),
           storyHarness: harness,

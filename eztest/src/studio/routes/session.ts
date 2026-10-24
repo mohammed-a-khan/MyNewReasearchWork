@@ -1,6 +1,7 @@
 /** Session info, git branch, and API discoverability (`/api/routes`, `/api/topics`). */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
+import { BROWSER_ENGINES, BROWSER_TARGETS } from '../../core/browsers.js';
 import { sendJson } from '../http.js';
 import type { StudioRoute } from './route.js';
 
@@ -49,6 +50,8 @@ export const sessionRoutes: StudioRoute[] = [
         node: process.versions.node,
         watching: app.watcher?.mode,
         lastEventSeq: app.hub.lastSeq,
+        // The browsers the Run and Debug pages offer (EZTest's supported browsers; no WebKit).
+        browsers: { engines: BROWSER_ENGINES, targets: BROWSER_TARGETS },
       });
     },
   },
