@@ -13,6 +13,7 @@ FROM ${NODE_IMAGE}
 ARG EXTRA_PACKAGES=""
 WORKDIR /opt/eztest
 COPY dist-load-agent/eztest-load-agent.mjs ./eztest-load-agent.mjs
+COPY dist-load-agent/generator-worker.mjs ./generator-worker.mjs
 RUN if [ -n "$EXTRA_PACKAGES" ]; then npm init -y >/dev/null && npm install --no-audit --no-fund $EXTRA_PACKAGES; fi
 ENV NODE_ENV=production EZTEST_LOAD_NO_BROWSER=1
 USER node

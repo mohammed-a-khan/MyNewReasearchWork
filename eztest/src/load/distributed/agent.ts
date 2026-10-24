@@ -15,7 +15,9 @@ import { parseScenario } from '../model.js';
 import { MetricsCollector, type EncodedInterval } from '../metrics.js';
 import { Executor } from '../engine/executor.js';
 import { LoadRuntime } from '../engine/vu.js';
-import { buildPopulations, steadyAfter } from '../run.js';
+import { buildPopulations, generatorsFor, steadyAfter } from '../run.js';
+import { GeneratorPool } from '../engine/generators.js';
+import { profileCurve } from '../profiles.js';
 import type { Row } from '../data.js';
 import { Channel, mac, macEqual, nonce, parseHostPort, PROTOCOL_VERSION, readTls, type Frame, type TlsFiles } from './protocol.js';
 
@@ -33,6 +35,8 @@ export interface AgentOptions {
   connectTimeoutMs?: number;
   log?: (s: string) => void;
   baseDir?: string;
+  /** Generator processes of this agent (docs/load.md): each runs 1/N of the agent's share. Default 1; `eztest load agent`: one per CPU. */
+  generators?: number;
 }
 
 export interface AgentHandle {
@@ -77,6 +81,9 @@ async function runJob(ch: Channel, job: Frame, o: AgentOptions, log: (s: string)
   const scenario = parseScenario(job.scenario, o.baseDir ?? process.cwd());
   const data = (job.data ?? {}) as Record<string, Row[]>;
   const slices = (job.slices ?? {}) as Record<string, number>;
+  const gens = generatorsFor(scenario, o.generators);
+  if (gens.note) log(gens.note);
+  if (gens.count > 1) return runJobOnGenerators(ch, job, o, log, gens.count);
   const metrics = new MetricsCollector(scenario.options.errorSamples);
   metrics.steadyAfterSec = steadyAfter(scenario);
   const rt = new LoadRuntime(scenario, data, metrics, { vuIdOffset: Number(job.vuIdOffset ?? 0), seed: job.seed === undefined ? undefined : Number(job.seed) });
@@ -112,6 +119,50 @@ async function runJob(ch: Channel, job: Frame, o: AgentOptions, log: (s: string)
     await rt.close();
   }
   ch.send({ type: 'final', details: metrics.finalDetails(), errors: metrics.errorSamples, errorsByType: Object.fromEntries(metrics.errorsByType), maxVus: metrics.maxVus });
+  log(`job ${String(job.runId)} done`);
+}
+
+/** A job on several generator processes: their seconds are merged here and sent as this agent's. */
+async function runJobOnGenerators(ch: Channel, job: Frame, o: AgentOptions, log: (s: string) => void, threads: number): Promise<void> {
+  const scenario = parseScenario(job.scenario, o.baseDir ?? process.cwd());
+  const slices = (job.slices ?? {}) as Record<string, number>;
+  if (!scenario.populations.some((p) => (slices[p.name] ?? 0) > 0 && p.share > 0)) {
+    ch.send({ type: 'final', details: [], errors: [], errorsByType: {}, empty: true });
+    return;
+  }
+  const slot = job.slot && typeof job.slot === 'object' ? (job.slot as { index: number; count: number }) : undefined;
+  const durationMs = job.durationMs === undefined ? Math.max(...scenario.populations.map((p) => profileCurve((p.profile ?? scenario.profile)!, scenario.model).durationMs)) : Number(job.durationMs);
+  const pool = new GeneratorPool({
+    scenario, data: (job.data ?? {}) as Record<string, Row[]>, slices, processes: threads, ...(slot ? { slot } : {}), vuIdOffset: Number(job.vuIdOffset ?? 0),
+    ...(job.durationMs !== undefined ? { durationMs: Number(job.durationMs) } : {}), ...(job.seed !== undefined ? { seed: Number(job.seed) } : {}),
+    startAt: Number(job.startAt),
+  }, durationMs);
+  pool.on('interval', (e: EncodedInterval) => ch.send({ type: 'interval', data: e }));
+  pool.on('vu-error', (e: Error) => ch.send({ type: 'log', level: 'warn', message: e.message }));
+  const onControl = (f: Frame) => {
+    try {
+      if (f.type === 'stop') f.abort ? pool.abort() : pool.stop();
+      else if (f.type === 'control') {
+        if (typeof f.addVus === 'number') pool.addVus(f.addVus, typeof f.population === 'string' ? f.population : undefined);
+        if (typeof f.factor === 'number') pool.setFactor(f.factor);
+      }
+    } catch (e) {
+      ch.send({ type: 'log', level: 'warn', message: (e as Error).message });
+    }
+  };
+  ch.on('frame', onControl);
+  const lost = () => pool.stop();
+  ch.once('close', lost);
+  ch.send({ type: 'ready', populations: scenario.populations.map((p) => ({ name: p.name })), generators: threads });
+  log(`job ${String(job.runId)}: ${threads} generator processes; starting at ${new Date(Number(job.startAt)).toISOString()}`);
+  let out;
+  try {
+    out = await pool.run();
+  } finally {
+    ch.off('frame', onControl);
+    ch.off('close', lost);
+  }
+  ch.send({ type: 'final', details: out.details, errors: out.errors, errorsByType: {}, maxVus: out.maxVus });
   log(`job ${String(job.runId)} done`);
 }
 

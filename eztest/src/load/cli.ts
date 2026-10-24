@@ -27,6 +27,7 @@ import { profileCurve } from './profiles.js';
 import { LoadTest, verdictOf, type LiveSnapshot, type LoadResults } from './run.js';
 import { LoadController } from './distributed/controller.js';
 import { startAgent } from './distributed/agent.js';
+import { defaultGenerators } from './engine/generators.js';
 import { appendHistory, readHistory, readLoadResults, writeLoadRun } from './results.js';
 import { renderLoadReport } from './report.js';
 import { compareRuns, trend } from './analysis.js';
@@ -94,6 +95,7 @@ export function registerLoadCommands(program: Command, io: CliIO): void {
       .option('--duration <d>', 'override the test duration (e.g. 30s)')
       .option('--scale <f>', 'scale every profile by a factor', num)
       .option('--agents <n>', 'distributed: number of load generators to wait for', num)
+      .option('--generators <n>', 'generator processes on this machine, each running 1/n of the load (default: one per CPU)', num)
       .option('--listen <host:port>', 'distributed: controller address', '0.0.0.0:7400')
       .option('--token <token>', 'distributed: shared agent token (or EZTEST_LOAD_TOKEN)')
       .option('--tls-cert <file>').option('--tls-key <file>').option('--tls-ca <file>', 'CA for agent client certificates (mutual TLS)')
@@ -134,7 +136,11 @@ export function registerLoadCommands(program: Command, io: CliIO): void {
             });
             await (test as LoadController).listen();
             io.err(`waiting for ${agents} agent(s) on port ${(test as LoadController).port}`);
-          } else test = new LoadTest(s, { durationMs, baseline, monitors: o.monitors !== false });
+          } else {
+            const generators = typeof o.generators === 'number' ? o.generators : defaultGenerators();
+            test = new LoadTest(s, { durationMs, baseline, monitors: o.monitors !== false, generators });
+            test.on('note', (n: string) => io.err(n));
+          }
           let lastLine = 0;
           test.on('point', (_p, snap: LiveSnapshot) => {
             if (o.quiet || Date.now() - lastLine < 5000) return;
@@ -187,9 +193,11 @@ export function registerLoadCommands(program: Command, io: CliIO): void {
     .option('--tls-ca <file>', 'CA of the controller certificate').option('--tls-cert <file>', 'client certificate (mutual TLS)').option('--tls-key <file>')
     .option('--tls-insecure', 'TLS without verifying the controller (test labs only)')
     .option('--once', 'run one job and exit')
-    .action(async (o: { controller: string; token?: string; id?: string; zone?: string; capacity: number; tlsCa?: string; tlsCert?: string; tlsKey?: string; tlsInsecure?: boolean; once?: boolean }) => {
+    .option('--generators <n>', 'generator processes, each running 1/n of this agent\'s load (default: one per CPU)', num)
+    .action(async (o: { controller: string; token?: string; id?: string; zone?: string; capacity: number; tlsCa?: string; tlsCert?: string; tlsKey?: string; tlsInsecure?: boolean; once?: boolean; generators?: number }) => {
       const a = startAgent({
         controller: o.controller, token: o.token ?? io.env.EZTEST_LOAD_TOKEN, id: o.id, zone: o.zone, capacity: o.capacity, once: o.once, log: (l) => io.err(l), baseDir: io.cwd,
+        generators: o.generators ?? defaultGenerators(),
         tls: o.tlsCa || o.tlsCert || o.tlsInsecure ? { ca: o.tlsCa, cert: o.tlsCert, key: o.tlsKey, insecure: o.tlsInsecure } : undefined,
         connectTimeoutMs: o.once ? 60_000 : 24 * 3_600_000,
       });

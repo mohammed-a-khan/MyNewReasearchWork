@@ -33,6 +33,13 @@ export interface ExecutorOptions {
    * the agents' integer VU counts add up exactly to the total (Hermite's identity).
    */
   roundOffset?: number;
+  /**
+   * Open model: this generator's k-th arrival is due when the integral of its rate curve reaches
+   * k - 1 + arrivalPhase. Default 1 (arrivals at 1, 2, 3 ...). Generator g of G, each running 1/G of
+   * the rate, uses (g + 1) / G, so their arrivals interleave exactly as one generator's would
+   * (instead of G arrivals at the same instant).
+   */
+  arrivalPhase?: number;
 }
 
 interface PopState {
@@ -236,7 +243,7 @@ export class Executor extends EventEmitter {
   /** Time (ms) at which the integral of the rate curve reaches k iterations, or Infinity. */
   private arrivalTime(p: PopState, k: number, after: number): number {
     const c = p.rt.curve;
-    const want = (k * 1000) / this.factor;
+    const want = ((k - 1 + (this.o.arrivalPhase ?? 1)) * 1000) / this.factor;
     const end = this.durationMs;
     if (c.integral(end) < want) return Number.POSITIVE_INFINITY;
     let lo = after;
@@ -414,7 +421,7 @@ export class Executor extends EventEmitter {
       for (const p of this.pops) {
         // keep the arrivals already made; continue from the scaled integral
         const done = (p.rt.curve.integral(now) / 1000) * f;
-        p.arrivals = Math.floor(done);
+        p.arrivals = Math.max(0, Math.floor(done + 1 - (this.o.arrivalPhase ?? 1)));
         p.nextAt = this.arrivalTime(p, p.arrivals + 1, now);
       }
     }

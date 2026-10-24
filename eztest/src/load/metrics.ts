@@ -60,6 +60,48 @@ export interface EncodedInterval {
   populations: Record<string, { vus: number; n: number; e: number }>;
 }
 
+/**
+ * One second of several load generators as one interval (exact: histograms are merged, counts added;
+ * the event-loop lag is the worst generator's). Used by an agent with several generator threads.
+ */
+export function mergeIntervals(parts: EncodedInterval[]): EncodedInterval {
+  if (parts.length === 1) return parts[0];
+  const keys = new Map<string, { k: SampleKind; name: string; n: number; e: number; bin: number; bout: number; h: Histogram }>();
+  const errors: Record<string, number> = {};
+  const populations: EncodedInterval['populations'] = {};
+  let vus = 0;
+  let started = 0;
+  let dropped = 0;
+  let lag: number | undefined;
+  for (const p of parts) {
+    vus += p.vus;
+    started += p.started;
+    dropped += p.dropped;
+    if (p.lag !== undefined) lag = Math.max(lag ?? 0, p.lag);
+    for (const k of p.keys) {
+      const id = `${k.k}\u0000${k.name}`;
+      let m = keys.get(id);
+      if (!m) keys.set(id, (m = { k: k.k, name: k.name, n: 0, e: 0, bin: 0, bout: 0, h: new Histogram(k.h.d) }));
+      m.n += k.n;
+      m.e += k.e;
+      m.bin += k.bin;
+      m.bout += k.bout;
+      m.h.add(k.h);
+    }
+    for (const [t, n] of Object.entries(p.errors)) errors[t] = (errors[t] ?? 0) + n;
+    for (const [name, v] of Object.entries(p.populations)) {
+      const q = (populations[name] ??= { vus: 0, n: 0, e: 0 });
+      q.vus += v.vus;
+      q.n += v.n;
+      q.e += v.e;
+    }
+  }
+  return {
+    t: parts[0].t, vus, started, dropped, errors, populations, ...(lag !== undefined ? { lag } : {}),
+    keys: [...keys.values()].map((m) => ({ k: m.k, name: m.name, n: m.n, e: m.e, bin: m.bin, bout: m.bout, h: m.h.encode() })),
+  };
+}
+
 export interface IntervalSummaryRow {
   kind: SampleKind;
   name: string;

@@ -269,7 +269,8 @@ export class LoadController extends EventEmitter {
     act.forEach((a, i) => {
       const d: Record<string, Row[]> = {};
       for (const [name, rows] of Object.entries(data)) d[name] = sliceRows(rows, this.scenario.data[name], i, act.length);
-      a.ch.send({ type: 'job', runId: this.runId, scenario: doc, data: d, slices: slices.get(a.id), startAt: this.startAt, vuIdOffset: i * 1_000_000, roundOffset: i / act.length, durationMs: this.o.durationMs, seed: this.o.seed === undefined ? undefined : this.o.seed + i });
+      // slot: this agent among the generators of the test (agents with several threads split it further; see engine/generators.ts).
+      a.ch.send({ type: 'job', runId: this.runId, scenario: doc, data: d, slices: slices.get(a.id), startAt: this.startAt, vuIdOffset: i * 1_000_000, roundOffset: i / act.length, slot: { index: i, count: act.length }, durationMs: this.o.durationMs, seed: this.o.seed === undefined ? undefined : this.o.seed + i });
     });
     this.log(`job sent to ${act.length} agent(s); start at ${new Date(this.startAt).toISOString()}`);
     this.metrics.startedAt = this.startAt;
