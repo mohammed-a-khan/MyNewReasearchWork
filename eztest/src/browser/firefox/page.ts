@@ -155,6 +155,7 @@ export class FirefoxPage extends ChromiumPage {
       syntheticKey: (t, i) => holder.page!.syntheticKey(t, i),
       insertText: (t) => holder.page!.insertTextAtCaret(t),
       viewport: () => holder.page!.viewportSize(),
+      pointerLeft: (x, y, edge) => holder.page!.pointerLeft(x, y, edge),
     };
     const slowMo = () => ffCtx.browser().slowMo;
     const keyboard = new FirefoxKeyboard(target, slowMo);
@@ -555,6 +556,15 @@ export class FirefoxPage extends ChromiumPage {
       const target = document.activeElement || document.body;
       if (target) h.dispatch(target, t, { bubbles: true, cancelable: true, composed: true, ...i });
     }, [type, init]);
+  }
+
+  async pointerLeft(x: number, y: number, edge: { x: number; y: number }): Promise<void> {
+    await (this.mainFrame() as FirefoxFrame).inEngine((_e, _h, px, py, ex, ey) => {
+      const under = document.elementFromPoint(ex as number, ey as number) || document.documentElement;
+      const init = { clientX: px as number, clientY: py as number, screenX: px as number, screenY: py as number, relatedTarget: null, view: window };
+      under.dispatchEvent(new MouseEvent('mouseout', { ...init, bubbles: true, cancelable: true, composed: true }));
+      for (let el: Element | null = under; el; el = el.parentElement) el.dispatchEvent(new MouseEvent('mouseleave', { ...init, bubbles: false, cancelable: false }));
+    }, [x, y, edge.x, edge.y]);
   }
 
   async insertTextAtCaret(text: string): Promise<boolean> {

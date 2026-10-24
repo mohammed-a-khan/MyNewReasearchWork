@@ -88,6 +88,11 @@ export interface InputTarget {
   /** Insert text at the caret of the focused element (like an IME commit); false when nothing editable is focused. */
   insertText(text: string): Promise<boolean>;
   viewport(): { width: number; height: number } | null;
+  /**
+   * The pointer left the page at (x, y) outside the viewport. WebDriver cannot move a pointer out of the viewport,
+   * so the mouseout / mouseleave events a browser fires then are dispatched in the page (from the edge point).
+   */
+  pointerLeft(x: number, y: number, edge: { x: number; y: number }): Promise<void>;
 }
 
 const MOD_BITS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
@@ -164,6 +169,10 @@ export class FirefoxMouse extends Mouse {
       actions.push({ type: 'pointerMove', x: p.x, y: p.y, origin: 'viewport', duration: 0 });
     }
     await this.send(actions);
+    const vp = this.target.viewport();
+    const outside = (px: number, py: number) => !!vp && (px < 0 || py < 0 || px >= vp.width || py >= vp.height);
+    // Leaving the page (an exit-intent popup listens for this): Chromium fires the events itself, Firefox cannot move there.
+    if (outside(x, y) && !outside(fromX, fromY)) await this.target.pointerLeft(x, y, this.clamp(x, y)).catch(() => undefined);
     this.x = x;
     this.y = y;
   }

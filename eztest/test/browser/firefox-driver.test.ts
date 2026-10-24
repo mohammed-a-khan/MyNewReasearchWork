@@ -248,6 +248,21 @@ describe.skipIf(!executable)('firefox driver', () => {
       });
     });
 
+    it('fires mouseout and mouseleave when the mouse leaves the page (exit-intent popups)', async () => {
+      await withPage(async (page) => {
+        await page.setContent(`<!doctype html><p style="height:400px">page</p><script>
+          window.left = [];
+          document.documentElement.addEventListener('mouseleave', (e) => left.push('leave ' + e.clientY));
+          document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) left.push('out ' + e.clientY); });
+        </script>`);
+        await page.mouse.move(100, 200);
+        await page.mouse.move(100, -5);
+        expect(await page.evaluate(() => (window as unknown as { left: string[] }).left)).toEqual(['out -5', 'leave -5']);
+        await page.mouse.move(100, -20);
+        expect(await page.evaluate(() => (window as unknown as { left: string[] }).left.length)).toBe(2);
+      });
+    });
+
     it('types with the keyboard (modifiers, chords) and drives mouse, wheel and touch', async () => {
       await withPage(async (page) => {
         await page.goto(`${demo.url}/lab/keys`);

@@ -170,6 +170,12 @@ Every EZTest module that touches a page imports it.
 
 ### Known differences
 
+- **The mouse leaving the page (Firefox).** WebDriver BiDi keeps the pointer
+  inside the viewport. A move to a point outside it moves to the edge and
+  then dispatches the `mouseout` (no related target) and `mouseleave` events
+  a browser fires when the pointer leaves the document, with the requested
+  coordinates; they are untrusted events. Chromium fires them itself.
+
 - **Client certificates.** Chromium has no protocol command to present a
   TLS client certificate. Requests to an origin with a configured certificate
   are intercepted and performed from Node (with the certificate), and the
