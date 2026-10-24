@@ -118,7 +118,10 @@ export const BatchJobSchema = z.union([
     ssh: z.string().min(1),
     command: z.string().min(1),
     successExitCode: z.number().int().default(0),
-    /** Optional completion check: a file that appears when the job is done. */
+    /**
+     * Optional completion check: after the command succeeds, wait (within the step's time) for a
+     * new file matching `pattern` (glob, ${var}s allowed) in `dir` on the files.sftp server `sftp`.
+     */
     doneFile: z.object({ sftp: z.string(), dir: z.string(), pattern: z.string() }).optional(),
   }),
   z.object({

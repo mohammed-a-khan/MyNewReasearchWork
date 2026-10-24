@@ -111,8 +111,19 @@ describe.skipIf(!ssh)('SSH commands and batch jobs (allow-listed)', () => {
     dir = await mkdtemp(join(tmpdir(), 'eztest-ssh-'));
     await writeFile(join(dir, 'eztest.config.yaml'), toYaml({
       outputDir: 'results', healing: { enabled: false },
-      files: { ssh: { 'batch-host': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}', allowCommands: ['echo closing *', "sh -c 'exit 3'", 'echo closed *'] } } },
-      batch: { jobs: { 'close-day': { ssh: 'batch-host', command: 'echo closed $${date}' } } },
+      files: {
+        ssh: { 'batch-host': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}', allowCommands: ['echo closing *', "sh -c 'exit 3'", 'echo closed *', "sh -c 'sleep 1; touch /tmp/eztest-done-*.flag'"] } },
+        // The same machine over SFTP, where the jobs' completion files appear.
+        sftp: { 'batch-files': { host: ssh!.host, port: ssh!.port, username: ssh!.username, password: '${SSH_PASSWORD}' } },
+        pollMs: 200,
+      },
+      batch: {
+        jobs: {
+          'close-day': { ssh: 'batch-host', command: 'echo closed $${date}' },
+          'close-day-with-flag': { ssh: 'batch-host', command: "sh -c 'sleep 1; touch /tmp/eztest-done-$${run}.flag'", doneFile: { sftp: 'batch-files', dir: '/tmp', pattern: 'eztest-done-$${run}.flag' } },
+          'never-flags': { ssh: 'batch-host', command: 'echo closed quietly', doneFile: { sftp: 'batch-files', dir: '/tmp', pattern: 'eztest-never-$${run}.flag' } },
+        },
+      },
     }));
     // Record the host key once (trust on first use); the journeys check it strictly.
     const prime = new SshSession('prime', { ...ssh!, trustOnFirstUse: true }, dir);
@@ -130,6 +141,20 @@ Run batch job "close-day" with date=\${day} and wait up to 1 minute as job
 Expect response job "$.stdout" contains "closed 2026-01-31"
 `);
     expect(j.status, steps(j)).toBe('passed');
+  });
+
+  it('a batch job with a doneFile waits for its completion file, and fails when it never appears', async () => {
+    const run = randomUUID().slice(0, 8);
+    const j = await runJourney(dir, `Journey: Close with flag
+Run batch job "close-day-with-flag" with run=${run} and wait up to 30 seconds as job
+`);
+    expect(j.status, steps(j)).toBe('passed');
+    expect((j.ledger.job as { doneFile?: { name: string } }).doneFile?.name).toBe(`eztest-done-${run}.flag`);
+    const never = await runJourney(dir, `Journey: Never done
+Run batch job "never-flags" with run=${run} and wait up to 3 seconds as job
+`);
+    expect(never.status).toBe('failed');
+    expect(steps(never)).toMatch(new RegExp(`Batch job "never-flags" finished, but its completion file \\(matching "eztest-never-${run}\\.flag" in /tmp on SFTP batch-files\\) did not appear within 3 s of the job starting`));
   });
 
   it('refuses a command that is not allow-listed', async () => {
