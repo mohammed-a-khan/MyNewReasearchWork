@@ -36,6 +36,7 @@ baseUrl: https://app.test
 browser: chromium              # chromium | firefox (Chrome and Edge: channel; Safari/WebKit is not supported)
 headless: true
 concurrency: 1                 # journeys in parallel
+workers: process               # parallel journeys in worker processes (default when concurrency > 1), or inline; docs/scale.md
 retries: 0
 logLevel: info
 timeouts: { step: 15000 }
