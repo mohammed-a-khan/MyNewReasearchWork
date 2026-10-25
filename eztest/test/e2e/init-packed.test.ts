@@ -113,7 +113,7 @@ journey('Stock message shows', { tags: ['@smoke'] }, async ({ ui }) => {
     expect(gate.out).toContain('PASS');
 
     // The enterprise template from the installed package: its TypeScript samples (step definitions, a code
-    // journey importing @eztech/eztest/sdk and /core, helpers, a screen model) load, and it validates and lints clean.
+    // journey importing @eztech.com/eztest/sdk and /core, helpers, a screen model) load, and it validates and lints clean.
     const ent = join(base, 'enterprise');
     await mkdir(ent);
     await symlink(join(project, 'node_modules'), join(ent, 'node_modules'), 'dir');

@@ -37,7 +37,7 @@ const fill = (text: string, n: AppNames) => text.replace(/__APP__/g, n.app).repl
 // ------------------------------------------------------------------ project files (once)
 
 const CONFIG = `# EZTest project: the layout and rules of the EZTest Project Guide
-# (node_modules/@eztech/eztest/docs/project-guide.md). configVersion 1 (docs/versioning.md).
+# (node_modules/@eztech.com/eztest/docs/project-guide.md). configVersion 1 (docs/versioning.md).
 #
 # Every application under test is a project below (projects.<app>): select it with --project <app>,
 # and the environment with -e <env>. The npm scripts in package.json do both.
@@ -135,7 +135,7 @@ ${extra}`;
 
 const README = `# Test automation
 
-This project follows the EZTest Project Guide (\`node_modules/@eztech/eztest/docs/project-guide.md\`).
+This project follows the EZTest Project Guide (\`node_modules/@eztech.com/eztest/docs/project-guide.md\`).
 
 ## Layout
 
@@ -162,7 +162,7 @@ shared/steps, shared/helpers  steps and helpers every application uses
 ## Running
 
 \`\`\`bash
-npm install                      # once; installs @eztech/eztest
+npm install                      # once; installs @eztech.com/eztest
 npx eztest install-browsers      # once, if Chrome or Edge is not installed
 cp .env.example .env             # then fill in the secrets for your environment
 
@@ -384,7 +384,7 @@ const SHARED_STEPS = `/**
  * Step definitions every application's features use: one definition for the whole project
  * (docs/project-guide.md#helpers-or-steps). App-specific steps live in apps/<app>/steps/.
  */
-import { Given } from '@eztech/eztest/bdd';
+import { Given } from '@eztech.com/eztest/bdd';
 
 // Every application of this project answers GET /api/health (relative to its baseUrl).
 Given('the application is up', async ({ api, expect }) => {
@@ -397,7 +397,7 @@ const SHARED_UNIQUE = `/**
  * Test data generators shared by every application: values unique across workers, shards and
  * machines, so parallel journeys never collide (docs/project-guide.md#test-data-per-environment).
  */
-import { uniqueValue } from '@eztech/eztest/core';
+import { uniqueValue } from '@eztech.com/eztest/core';
 
 /** A reference such as PO-mq3k9d-7f2a-1, unique to this run, worker and machine. */
 export function uniqueReference(prefix: string): string {
@@ -491,7 +491,7 @@ const STEPS = `/**
  * Step definitions for the orders features of __APP__ (docs/bdd.md). Elements come from the screen
  * model (screens/orders.ts), which shares its ids with elements/orders.yaml.
  */
-import { Then, When } from '@eztech/eztest/bdd';
+import { Then, When } from '@eztech.com/eztest/bdd';
 import { Orders } from '../screens/orders.ts';
 import { uniqueReference } from '../../../shared/helpers/unique.ts';
 
@@ -524,7 +524,7 @@ const CODE = `/**
  * The order is set up through the API (fast, no screens), then checked where the user sees it and
  * where it is stored. The data row comes from apps/__APP__/data/<env>/orders.csv.
  */
-import { expect, journey, step } from '@eztech/eztest/sdk';
+import { expect, journey, step } from '@eztech.com/eztest/sdk';
 import { Orders } from '../../screens/orders.ts';
 import { createOrder } from '../../helpers/orders-api.ts';
 
@@ -549,7 +549,7 @@ const HELPER = `/**
  * The orders API of __APP__. Setting test data up through the API is faster and steadier than
  * through the screens (docs/project-guide.md#api-setup); the journey then checks the screens.
  */
-import { api } from '@eztech/eztest/sdk';
+import { api } from '@eztech.com/eztest/sdk';
 import { uniqueReference } from '../../../shared/helpers/unique.ts';
 
 export interface CreatedOrder {
@@ -569,7 +569,7 @@ const SCREEN = `/**
  * (Orders.customer, ...) are those of elements/orders.yaml: the repository's locators come first,
  * so a heal accepted there reaches code too (docs/elements.md).
  */
-import { screen } from '@eztech/eztest/sdk';
+import { screen } from '@eztech.com/eztest/sdk';
 
 export const Orders = screen('Orders', {
   customer: { label: 'Customer' },

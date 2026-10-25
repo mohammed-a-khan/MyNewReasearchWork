@@ -1,6 +1,6 @@
 {
   "name": "@eztech.com/eztest",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "EZTest - one-stop, verified test automation: web, API, DB, documents, identity, data, performance, accessibility, visual, security and release readiness in a single package.",
   "type": "module",
   "engines": {

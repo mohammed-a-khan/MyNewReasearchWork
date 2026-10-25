@@ -102,7 +102,7 @@ describe('project guide lint rules: across files', () => {
       'apps/web/journeys/orders/a.ez': GOOD(),
       'apps/web/journeys/orders/b.ez': GOOD(),
       'apps/web/features/orders/o.feature': '@orders\nFeature: O\n  @id:web-orders-save @smoke\n  Scenario: S\n    Given I am on "/orders"\n  Scenario: Untagged and without id\n    Given I am on "/orders"\n',
-      'apps/web/code/orders/c.journey.ts': "import { journey } from '@eztech/eztest/sdk';\njourney('No id', { tags: ['@orders'] }, async ({ ui }) => { await ui.open('/'); });\njourney('No tags', { id: 'web-orders-no-tags' }, async () => {});\njourney('Fine', { id: 'web-orders-fine', tags: ['@orders'] }, async () => {});\n",
+      'apps/web/code/orders/c.journey.ts': "import { journey } from '@eztech.com/eztest/sdk';\njourney('No id', { tags: ['@orders'] }, async ({ ui }) => { await ui.open('/'); });\njourney('No tags', { id: 'web-orders-no-tags' }, async () => {});\njourney('Fine', { id: 'web-orders-fine', tags: ['@orders'] }, async () => {});\n",
     });
     const r = await lintPaths(['apps'], { cwd: dir });
     // The scenario's @id: comes first (files are read in path order); both journeys repeat it, at their Id: line.
@@ -150,7 +150,7 @@ describe('project guide lint rules: across files', () => {
   it('undefined-step and ambiguous-step: Gherkin steps against the step definitions, read as text', async () => {
     const dir = await project({
       'apps/web/features/orders/o.feature': '@orders\nFeature: O\n  @id:web-o-1 @smoke\n  Scenario: S\n    Given I am logged in as "clerk"\n    When I place an order\n    Then the invoice is sent twice\n    And the total is right\n',
-      'apps/web/steps/orders.steps.ts': "import { When, Then } from '@eztech/eztest/bdd';\nWhen('I place an order', async () => {});\nThen('the total is right', async () => {});\nThen(/^the total is (right|wrong)$/, async () => {});\n",
+      'apps/web/steps/orders.steps.ts': "import { When, Then } from '@eztech.com/eztest/bdd';\nWhen('I place an order', async () => {});\nThen('the total is right', async () => {});\nThen(/^the total is (right|wrong)$/, async () => {});\n",
     });
     const r = await lintPaths(['apps'], { cwd: dir, bdd: { steps: ['apps/web/steps/**/*.steps.ts'] } });
     expect(by(r, 'undefined-step')).toEqual(['apps/web/features/orders/o.feature:7']);   // line 5 is an EZTest phrasing, line 6 has a definition
@@ -159,8 +159,8 @@ describe('project guide lint rules: across files', () => {
     // Per project: each application's features bind to that application's definitions only.
     const two = await project({
       'apps/a/features/x/o.feature': '@x\nFeature: O\n  @id:a-o @smoke\n  Scenario: S\n    When I place an order\n',
-      'apps/a/steps/a.steps.ts': "import { When } from '@eztech/eztest/bdd';\nWhen('I place an order', async () => {});\n",
-      'apps/b/steps/b.steps.ts': "import { When } from '@eztech/eztest/bdd';\nWhen('I place an order', async () => {});\n",
+      'apps/a/steps/a.steps.ts': "import { When } from '@eztech.com/eztest/bdd';\nWhen('I place an order', async () => {});\n",
+      'apps/b/steps/b.steps.ts': "import { When } from '@eztech.com/eztest/bdd';\nWhen('I place an order', async () => {});\n",
     });
     expect(by(await lintPaths(['apps'], { cwd: two, bdd: { steps: ['apps/*/steps/**/*.steps.ts'] } }), 'ambiguous-step')).toEqual(['apps/a/features/x/o.feature:5']);
     expect(by(await lintPaths(['apps'], { cwd: two, bdd: { steps: ['apps/*/steps/**/*.steps.ts'] }, bddScopes: [{ dir: 'apps/a', steps: ['apps/a/steps/**/*.steps.ts'] }] }), 'ambiguous-step')).toEqual([]);
@@ -189,7 +189,7 @@ describe('project guide lint rules: across files', () => {
       'apps/web/data/dev/orders.csv': 'case,customer\na,b\n',
       'apps/web/elements/orders.yaml': 'screen: Orders\nelements:\n  save: testid=save\n',
       'journeys/old.ez': GOOD().replace('web-orders-save', 'old'),
-      'shared/steps/common.steps.ts': "import { Given } from '@eztech/eztest/bdd';\nGiven('the app is up', async () => {});\n",
+      'shared/steps/common.steps.ts': "import { Given } from '@eztech.com/eztest/bdd';\nGiven('the app is up', async () => {});\n",
       'tools/build.ts': 'export const x = 1;\n',
     };
     const dir = await project(files);
