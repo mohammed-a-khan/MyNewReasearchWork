@@ -5,6 +5,7 @@
 import { EzTestError, NotSupportedError } from '../core/index.js';
 import { redactText } from '../mocks/redact.js';
 import type { JourneyMonitorState } from './state.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 export interface MonitorAlert {
   /** Stable dedupe key: journey + kind + time of the health change. */
@@ -85,7 +86,7 @@ export function buildAlert(
 }
 
 export async function sendWebhook(c: Extract<AlertChannel, { type: 'webhook' }>, alert: MonitorAlert): Promise<void> {
-  const res = await fetch(c.url, {
+  const res = await envProxyFetch(c.url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(c.headers ?? {}) },
     // `text` makes the payload render in Slack incoming webhooks and Teams connectors.

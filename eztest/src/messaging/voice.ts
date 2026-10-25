@@ -23,6 +23,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { EzTestError, nowIso, sleep } from '../core/index.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 export interface VoiceCall {
   id: string;
@@ -229,7 +230,7 @@ export class TwilioVoiceProvider implements VoiceProvider {
   }
 
   private async api<T>(path: string, init: { method?: string; form?: Record<string, string> } = {}): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, {
+    const res = await envProxyFetch(`${this.base}${path}`, {
       method: init.method ?? 'GET',
       headers: { authorization: this.auth, accept: 'application/json', ...(init.form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) },
       ...(init.form ? { body: new URLSearchParams(init.form).toString() } : {}),
@@ -325,7 +326,7 @@ export class TwilioVoiceProvider implements VoiceProvider {
     if (!f) return undefined;
     if (f.byRecording?.[recordingSid] !== undefined) return f.byRecording[recordingSid];
     if (!f.bySha256 || !Object.keys(f.bySha256).length || this.o.fetchAudio === false) return undefined;
-    const res = await fetch(`${this.base}/Recordings/${encodeURIComponent(recordingSid)}.wav`, { headers: { authorization: this.auth }, signal: AbortSignal.timeout(30_000) });
+    const res = await envProxyFetch(`${this.base}/Recordings/${encodeURIComponent(recordingSid)}.wav`, { headers: { authorization: this.auth }, signal: AbortSignal.timeout(30_000) });
     if (!res.ok) return undefined;
     const sha = createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex');
     return f.bySha256[sha];

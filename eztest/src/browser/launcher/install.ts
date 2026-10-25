@@ -27,6 +27,7 @@ import { connect as tlsConnect } from 'node:tls';
 import { join } from 'node:path';
 import { browserCacheDir, cftBinaryInArchive, cftPlatform } from './find.js';
 import { extractZip } from './unzip.js';
+import { envProxyFor } from '../../surfaces/proxy.js';
 
 export interface InstallOptions {
   /** 'chrome' (Chrome for Testing, default) or 'chrome-headless-shell'. */
@@ -56,11 +57,15 @@ const DEFAULT_INDEX = 'https://googlechromelabs.github.io/chrome-for-testing/las
 const DEFAULT_BASE = 'https://storage.googleapis.com/chrome-for-testing-public';
 
 function proxyFor(url: URL): URL | undefined {
-  const noProxy = (process.env.NO_PROXY ?? process.env.no_proxy ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const host = url.hostname;
-  if (noProxy.some((n) => n === '*' || host === n || (n.startsWith('.') ? host.endsWith(n) : host.endsWith(`.${n}`)))) return undefined;
-  const p = url.protocol === 'https:' ? (process.env.HTTPS_PROXY ?? process.env.https_proxy) : (process.env.HTTP_PROXY ?? process.env.http_proxy);
-  return p ? new URL(p) : undefined;
+  // The same rules as every other outbound call (HTTPS_PROXY / HTTP_PROXY / NO_PROXY, loopback always direct).
+  const p = envProxyFor(url);
+  return p ? new URL(p.url) : undefined;
+}
+
+/** Proxy-Authorization for a proxy URL with credentials (http://user:pass@proxy:3128). */
+function proxyAuthHeaders(proxy: URL): Record<string, string> {
+  if (!proxy.username) return {};
+  return { 'proxy-authorization': `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}` };
 }
 
 interface HttpResult {
@@ -87,7 +92,7 @@ export async function httpGet(url: string, onProgress?: (received: number, total
       resp.on('error', reject);
     };
     if (proxy && u.protocol === 'https:') {
-      const connectReq = httpRequest({ host: proxy.hostname, port: Number(proxy.port || 80), method: 'CONNECT', path: `${u.hostname}:${u.port || 443}`, headers: { host: `${u.hostname}:${u.port || 443}` } });
+      const connectReq = httpRequest({ host: proxy.hostname, port: Number(proxy.port || 80), method: 'CONNECT', path: `${u.hostname}:${u.port || 443}`, headers: { host: `${u.hostname}:${u.port || 443}`, ...proxyAuthHeaders(proxy) } });
       connectReq.on('connect', (cres, socket) => {
         if (cres.statusCode !== 200) {
           reject(new Error(`Proxy refused CONNECT to ${u.host}: ${cres.statusCode}`));
@@ -103,7 +108,7 @@ export async function httpGet(url: string, onProgress?: (received: number, total
       connectReq.on('error', reject);
       connectReq.end();
     } else if (proxy) {
-      const r = httpRequest({ host: proxy.hostname, port: Number(proxy.port || 80), path: u.href, method: 'GET', headers: { host: u.host } }, handle);
+      const r = httpRequest({ host: proxy.hostname, port: Number(proxy.port || 80), path: u.href, method: 'GET', headers: { host: u.host, ...proxyAuthHeaders(proxy) } }, handle);
       r.on('error', reject);
       r.end();
     } else {

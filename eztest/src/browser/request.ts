@@ -3,6 +3,7 @@
  * context.request), performed from Node with fetch.
  */
 import { FetchedResponse } from './chromium/network.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 export interface APIRequestOptions {
   headers?: Record<string, string>;
@@ -55,7 +56,7 @@ export class APIRequestContext {
     let res: globalThis.Response;
     let redirects = options.maxRedirects ?? 20;
     for (;;) {
-      res = await fetch(current, {
+      res = await envProxyFetch(current, {
         method,
         headers,
         body: method === 'GET' || method === 'HEAD' ? undefined : body,

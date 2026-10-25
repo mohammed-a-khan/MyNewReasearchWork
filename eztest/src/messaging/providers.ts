@@ -8,6 +8,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { EzTestError, nowIso, sleep } from '../core/index.js';
 import { parseMime } from './mime.js';
 import type { EmailMessage, MailProvider, MailQuery, SmsMessage, SmsProvider, SmsQuery } from './types.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 function matchesMail(m: EmailMessage, q: MailQuery): boolean {
   if (q.to && !m.to.some((t) => t.toLowerCase().includes(q.to!.toLowerCase()))) return false;
@@ -205,7 +206,7 @@ export async function sendSmtpMail(o: { host?: string; port: number; from: strin
 // ------------------------------------------------------------------ HTTP helper
 
 async function getJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
-  const res = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(10_000) });
+  const res = await envProxyFetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new EzTestError(`GET ${url} returned ${res.status}`, 'MAIL_API');
   return res.json();
 }

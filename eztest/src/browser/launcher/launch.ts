@@ -25,6 +25,7 @@ import { redactUrl } from '../transport/websocket.js';
 import { findChromium, type FoundBrowser } from './find.js';
 import { settleWithin } from '../util.js';
 import { makeTempDir, removeTrackedTempDirsSync, sweepStaleTempDirsOnce, trackTempDir, untrackTempDir } from './temp-dirs.js';
+import { envProxyFetch } from '../../surfaces/proxy.js';
 
 export interface LaunchProcessOptions {
   executablePath?: string;
@@ -371,7 +372,9 @@ export async function resolveBrowserWsEndpoint(endpoint: string, headers?: Recor
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(url, { headers: { ...auth, ...(headers ?? {}) }, signal: ctrl.signal });
+    // A remote browser (a grid, a cloud service) through the environment's proxy; a browser on this machine directly.
+    const local = /^(?:localhost|127\.[\d.]+|\[::1\])$/i.test(url.hostname);
+    res = await (local ? fetch : envProxyFetch)(url, { headers: { ...auth, ...(headers ?? {}) }, signal: ctrl.signal });
   } catch (e) {
     throw new Error(`Could not reach the DevTools endpoint ${redactUrl(url.toString())}: ${(e as Error).message}`);
   } finally {

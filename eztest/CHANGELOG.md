@@ -4,6 +4,10 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Fixed in 0.1.0-beta.4
+
+- **Every outbound call goes through the environment's proxy.** API steps, the SDK's `context.request`, `route.fetch()`, messaging providers (mail and SMS APIs, voice), alert webhooks, XSD downloads and remote browser endpoints used Node's own fetch, which ignores `HTTPS_PROXY`: on a proxy-only machine the health checks passed (fixed in beta.3) and then every API step failed with `fetch failed`, unless Node ran with `NODE_USE_ENV_PROXY=1`. They now use EZTest's proxy-aware fetch, with `NO_PROXY` honoured. `eztest install-browsers` follows the same rules and now sends the proxy credentials from the proxy URL (`Proxy-Authorization`). A browser on this machine is still reached directly. See [docs/configuration.md](docs/configuration.md#behind-a-proxy).
+
 ### Found by a consumer project on 0.1.0-beta.2, fixed in 0.1.0-beta.3
 
 - A config variable that refers to itself (`vars: { X: ${X:-https://...} }`) left `baseUrl: ${X}` unresolved and the run stopped with a bare `baseUrl: Invalid URL`. A variable's own name in its value is now the environment's variable of that name, else the default (so this form works as intended), and variables that refer to each other in a cycle nothing breaks stop with a configuration error that names the cycle (`vars.A: the variables refer to each other in a cycle (A -> B -> A) ...`).

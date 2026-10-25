@@ -17,6 +17,7 @@ import type { URLMatch } from '../types.js';
 import { deferred, headersFromProtocol, headersToObject, mimeFor, urlMatches, type Deferred } from '../util.js';
 import type { ChromiumFrame } from './frame.js';
 import type { ChromiumPage } from './page.js';
+import { envProxyFetch } from '../../surfaces/proxy.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface Header {
@@ -547,7 +548,7 @@ export class Route {
     const headers = o.headers ?? this.request_.headers();
     const method = o.method ?? this.request_.method();
     const post = o.postData !== undefined ? postDataBuffer(o.postData) : this.request_.postDataBuffer();
-    const res = await fetch(o.url ?? this.request_.url(), {
+    const res = await envProxyFetch(o.url ?? this.request_.url(), {
       method,
       headers,
       body: method === 'GET' || method === 'HEAD' || !post ? undefined : new Uint8Array(post),

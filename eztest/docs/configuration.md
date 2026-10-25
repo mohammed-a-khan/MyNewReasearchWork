@@ -611,3 +611,13 @@ manual:
 ```
 
 See [coverage.md](coverage.md) and [manual-testing.md](manual-testing.md).
+
+## Behind a proxy
+
+Every call EZTest makes to the network honours `HTTPS_PROXY` / `HTTP_PROXY` (or the lower-case names) and
+`NO_PROXY`, with nothing to configure and no `NODE_USE_ENV_PROXY`: the browser, API steps (`Call API ...`), the SDK's
+`context.request`, `route.fetch()`, health checks, OAuth token requests, secret stores, messaging providers, alert
+webhooks, XSD downloads and `eztest install-browsers`. Proxy credentials go in the URL
+(`http://user:password@proxy:3128`) and are sent as `Proxy-Authorization: Basic`. A browser on this machine is
+reached directly; a remote one (a grid) through the proxy. List local hosts (`localhost,127.0.0.1,.ez.test`) in
+`NO_PROXY` when the proxy cannot reach them.

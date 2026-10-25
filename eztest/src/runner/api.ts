@@ -1,7 +1,8 @@
-/** Default API handler: global fetch with baseUrl resolution and optional role auth. */
+/** Default API handler: fetch (through the environment's proxy) with baseUrl resolution and optional role auth. */
 import { EzTestError, type ApiCall } from '../core/index.js';
 import { selectClientCertificate, tlsFetchFor } from '../surfaces/api-tls.js';
 import type { ApiAuthProvider, ApiHandler, ApiResponse, ClientCertificate, StepContext } from './types.js';
+import { envProxyFetch } from '../surfaces/proxy.js';
 
 export interface FetchApiOptions {
   /** Used when the call URL is relative and the step context has no baseUrl. */
@@ -44,7 +45,7 @@ export function createFetchApiHandler(opts: FetchApiOptions = {}): ApiHandler {
       }
     }
     const cert = selectClientCertificate(opts.clientCertificates, url, call.clientCertificate);
-    const res = await (cert ? tlsFetchFor(cert) : fetch)(url, {
+    const res = await (cert ? tlsFetchFor(cert) : envProxyFetch)(url, {
       method: call.method,
       headers,
       body,

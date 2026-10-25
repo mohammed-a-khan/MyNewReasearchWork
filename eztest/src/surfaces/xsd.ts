@@ -24,6 +24,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { EzTestError } from '../core/index.js';
 import { childElements, getAttr, lookupNamespace, parseXml, type XElement } from './xml-dom.js';
+import { envProxyFetch } from './proxy.js';
 
 export const XS_NS = 'http://www.w3.org/2001/XMLSchema';
 export const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
@@ -245,7 +246,7 @@ export type SchemaLoader = (location: string, base?: string) => Promise<{ text: 
 /** Default loader: files relative to the referring document (http(s) locations are fetched). */
 export const fileSchemaLoader: SchemaLoader = async (location, base) => {
   if (/^https?:\/\//i.test(location)) {
-    const r = await fetch(location);
+    const r = await envProxyFetch(location);
     if (!r.ok) throw new EzTestError(`Cannot fetch schema ${location}: HTTP ${r.status}`, 'XSD_LOAD');
     return { text: await r.text(), location };
   }
