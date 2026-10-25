@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from '../support/testkit.js';
 import type { JourneyResult, RunResult, StepResult } from '../../src/core/index.js';
-import { bddHierarchy, buildJsonReport, renderHtmlReport, renderJUnit, worstStatus } from '../../src/report/index.js';
+import { bddHierarchy, buildJsonReport, buildReportModel, renderHtmlReport, renderJUnit, worstStatus } from '../../src/report/index.js';
 import { renderLargeHtmlReport } from '../../src/scale/report.js';
 
 const step = (line: number, text: string, status: StepResult['status'], match: 'definition' | 'ez' | 'undefined' = 'ez'): StepResult => ({
@@ -52,10 +52,15 @@ describe('BDD reports', () => {
   it('JSON and HTML carry the hierarchy; the large-run report has the feature table', () => {
     expect(buildJsonReport(run).bdd?.features.length).toBe(2);
     expect(buildJsonReport({ ...run, journeys: [run.journeys[0]] }).bdd).toBeUndefined();
-    const html = renderHtmlReport(run);
-    expect(html).toContain('<h2 id="features-h">Features</h2>');
-    expect(html).toContain('Rule:</span> Refunds');
-    expect(html).toContain('step definition &middot; steps/a.steps.ts:3');
+    // The report groups the Tests tab by feature and rule (the suite path); each scenario's detail has its
+    // feature file and line, and each step its keyword and binding.
+    const m = buildReportModel(run);
+    const refund = m.tests.find((t) => t.gherkin && t.suite.includes('Refunds'))!;
+    expect(refund.suite).toEqual(expect.arrayContaining(['Billing', 'Refunds']));
+    expect(refund.gherkin).toMatchObject({ file: 'features/billing.feature', keyword: expect.any(String) });
+    expect(refund.gherkin!.steps[0]).toEqual(['Given', 'a refund', 'undefined']);
+    expect(m.tests.flatMap((t) => t.gherkin?.steps ?? [])).toContainEqual(expect.arrayContaining(['definition', 'steps/a.steps.ts:3']));
+    expect(renderHtmlReport(run)).toContain('"gherkin":');
     expect(renderLargeHtmlReport(run)).toContain('<h2 id="bdd-h">Features</h2>');
   });
 

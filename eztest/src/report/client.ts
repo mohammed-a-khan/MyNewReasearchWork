@@ -787,12 +787,14 @@ function stepNode(s, t, num, ctx) {
   var code = STEP[s.s] || STEP.S;
   var no = ++ctx.n;
   var isFailing = s === ctx.fs;
+  var gs = ctx.g; ctx.g = null;
+  var BIND = { definition: 'step definition', ez: 'built-in phrasing', undefined: 'undefined step', ambiguous: 'ambiguous step' };
   var myShots = ctx.shots.filter(function (x) { return x.step === s; });
-  var hasBody = isFailing || s.x || s.h || (s.c && s.c.length) || s.l || s.dg || s.db || s.api || s.im || s.m || (s.w && s.w.length) || (s.e && s.e.length) || s.sn || s.hn || s.vd || myShots.length;
+  var hasBody = isFailing || (gs && gs[2]) || s.x || s.h || (s.c && s.c.length) || s.l || s.dg || s.db || s.api || s.im || s.m || (s.w && s.w.length) || (s.e && s.e.length) || s.sn || s.hn || s.vd || myShots.length;
   var body = null;
   var bodyId = 'sb-' + ctx.uid + '-' + no;
   var row = el('button', { type: 'button', cls: 'step-row', 'aria-expanded': hasBody ? 'false' : null, 'aria-controls': hasBody ? bodyId : null, disabled: hasBody ? null : true },
-    [el('span', { cls: 'step-int' }, [el('span', { cls: 'no', text: num + '.' }), s.n, s.a ? el('span', { cls: 'chip', style: 'margin-left:6px', text: 'as ' + s.a }) : null, s.i ? el('span', { cls: 'chip', style: 'margin-left:6px', text: '#' + s.i }) : null, s.b ? el('span', { cls: 'chip', style: 'margin-left:6px', text: s.b }) : null, s.h ? el('span', { cls: 'badge b-healed', style: 'margin-left:6px', text: 'healed' }) : null, s.so ? el('span', { cls: 'chip', style: 'margin-left:6px', text: 'soft' }) : null, el('span', { cls: 'sr-only', text: ', ' + code[1] })]),
+    [el('span', { cls: 'step-int' }, [el('span', { cls: 'no', text: num + '.' }), gs ? el('strong', { text: gs[0] + ' ' }) : null, s.n, gs && (gs[2] === 'undefined' || gs[2] === 'ambiguous') ? el('span', { cls: 'cat c-unknown', style: 'margin-left:6px', text: BIND[gs[2]] }) : null, s.a ? el('span', { cls: 'chip', style: 'margin-left:6px', text: 'as ' + s.a }) : null, s.i ? el('span', { cls: 'chip', style: 'margin-left:6px', text: '#' + s.i }) : null, s.b ? el('span', { cls: 'chip', style: 'margin-left:6px', text: s.b }) : null, s.h ? el('span', { cls: 'badge b-healed', style: 'margin-left:6px', text: 'healed' }) : null, s.so ? el('span', { cls: 'chip', style: 'margin-left:6px', text: 'soft' }) : null, el('span', { cls: 'sr-only', text: ', ' + code[1] })]),
      el('span', { cls: 'step-dur', text: fmtMs(s.d) }), svgIcon('chevron', 'chev')]);
   var line = el('div', { cls: 'step-line' }, [sicon(code[0], code[1]), row]);
   if (myShots.length) {
@@ -833,7 +835,7 @@ function stepNode(s, t, num, ctx) {
       s.c.forEach(function (c) { pc.appendChild(el('tr', null, [el('td', null, [el('code', { text: c[0] })]), el('td', null, [badge(c[1] ? 'passed' : 'failed', c[1] ? 'held' : 'failed')]), el('td', { text: c[2] })])); });
       kids.push(el('div', { cls: 'tbl-wrap' }, [el('table', null, [el('caption', { text: 'Post-conditions' }), el('thead', null, [el('tr', null, [el('th', { scope: 'col', text: 'Condition' }), el('th', { scope: 'col', text: 'Result' }), el('th', { scope: 'col', text: 'Actual' })])]), pc])]));
     }
-    var facts = dl([['Locator', s.l ? el('code', { text: s.l }) : null], ['Better locator', s.im ? el('span', null, [el('code', { text: s.im.suggested }), ' – ' + s.im.reason]) : null], ['Manual result', s.m ? s.m.verdict + (s.m.tester ? ' by ' + s.m.tester : '') : null], ['Observed', s.m ? s.m.actual : null], ['Notes', s.m ? s.m.notes : null]]);
+    var facts = dl([['Bound to', gs && gs[2] ? (BIND[gs[2]] || gs[2]) + (gs[3] ? ' \u00b7 ' + gs[3] : '') : null], ['Locator', s.l ? el('code', { text: s.l }) : null], ['Better locator', s.im ? el('span', null, [el('code', { text: s.im.suggested }), ' – ' + s.im.reason]) : null], ['Manual result', s.m ? s.m.verdict + (s.m.tester ? ' by ' + s.m.tester : '') : null], ['Observed', s.m ? s.m.actual : null], ['Notes', s.m ? s.m.notes : null]]);
     if (facts.childNodes.length) kids.push(facts);
     if (s.w && s.w.length) kids.push(el('ul', { cls: 'small', style: 'margin:0' }, s.w.map(function (w) { return el('li', { text: w }); })));
     if (s.api) s.api.forEach(function (a) { kids.push(apiView(a)); });
@@ -966,7 +968,11 @@ function renderDetail(t) {
       if (t.error && !fs) p.appendChild(el('div', { cls: 'err', role: 'note', style: 'margin-bottom:12px' }, [el('strong', { text: t.error.name || 'Error' }), pre(t.error.message, ' '), t.error.stack ? el('details', null, [el('summary', { text: 'Stack trace' }), pre(t.error.stack)]) : null]));
       var ol = el('ol', { cls: 'steps', 'aria-label': 'Steps of ' + t.name });
       var ctx = { n: 0, shots: shots, cueFor: cueFor, fs: fs, expand: [], uid: uid, showVideo: function (sec) { selectSub('video', true); if (videoCtl) videoCtl.seek(sec, true); } };
-      t.steps.forEach(function (s, i) { ol.appendChild(stepNode(s, t, String(i + 1), ctx)); });
+      if (t.gherkin) {
+        var gk = t.gherkin;
+        p.appendChild(el('p', { cls: 'small muted', style: 'margin:0 0 10px' }, [el('strong', { text: gk.keyword + ' ' }), gk.file + ':' + gk.line + (gk.examples ? ' \u00b7 ' + gk.examples : '')]));
+      }
+      t.steps.forEach(function (s, i) { ctx.g = t.gherkin && t.gherkin.steps[i] && s.n.indexOf(t.gherkin.steps[i][1]) >= 0 ? t.gherkin.steps[i] : null; ol.appendChild(stepNode(s, t, String(i + 1), ctx)); });
       p.appendChild(ol);
       ctx.expand.forEach(function (f) { f(); });
       if (!t.steps.length) p.appendChild(el('p', { cls: 'muted', text: 'No steps recorded.' }));

@@ -160,7 +160,12 @@ describe('HTML report: run-level analysis in the browser', () => {
     const failing = model.tests.filter((t) => ['failed', 'error', 'flaky'].includes(t.state));
     expect(listed.sort()).toEqual(failing.map((t) => `#tests/${encodeURIComponent(t.id)}`).sort());
     expect(await page.locator('#p-failures .cat-sec h3 .cat').allTextContents()).toEqual(expect.arrayContaining(['Product defect', 'Test data', 'Flaky']));
-    expect(await page.locator('#p-failures .cause-card').count()).toBe(await page.locator('#p-failures .cause-card .next').count());
+    // Each cause has its next step, once: on the cause, or on its category when every cause there shares it.
+    for (const sec of await page.locator('#p-failures .cat-sec').all()) {
+      const cards = await sec.locator('.cause-card').count();
+      const own = await sec.locator('.cause-card .next').count();
+      expect(own === cards || (own === 0 && (await sec.locator('.cat-next').count()) === 1)).toBe(true);
+    }
     // A category filter in the list (deep link), and grouping by category.
     await page.goto(pathToFileURL(out.html!).href + '#tests?cat=data');
     await expect.poll(() => page.locator('#f-cat').evaluate((x) => (x as HTMLSelectElement).value)).toBe('data');

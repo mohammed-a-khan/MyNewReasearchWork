@@ -95,6 +95,7 @@ const shortDay = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 };
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const isFail = (t: { state: TestState }) => t.state === 'failed' || t.state === 'error';
 const ADO_TAG = /^@?(TestCaseId|TestPlanId|TestSuiteId)\b/i;
 
@@ -208,14 +209,14 @@ export function outcomeDonut(m: ReportModel): string {
   return `<div class="outcome"><svg class="viz" viewBox="0 0 ${size} ${size}" role="img" aria-labelledby="donut-t"><title id="donut-t">Pass rate ${e(fmtPct(k.passRate))}. Share of tests: ${e(desc)}.</title><circle cx="${c}" cy="${c}" r="${(r + inner) / 2}" fill="none" class="track" stroke-width="${r - inner}"/>${arcs}<text x="${c}" y="${c + 2}" text-anchor="middle" class="viz-hero">${e(fmtPct(k.passRate, k.passRate === 1 || k.passRate === 0 ? 0 : 1))}</text><text x="${c}" y="${c + 22}" text-anchor="middle" class="viz-muted">pass rate</text></svg>${legend}</div>`;
 }
 
-function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: string }>, caption: string, first: string, more: number): string {
+function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: string }>, caption: string, first: string, more: number, noun = 'Tests', tab = 'Tests'): string {
   if (!rows.length) return '';
   const body = rows.map((r) => {
     const c = countsOf(r.tests);
     const failing = c.failed + c.error;
     return `<tr><th scope="row">${r.href ? `<a href="${e(r.href)}">${e(r.label)}</a>` : e(r.label)}</th><td class="num">${e(r.tests.length)}</td><td class="num${failing ? ' ink-failed' : ''}">${e(failing)}</td><td class="bar-cell bar-col">${stateBar(c)}</td><td class="num rate">${e(fmtPct(passRateOf(c), 0))}</td></tr>`;
   }).join('');
-  return `<div class="tbl-wrap"><table><caption class="sr-only">${e(caption)}</caption><thead><tr><th scope="col">${e(first)}</th><th scope="col" class="num">Tests</th><th scope="col" class="num">Failing</th><th scope="col" class="bar-col"><span class="sr-only">Outcome</span></th><th scope="col" class="num">Pass rate</th></tr></thead><tbody>${body}</tbody></table></div>${more > 0 ? `<p class="small muted" style="margin:8px 0 0">${e(more)} more in the Tests tab.</p>` : ''}`;
+  return `<div class="tbl-wrap"><table><caption class="sr-only">${e(caption)}</caption><thead><tr><th scope="col">${e(first)}</th><th scope="col" class="num">${e(noun)}</th><th scope="col" class="num">Failing</th><th scope="col" class="bar-col"><span class="sr-only">Outcome</span></th><th scope="col" class="num">Pass rate</th></tr></thead><tbody>${body}</tbody></table></div>${more > 0 ? `<p class="small muted" style="margin:8px 0 0">${e(more)} more in the ${e(tab)} tab.</p>` : ''}`;
 }
 
 function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): string {
@@ -240,13 +241,13 @@ function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): st
     : emptyState('Nothing executed', 'Every test was skipped.', false);
   const b = m.browsers;
   const browserCard = b
-    ? `<section class="card span-6" aria-labelledby="ov-browser"><div class="card-h"><h3 id="ov-browser">${e(L.sections.byBrowser)}</h3></div>${breakdownTable(b.names.map((n) => ({ label: `${n}${b.perBrowser[n].version ? ` ${b.perBrowser[n].version!.split('.')[0]}` : ''}`, tests: m.tests.filter((t) => t.browser === n) })), L.sections.byBrowser, 'Browser', 0)}</section>`
+    ? `<section class="card span-6" aria-labelledby="ov-browser"><div class="card-h"><h3 id="ov-browser">${e(L.sections.byBrowser)}</h3></div>${breakdownTable(b.names.map((n) => ({ label: `${n}${b.perBrowser[n].version ? ` ${b.perBrowser[n].version!.split('.')[0]}` : ''}`, tests: m.tests.filter((t) => t.browser === n) })), L.sections.byBrowser, 'Browser', 0, cap(L.tests), L.tabs.tests)}</section>`
     : '';
   return `${health}<div class="grid">
 <section class="card span-4" aria-labelledby="ov-outcome"><div class="card-h"><h3 id="ov-outcome">${e(L.sections.outcome)}</h3>${info('the pass rate', 'Passed tests (healed and flaky included) out of the tests that ran; skipped tests are not counted.')}</div>${outcomeDonut(m)}</section>
 <section class="card span-8" aria-labelledby="ov-reasons"><div class="card-h"><h3 id="ov-reasons" class="grow">${e(L.sections.topFailures)}</h3>${groups.length && !isHidden(m.brand, 'failures') ? `<a class="btn quiet" href="#failures">All causes</a>` : ''}</div>${fail.length || groups.length ? `<div>${reasons}</div>` : emptyState('No failures', `Every ${L.test} that ran passed.`)}</section>
-<section class="card span-6" aria-labelledby="ov-feature"><div class="card-h"><h3 id="ov-feature">${e(L.sections.byFeature)}</h3>${info('features', 'The first level of the suite: the feature of a Gherkin scenario, else the folder or file of the journey.')}</div>${breakdownTable(suites.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byFeature, 'Feature', suites.length - 10)}</section>
-<section class="card span-6" aria-labelledby="ov-tag"><div class="card-h"><h3 id="ov-tag">${e(L.sections.byTag)}</h3></div>${tags.length ? breakdownTable(tags.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byTag, 'Tag', tags.length - 10) : emptyState('No tags', 'Tag journeys (Tags: @smoke) to see results per tag.', false)}</section>
+<section class="card span-6" aria-labelledby="ov-feature"><div class="card-h"><h3 id="ov-feature">${e(L.sections.byFeature)}</h3>${info('features', 'The first level of the suite: the feature of a Gherkin scenario, else the folder or file of the journey.')}</div>${breakdownTable(suites.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byFeature, 'Feature', suites.length - 10, cap(L.tests), L.tabs.tests)}</section>
+<section class="card span-6" aria-labelledby="ov-tag"><div class="card-h"><h3 id="ov-tag">${e(L.sections.byTag)}</h3></div>${tags.length ? breakdownTable(tags.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byTag, 'Tag', tags.length - 10, cap(L.tests), L.tabs.tests) : emptyState('No tags', 'Tag journeys (Tags: @smoke) to see results per tag.', false)}</section>
 <section class="card span-6" aria-labelledby="ov-slow"><div class="card-h"><h3 id="ov-slow">${e(L.sections.slowest)}</h3></div>${slowList}</section>
 ${browserCard}
 </div>`;
@@ -282,15 +283,17 @@ function failuresPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): st
   const sections = order.filter((c) => byCat.has(c)).map((c) => {
     const list = byCat.get(c)!;
     const n = list.reduce((x, g) => x + g.tests.length, 0);
+    // One next step for the whole category when every cause in it has the same one.
+    const shared = list.length > 1 && list.every((g) => g.fix && g.fix === list[0].fix) ? list[0].fix : undefined;
     const cards = list.map((g) => {
       const first = g.tests[0];
       const tests = g.tests.slice(0, 50).map((t) => `<li><span class="sicon si-${t.state}" title="${e(STATE_LABEL[t.state])}">${icon(STATE_ICON[t.state])}</span><a href="${testHref(t.id)}" title="${e(t.name)}">${e(t.name)}</a>${t.failedStep ? `<span class="where" title="${e(t.failedStep)}">${e(t.failedStep)}</span>` : ''}</li>`).join('');
       return `<article class="cause-card${g.kind === 'flaky' ? ' flaky' : ''}" id="failures/${e(g.id)}" tabindex="-1" aria-labelledby="g-${e(g.id)}">
 <div class="group-h"><div class="grow"><p class="group-msg" id="g-${e(g.id)}">${e(g.message)}</p><div class="group-meta">${g.kind === 'failure' ? (g.known ? `<span>Seen before${g.firstSeenAt ? ` &middot; first on ${e(shortDay(g.firstSeenAt))}` : ''}</span>` : '<span class="cat c-new">new</span>') : ''}${first.signature ? `<span class="mono" title="Error signature">${e(first.signature.slice(0, 10))}</span>` : ''}<button type="button" class="btn quiet no-print" data-copy-bug="${e(first.id)}" style="min-height:26px;padding:2px 8px">${icon('copy')}Copy for bug</button></div></div><div class="group-n">${e(g.tests.length)}<small>${e(g.tests.length === 1 ? L.test : L.tests)}</small></div></div>
-${g.fix ? `<div class="next">${icon('bulb')}<div><strong>Next step:</strong> ${e(g.fix)}</div></div>` : ''}
+${g.fix && !shared ? `<div class="next">${icon('bulb')}<div><strong>Next step:</strong> ${e(g.fix)}</div></div>` : ''}
 <ul class="group-tests">${tests}${g.tests.length > 50 ? `<li class="muted">${e(g.tests.length - 50)} more: filter the Tests tab by this category.</li>` : ''}</ul></article>`;
     }).join('');
-    return `<section class="cat-sec" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${catChip(c)} <span class="muted small" style="font-weight:500">${e(plural(n, L.test, L.tests))} &middot; ${e(plural(list.length, 'cause', 'causes'))}</span></h3>${cards}</section>`;
+    return `<section class="cat-sec" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${catChip(c)} <span class="muted small" style="font-weight:500">${e(plural(n, L.test, L.tests))} &middot; ${e(plural(list.length, 'cause', 'causes'))}</span></h3>${shared ? `<div class="next cat-next">${icon('bulb')}<div><strong>Next step:</strong> ${e(shared)}</div></div>` : ''}${cards}</section>`;
   }).join('');
   return `<div class="panel-head"><p>Failing and flaky ${e(L.tests)} grouped by cause: similar errors form one group, each with the suggested next step. ${info('the categories', 'Product defect, test issue, environment, test data, flaky or needs review: decided by the triage when it is confident, otherwise by rules on the error text.')}</p></div>${sections}`;
 }

@@ -26,6 +26,7 @@ import { categoriseFailure, FAILURE_CATEGORIES, type CategoryVerdict, type Failu
 import { summariseLenses, type LensFile, type LensSummary } from './lenses.js';
 import { configSnapshot } from './config-snapshot.js';
 import { normalizeBrand, type ReportBrand } from './brand.js';
+import { scenarioEntry } from './bdd.js';
 
 export const REPORT_MODEL_VERSION = 2 as const;
 
@@ -165,6 +166,8 @@ export interface TestModel {
   /** Browser console: level, text, ms after the test started, step number, source location. */
   console?: Array<{ l: string; t: string; at?: number; step?: number; loc?: string }>;
   manual?: { type: string; testers: string[]; pending: number };
+  /** A Gherkin scenario: its feature file and line, keyword, Examples row, and each step's keyword, text and binding (definition / ez / undefined / ambiguous, location). */
+  gherkin?: { file: string; line: number; keyword: string; examples?: string; steps: Array<[string, string, string?, string?]> };
   steps: StepModel[];
 }
 
@@ -860,6 +863,20 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       else pk.skipped++;
     }
     previous = { runId: prevEntry.runId, startedAt: prevEntry.startedAt, kpis: pk };
+  }
+
+  // Gherkin scenarios: feature file, keyword, Examples row and step bindings, for the test detail.
+  const testById = results.some((j) => j.bdd) ? new Map(tests.map((x) => [x.id, x])) : undefined;
+  for (const j of testById ? results : []) {
+    if (!j.bdd) continue;
+    const t = testById!.get(j.journeyId);
+    if (!t) continue;
+    const sc = scenarioEntry(j);
+    t.gherkin = {
+      file: j.bdd.file, line: sc.line, keyword: sc.keyword,
+      ...(sc.examples ? { examples: `${sc.examples.name || 'Examples'}, row ${(sc.examples.row?.index ?? 0) + 1}` } : {}),
+      steps: sc.steps.map((s): [string, string, string?, string?] => [s.keyword, s.text, ...(s.match ? [s.match] : []), ...(s.location ? [s.location] : [])] as [string, string, string?, string?]),
+    };
   }
 
   // cross-browser matrix
