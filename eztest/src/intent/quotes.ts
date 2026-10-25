@@ -17,18 +17,29 @@ export interface Protected {
   quotes: string[];
 }
 
-/** Replace "double", 'single', `backtick` and “curly” quoted segments by placeholders. */
+/**
+ * Replace "double", 'single', `backtick` and “curly” quoted segments by placeholders. Inside a segment a backslash
+ * before its own quote character escapes it (`"\"approver\":\s*true"` holds `"approver":\s*true`); every other
+ * backslash is kept as written (regular expressions, Windows paths).
+ */
 export function protectQuotes(line: string): Protected {
   const quotes: string[] = [];
-  const keep = (content: string) => {
-    quotes.push(content);
+  const keep = (content: string, q: string) => {
+    quotes.push(q && content.includes('\\') ? content.split(`\\${q}`).join(q) : content);
     return `${OPEN}${quotes.length - 1}${CLOSE}`;
   };
-  // One left-to-right pass, so the outermost quote wins ('["EU"]' stays one segment).
+  // One left-to-right pass, so the outermost quote wins ('["EU"]' stays one segment). Each kind is tried with
+  // escapes first, then as before without them (a segment that ends in a backslash, "C:\temp\").
   const text = line.replace(
-    /"([^"]*)"|\u201c([^\u201d]*)\u201d|`([^`]*)`|(^|[\s(,=])'([^']*)'(?=$|[\s,.;:)])/g,
-    (_w, d?: string, c?: string, b?: string, pre?: string, sq?: string) =>
-      sq !== undefined ? (pre ?? '') + keep(sq) : keep((d ?? c ?? b) as string),
+    /"((?:[^"\\]|\\.)*)"|"([^"]*)"|\u201c([^\u201d]*)\u201d|`((?:[^`\\]|\\.)*)`|`([^`]*)`|(^|[\s(,=])(?:'((?:[^'\\]|\\.)*)'|'([^']*)')(?=$|[\s,.;:)])/g,
+    (_w, d?: string, dPlain?: string, c?: string, b?: string, bPlain?: string, pre?: string, sq?: string, sqPlain?: string) => {
+      if (d !== undefined) return keep(d, '"');
+      if (dPlain !== undefined) return keep(dPlain, '');
+      if (c !== undefined) return keep(c, '');
+      if (b !== undefined) return keep(b, '`');
+      if (bPlain !== undefined) return keep(bPlain, '');
+      return (pre ?? '') + (sq !== undefined ? keep(sq, "'") : keep(sqPlain ?? '', ''));
+    },
   );
   return { text, quotes };
 }

@@ -23,7 +23,7 @@ Expect the URL to contain "/checkout"          # post-condition of the Click
 ```
 
 - `#` starts a comment; blank lines are ignored. Indentation is free.
-- Text in quotes is kept exactly. `${name}` inserts a journey variable, a run variable, or anything captured earlier in the journey (`${order.lines.0.sku}` reaches inside captured values).
+- Text in quotes is kept exactly. Inside quotes a backslash before the same quote character is that quote: `Expect the page text matches "\"approver\":\s*true"` matches `"approver": true`, `'it\'s'` is `it's`; other backslashes stay as written (`"\d+ items"`). Text that holds one kind of quote can also be quoted with another (`'say "hi"'`). `${name}` inserts a journey variable, a run variable, or anything captured earlier in the journey (`${order.lines.0.sku}` reaches inside captured values).
 - Step options can follow in brackets: `Click the Save button [id=save optional timeout=5s risk=5]`.
   - `soft` makes a failure a soft one (the journey goes on and still fails at the end).
   - `retry=N every=500ms` repeats the step until its expectations hold ("retry until"), e.g. polling an API.
