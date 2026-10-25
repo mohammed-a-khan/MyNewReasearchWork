@@ -1,0 +1,4 @@
+# The PIM screens of OrangeHRM, shared by the journeys of the fixture.
+screen: Pim
+elements:
+  dateOfBirth: the "Date of Birth" field

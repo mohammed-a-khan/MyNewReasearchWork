@@ -83,6 +83,10 @@ describe.skipIf(!!skip)('OrangeHRM UI and its MariaDB together (real app)', () =
     const steps = flat(result.journeys[0].steps);
     expect(steps.find((s) => s.intent.startsWith('Expect a toast containing "Successfully Saved"'))?.status).toBe('passed');
     expect(steps.find((s) => s.intent.startsWith('Upload'))?.status).toBe('passed');
+    // The toast of the Personal Details page (a new document) is recorded too; the date picker is the element
+    // repository's @Pim.dateOfBirth.
+    expect(steps.find((s) => s.intent.startsWith('Expect a toast containing "Successfully Updated"'))?.status).toBe('passed');
+    expect(steps.find((s) => s.intent.startsWith('Pick 1990-04-15 in the @Pim.dateOfBirth date picker'))?.status).toBe('passed');
   }, 300_000);
 
   it('finds employees seeded with SQL in the PIM search; the UI table equals the SQL result set row by row', async () => {

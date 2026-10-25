@@ -833,8 +833,10 @@ E.dialogControl = function (el, a) {
 
 // ------------------------------------------------------------ toasts
 E.toastWatch = function (el, a) {
-  if (window.__ezcToasts && window.__ezcToasts.sel === a.selector) return true;
-  var seen = window.__ezcToasts = { sel: a.selector, items: [] };
+  // Watching once per document; a watcher counts only once its observer runs (an init script starts it before the
+  // document has an element, so the observer watches the document node itself).
+  if (window.__ezcToasts && window.__ezcToasts.sel === a.selector && window.__ezcToasts.observing) return true;
+  var seen = { sel: a.selector, items: [], observing: false };
   // A toast shown just before the app navigates ("Saved", then the details page loads) is kept in this tab's
   // sessionStorage for a minute, so the next page still knows it was seen.
   var KEY = '__eztest_toasts';
@@ -847,7 +849,9 @@ E.toastWatch = function (el, a) {
     hits.forEach(function (h) { push(text(h)); setTimeout(function () { push(text(h)); }, 30); });
   }
   new MutationObserver(function (ms) { ms.forEach(function (m) { if (m.type === 'childList') m.addedNodes.forEach(rec); else if (m.type === 'characterData' && m.target.parentElement) rec(m.target.parentElement.closest(a.selector) || document.createElement('i')); }); })
-    .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    .observe(document, { childList: true, subtree: true, characterData: true });
+  seen.observing = true;
+  window.__ezcToasts = seen;
   qa(document, a.selector).forEach(rec);
   return true;
 };

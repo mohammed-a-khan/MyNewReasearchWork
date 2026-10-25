@@ -25,7 +25,7 @@ Expect ${photoBytes} > 1000
 # Personal details: Vue oxd select dropdowns, a date input, radio buttons; two forms on the page have a Save button
 Choose "Nigerian" in the Nationality select box
 Choose "Married" in the "Marital Status" select box
-Pick 1990-04-15 in the "Date of Birth" date picker
+Pick 1990-04-15 in the @Pim.dateOfBirth date picker
 Check the "Female" radio button
 Click the "Save" button in the "Personal Details" section
 Expect a toast containing "Successfully Updated"

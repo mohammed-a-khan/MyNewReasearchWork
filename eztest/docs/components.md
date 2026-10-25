@@ -34,7 +34,7 @@ The in-page half of the layer is one static script (never user input) installed 
 | Tree | expand, collapse or select a path (`Europe > Germany > Berlin`), waiting for lazily loaded children; check a node | `expand` `collapse` `select` `expect` |
 | Tabs, accordion | select a tab (and see its panel), expand or collapse a section | `select` `expect`, `expand` `collapse` |
 | Dialog | click a control in a named or the top dialog, close a dialog, check that a dialog is open or closed, count open dialogs | `click` `close` `expectOpen` `expectClosed` `expectCount` |
-| Toast | watch for toasts (records every toast from then on, also after navigation: a toast shown just before the app loads the next page is kept for a minute in the tab's sessionStorage), expect a toast, expect none | `watch` `expect` `expectNone` |
+| Toast | watch for toasts (records every toast from then on, also after navigation: a toast shown just before the app loads the next page is kept for a minute in the tab's sessionStorage, and every new document of the browser context is watched from its first element), expect a toast, expect none | `watch` `expect` `expectNone` |
 | Rich text | replace, append, clear, check (contenteditable, Quill, CKEditor, TinyMCE inside its iframe) | `replace` `append` `clear` `expect` |
 | Slider | set one handle or both handles of a range slider (keyboard, or the range input), check | `set` `expect` |
 | Masked input | type keystroke by keystroke, verify the unmasked characters | `type` |
