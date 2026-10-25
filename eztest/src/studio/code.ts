@@ -26,6 +26,8 @@ export interface CodeJourneyInfo {
   tags: string[];
   requirements: string[];
   risk?: number;
+  /** The options object sets `id` (otherwise the id is the slug of the name). */
+  explicitId?: boolean;
 }
 
 const STR = String.raw`(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|\x60((?:[^\x60\\$]|\\.)*)\x60)`;
@@ -41,13 +43,14 @@ export function scanCodeJourneys(text: string): CodeJourneyInfo[] {
     const line = text.slice(0, at + m[0].indexOf('journey')).split('\n').length;
     // Options object (best effort): `id: '...'` and `tags: [...]` before the callback.
     const opts = m[4] ? text.slice(at + m[0].length, at + m[0].length + 600).split(/\basync\b|=>/)[0] : '';
-    const id = /\bid\s*:\s*['"`]([^'"`]+)['"`]/.exec(opts)?.[1] ?? slugify(name);
+    const explicit = /\bid\s*:\s*['"`]([^'"`]+)['"`]/.exec(opts)?.[1];
+    const id = explicit ?? slugify(name);
     const tagsText = /\btags\s*:\s*\[([^\]]*)\]/.exec(opts)?.[1] ?? '';
     const tags = [...tagsText.matchAll(/['"`]@?([^'"`]+)['"`]/g)].map((t) => t[1]);
     const reqText = /\brequirements\s*:\s*\[([^\]]*)\]/.exec(opts)?.[1] ?? '';
     const requirements = [...reqText.matchAll(/['"`]([^'"`]+)['"`]/g)].map((t) => t[1]);
     const risk = Number(/\brisk\s*:\s*([1-5])\b/.exec(opts)?.[1] ?? NaN);
-    out.push({ id, name, line, tags, requirements, ...(Number.isFinite(risk) ? { risk } : {}) });
+    out.push({ id, name, line, tags, requirements, ...(Number.isFinite(risk) ? { risk } : {}), ...(explicit ? { explicitId: true } : {}) });
   }
   return out;
 }
