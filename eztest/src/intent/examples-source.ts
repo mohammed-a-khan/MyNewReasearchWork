@@ -12,6 +12,7 @@
  * text case-insensitively, and numerically when both sides are numbers.
  * Values may be quoted; `${var}` in a value is resolved at run time.
  */
+import { checkExpression } from '../core/expr.js';
 import { protectQuotes, quoteText } from './quotes.js';
 
 /** Where an Examples table comes from (a data file or a named query). */
@@ -30,12 +31,23 @@ export interface ExamplesSource {
   sheet?: string;
   /** Row filter, in the filter language above. */
   where?: string;
+  /**
+   * Derived columns (`with ref = unique("VIS-"), due = addDays(today(), 14)`): safe expressions evaluated
+   * once per journey attempt, with the row's values as variables.
+   */
+  derive?: Array<{ name: string; expr: string }>;
+  /**
+   * Live data per row (`resolve with query "FIND_PET" on clinic with state=<requiredState> as pet when dataMode = live`):
+   * for rows matching `when` (all rows without it), the query's first row joins the row's values as `<as>.<column>`.
+   * No row is a data problem of that row, unless `keepRowValues` (`or keep row values`).
+   */
+  resolve?: { query: string; connection?: string; binds: Record<string, string>; as: string; when?: string; keepRowValues?: boolean };
 }
 
-export type FilterOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | '~';
+export type FilterOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | '~' | '^=' | '$=' | 'in';
 
 export type RowFilter =
-  | { type: 'cmp'; column: string; op: FilterOp; value: string }
+  | { type: 'cmp'; column: string; op: FilterOp; value: string; values?: string[] }
   | { type: 'and' | 'or'; left: RowFilter; right: RowFilter }
   | { type: 'not'; inner: RowFilter };
 
@@ -46,7 +58,7 @@ export class FilterSyntaxError extends Error {
   }
 }
 
-type Tok = { t: 'lp' } | { t: 'rp' } | { t: 'and' } | { t: 'or' } | { t: 'not' } | { t: 'op'; v: FilterOp } | { t: 'word'; v: string; quoted: boolean };
+type Tok = { t: 'lp' } | { t: 'rp' } | { t: 'comma' } | { t: 'and' } | { t: 'or' } | { t: 'not' } | { t: 'op'; v: FilterOp } | { t: 'word'; v: string; quoted: boolean };
 
 function tokenize(src: string): Tok[] {
   const out: Tok[] = [];
@@ -57,9 +69,10 @@ function tokenize(src: string): Tok[] {
     if (/\s/.test(c)) { i++; continue; }
     if (c === '(') { out.push({ t: 'lp' }); i++; continue; }
     if (c === ')') { out.push({ t: 'rp' }); i++; continue; }
+    if (c === ',') { out.push({ t: 'comma' }); i++; continue; }
     if (src.startsWith('&&', i)) { out.push({ t: 'and' }); i += 2; continue; }
     if (src.startsWith('||', i)) { out.push({ t: 'or' }); i += 2; continue; }
-    const op = /^(?:==|!=|<>|>=|<=|=|>|<|~)/.exec(src.slice(i));
+    const op = /^(?:==|!=|<>|>=|<=|\^=|\$=|=|>|<|~)/.exec(src.slice(i));
     if (op) {
       const v = op[0] === '==' ? '=' : op[0] === '<>' ? '!=' : op[0];
       out.push({ t: 'op', v: v as FilterOp });
@@ -75,7 +88,7 @@ function tokenize(src: string): Tok[] {
     }
     // A bare word runs until whitespace, a parenthesis or an operator character.
     let j = i;
-    while (j < src.length && !/[\s()=!<>~]/.test(src[j])) {
+    while (j < src.length && !/[\s()=!<>~,]/.test(src[j]) && !((src[j] === '^' || src[j] === '$') && src[j + 1] === '=')) {
       if (src[j] === '$' && src[j + 1] === '{') {
         const close = src.indexOf('}', j);
         j = close < 0 ? src.length : close + 1;
@@ -133,7 +146,25 @@ export function parseRowFilter(text: string): RowFilter {
     if (t.t !== 'word') throw err(`expected a column name, got "${t.t === 'op' ? t.v : t.t}"`);
     p++;
     const op = peek();
-    if (op?.t !== 'op') throw err(`expected an operator (= != > < >= <= ~) after "${t.v}"`);
+    // `status in (open, "on hold")`: any of the listed values.
+    if (op?.t === 'word' && !op.quoted && /^in$/i.test(op.v)) {
+      p++;
+      if (peek()?.t !== 'lp') throw err(`expected "(" after "${t.v} in"`);
+      p++;
+      const values: string[] = [];
+      for (;;) {
+        const v = peek();
+        if (v?.t !== 'word') throw err(`expected a value in "${t.v} in (...)"`);
+        values.push(v.v);
+        p++;
+        const sep = peek();
+        if (sep?.t === 'comma') { p++; continue; }
+        if (sep?.t === 'rp') { p++; break; }
+        throw err(`expected "," or ")" in "${t.v} in (...)"`);
+      }
+      return { type: 'cmp', column: t.v, op: 'in', value: values.join(', '), values };
+    }
+    if (op?.t !== 'op') throw err(`expected an operator (= != > < >= <= ~ ^= $= in) after "${t.v}"`);
     p++;
     const v = peek();
     if (v?.t !== 'word') throw err(`expected a value after "${t.v} ${op.v}"`);
@@ -185,6 +216,14 @@ export function matchRow(f: RowFilter, row: Record<string, unknown>, resolve: (s
       const { found, value } = rowValue(row, f.column);
       if (!found) return false;
       const a = cell(value);
+      if (f.op === 'in') {
+        const an = num(a);
+        return (f.values ?? [f.value]).some((x) => {
+          const b = resolve(x);
+          const bn = num(b);
+          return an !== undefined && bn !== undefined ? an === bn : a.toLowerCase() === b.toLowerCase();
+        });
+      }
       const b = resolve(f.value);
       const an = num(a);
       const bn = num(b);
@@ -193,6 +232,8 @@ export function matchRow(f: RowFilter, row: Record<string, unknown>, resolve: (s
         case '=': return numeric ? an === bn : a.toLowerCase() === b.toLowerCase();
         case '!=': return numeric ? an !== bn : a.toLowerCase() !== b.toLowerCase();
         case '~': return a.toLowerCase().includes(b.toLowerCase());
+        case '^=': return a.toLowerCase().startsWith(b.toLowerCase());
+        case '$=': return a.toLowerCase().endsWith(b.toLowerCase());
         case '>': return numeric ? an > bn : a > b;
         case '<': return numeric ? an < bn : a < b;
         case '>=': return numeric ? an >= bn : a >= b;
@@ -204,13 +245,13 @@ export function matchRow(f: RowFilter, row: Record<string, unknown>, resolve: (s
 }
 
 function valueText(v: string): string {
-  return /^[^\s()=!<>~"'`]+$/.test(v) && !/^(?:and|or|not)$/i.test(v) ? v : quoteText(v);
+  return /^[^\s()=!<>~,"'`]+$/.test(v) && !/[\^$]=/.test(v) && !/^(?:and|or|not|in)$/i.test(v) ? v : quoteText(v);
 }
 
 /** Canonical text of a filter (parses back to the same tree). */
 export function rowFilterToText(f: RowFilter, parent?: RowFilter['type']): string {
   switch (f.type) {
-    case 'cmp': return `${valueText(f.column)} ${f.op} ${valueText(f.value)}`;
+    case 'cmp': return f.op === 'in' ? `${valueText(f.column)} in (${(f.values ?? [f.value]).map(valueText).join(', ')})` : `${valueText(f.column)} ${f.op} ${valueText(f.value)}`;
     case 'not': return `not ${rowFilterToText(f.inner, 'not')}`;
     default: {
       const s = `${rowFilterToText(f.left, f.type)} ${f.type} ${rowFilterToText(f.right, f.type)}`;
@@ -234,19 +275,44 @@ export function parseExamplesSource(line: string): ExamplesSource {
   const t = line.trim();
   const m = EXAMPLES_FROM.exec(t);
   const body = m ? m[1] : t.replace(/^from\s+/i, '');
-  const { text, quotes } = protectQuotes(body);
+  const prot = protectQuotes(body);
+  let text = prot.text;
+  const quotes = prot.quotes;
   const Q = String.raw`⟦(\d+)⟧`;
   const unq = (i: string) => quotes[Number(i)] ?? '';
-  // Split off "where <filter>" (the filter keeps its own quotes).
+  const requote = (s: string) => s.replace(/⟦(\d+)⟧/g, (_x, i: string) => quoteText(unq(i))).trim();
+  // "resolve with query ..." (live data per row) comes last.
+  let resolveText: string | undefined;
+  const rv = /\s+resolve\s+with\s+(?:the\s+)?query\s+/i.exec(text);
+  if (rv) {
+    resolveText = text.slice(rv.index + rv[0].length);
+    text = text.slice(0, rv.index);
+  }
+  // Split off "where <filter>" (the filter keeps its own quotes), then derived columns ("with ref = unique(...)").
   const w = /\s+where\s+/i.exec(text);
-  const head = w ? text.slice(0, w.index) : text;
+  let head = w ? text.slice(0, w.index) : text;
   let where: string | undefined;
+  let deriveText: string | undefined;
   if (w) {
-    where = text.slice(w.index + w[0].length).replace(/⟦(\d+)⟧/g, (_x, i: string) => quoteText(unq(i))).trim();
+    let filter = text.slice(w.index + w[0].length);
+    const d = /\s+with\s+(?=[A-Za-z_][\w.-]*\s*=)/i.exec(filter);
+    if (d) {
+      deriveText = filter.slice(d.index + d[0].length);
+      filter = filter.slice(0, d.index);
+    }
+    where = requote(filter);
     parseRowFilter(where); // validate now: errors carry the filter text
   }
+  // In the head: a query's own "with" binds come first; a data file has none, so its "with" is derived columns.
+  const withs = head.split(/\s+with\s+/i);
+  head = withs[0];
+  const isQuery = /^\s*query\s/i.test(head);
+  const paramsText = isQuery && withs.length > 1 ? withs[1] : undefined;
+  const headDerive = withs.slice(isQuery ? 2 : 1);
+  if (headDerive.length > 1 || (headDerive.length && deriveText !== undefined)) throw new Error('Examples: give the derived columns once ("with name = expression, ...")');
+  if (headDerive.length) deriveText = headDerive[0];
   const src: ExamplesSource = {};
-  let rest = head.trim();
+  let rest = (paramsText !== undefined ? `${head} with ${paramsText}` : head).trim();
   let mm: RegExpExecArray | null;
   if ((mm = new RegExp(String.raw`^(?:data|file|data\s+file)\s+${Q}`, 'i').exec(rest))) {
     src.from = unq(mm[1]);
@@ -273,7 +339,57 @@ export function parseExamplesSource(line: string): ExamplesSource {
   }
   if (src.path && !src.from) throw new Error('Examples: "path" applies to data files only');
   if (where !== undefined) src.where = where;
+  if (deriveText !== undefined) src.derive = parseDerived(deriveText, requote);
+  if (resolveText !== undefined) src.resolve = parseResolve(resolveText, unq, requote);
   return src;
+}
+
+/** Split at commas outside parentheses and brackets (quoted text is already protected). */
+function splitTopLevel(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const c of s) {
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    if (c === ',' && depth <= 0) {
+      out.push(cur);
+      cur = '';
+    } else cur += c;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
+/** `ref = unique("VIS-"), due = addDays(today(), 14)` */
+function parseDerived(text: string, requote: (s: string) => string): Array<{ name: string; expr: string }> {
+  const out: Array<{ name: string; expr: string }> = [];
+  for (const part of splitTopLevel(text)) {
+    const m = /^\s*([A-Za-z_][\w.-]*)\s*=\s*(.+?)\s*$/.exec(part);
+    if (!m) throw new Error(`Examples: expected "name = expression" in "with", got "${requote(part)}"`);
+    const expr = requote(m[2]);
+    const problem = checkExpression(expr);
+    if (problem) throw new Error(`Examples: derived column ${m[1]}: ${problem}`);
+    out.push({ name: m[1], expr });
+  }
+  return out;
+}
+
+/** `"FIND_PET" on clinic with state=<requiredState> as pet when dataMode = live or keep row values` */
+function parseResolve(text: string, unq: (i: string) => string, requote: (s: string) => string): NonNullable<ExamplesSource['resolve']> {
+  const m = new RegExp(String.raw`^(?:⟦(\d+)⟧|([A-Za-z_][\w.-]*))(?:\s+(?:on|against|using)\s+([\w.-]+))?(?:\s+with\s+(.+?))?\s+as\s+([A-Za-z_]\w*)(?:\s+when\s+(.+?))?(\s+or\s+keep\s+(?:the\s+)?row(?:'s)?\s+values)?\s*$`, 'i').exec(text.trim());
+  if (!m) throw new Error(`Examples: expected 'resolve with query "NAME" on <connection> [with name=value, ...] as <name> [when <filter>] [or keep row values]', got "resolve with query ${requote(text)}"`);
+  const query = m[1] !== undefined ? unq(m[1]) : m[2];
+  if (!/^[A-Za-z_][\w.-]*$/.test(query)) throw new Error(`Examples: resolve with query "${query}": not a catalogue query name`);
+  const binds: Record<string, string> = {};
+  for (const part of m[4] ? splitTopLevel(m[4]) : []) {
+    const kv = /^\s*:?([A-Za-z_][\w.-]*)\s*=\s*(?:⟦(\d+)⟧|(\S+))\s*$/.exec(part);
+    if (!kv) throw new Error(`Examples: expected name=value in "resolve with query ... with", got "${requote(part)}"`);
+    binds[kv[1]] = kv[2] !== undefined ? unq(kv[2]) : kv[3];
+  }
+  const when = m[6] !== undefined ? requote(m[6]) : undefined;
+  if (when !== undefined) parseRowFilter(when);
+  return { query, ...(m[3] ? { connection: m[3] } : {}), binds, as: m[5], ...(when !== undefined ? { when } : {}), ...(m[7] ? { keepRowValues: true } : {}) };
 }
 
 /** Render a source as an `Examples: from ...` line. */
@@ -285,6 +401,12 @@ export function examplesSourceToText(src: ExamplesSource): string {
   if (src.path) parts.push('path', quoteText(src.path));
   if (src.params && Object.keys(src.params).length) parts.push('with', Object.entries(src.params).map(([k, v]) => `${k}=${quoteText(v)}`).join(', '));
   if (src.where) parts.push('where', src.where);
+  if (src.derive?.length) parts.push('with', src.derive.map((d) => `${d.name} = ${d.expr}`).join(', '));
+  if (src.resolve) {
+    const r = src.resolve;
+    const binds = Object.entries(r.binds).map(([k, v]) => `${k}=${/^[^\s,"']+$/.test(v) ? v : quoteText(v)}`).join(', ');
+    parts.push('resolve with query', quoteText(r.query), ...(r.connection ? ['on', r.connection] : []), ...(binds ? ['with', binds] : []), 'as', r.as, ...(r.when ? ['when', r.when] : []), ...(r.keepRowValues ? ['or keep row values'] : []));
+  }
   return parts.join(' ');
 }
 

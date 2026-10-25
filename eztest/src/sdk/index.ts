@@ -15,7 +15,10 @@
  *
  * See docs/sdk.md.
  */
-export { journey, step, run, soft, codeStep, journeyInstance, todo, sdk } from './journey.js';
+export { journey, step, run, soft, poll, codeStep, journeyInstance, todo, sdk } from './journey.js';
+export type { PollOptions } from './journey.js';
+export { cleanup } from './cleanup.js';
+export type { CleanupSurface, CleanupQueryOptions, CleanupSnapshotOptions } from './cleanup.js';
 export { screen, el, child, nth, selectorSpec, toTarget, isScreenElement, within, inRow, below, above, rightOf, leftOf, near, screenElementId } from './screen.js';
 export type { Screen, ScreenSpec, ScreenElement, ElementSpec, ElementInput, LocatorSpec, TargetInput, LayoutSpec } from './screen.js';
 export { ui } from './ui.js';
@@ -28,7 +31,7 @@ export type { ApiSurface, ApiResponse, ApiOptions } from './api.js';
 export { graphql } from './graphql.js';
 export type { GraphQLSurface, GraphQLOptions, GraphQLSubscriptionHandle } from './graphql.js';
 export { db } from './db.js';
-export type { DbSurface, DbOptions, BindValue } from './db.js';
+export type { DbSurface, DbOptions, BindValue, Statement, TransactionOptions } from './db.js';
 export { data } from './data.js';
 export type { DataSurface, LeaseOptions, RowFilter } from './data.js';
 export { files, toCsv } from './files.js';

@@ -323,6 +323,11 @@ export const ActionType = z.enum([
   // -------------------------------------------- shared test data (see docs/shared-data.md)
   /** Shared store and data pools: args.op save | load | delete | poolAdd | poolTake | poolCount | poolSeed (src/store). */
   'store',
+  // -------------------------------------------- cleanup and transactions (see docs/test-data.md, docs/databases.md)
+  /** Register a cleanup action run after the journey: args.op query | snapshot (with args.restore). */
+  'cleanup',
+  /** "In a transaction on <alias>": the child query/execute steps run in one transaction (args.connection). */
+  'transaction',
 ]);
 export type ActionType = z.infer<typeof ActionType>;
 
@@ -558,6 +563,8 @@ export const BddMeta = z.object({
   glue: z.array(z.string()).default([]),
   /** Steps without a definition may run as EZTest plain-English steps. */
   fallback: z.boolean().default(true),
+  /** Interpolate definition arguments, data table cells and doc strings before a definition runs (config bdd.resolveArguments). */
+  resolveArguments: z.boolean().default(true),
   worldParameters: z.record(z.string(), z.unknown()).optional(),
 });
 export type BddMeta = z.infer<typeof BddMeta>;
@@ -667,6 +674,17 @@ export const Journey = z.object({
     path: z.string().optional(),
     sheet: z.string().optional(),
     where: z.string().optional(),
+    /** Derived columns: name = safe expression, evaluated once per journey attempt. */
+    derive: z.array(z.object({ name: z.string().min(1), expr: z.string().min(1) })).optional(),
+    /** Live data per row from a named query (`resolve with query ... as pet`). */
+    resolve: z.object({
+      query: z.string().min(1),
+      connection: z.string().optional(),
+      binds: z.record(z.string(), z.string()).default({}),
+      as: z.string().regex(/^[A-Za-z_]\w*$/),
+      when: z.string().optional(),
+      keepRowValues: z.boolean().optional(),
+    }).optional(),
   }).optional(),
 });
 export type Journey = z.infer<typeof Journey>;

@@ -16,6 +16,7 @@ import {
   importTestCases,
   listConfigurations,
   parseAdoTags,
+  loadTestCaseTagMap,
   pipelineLinksFromEnv,
   publishRun,
   queryRequirements,
@@ -151,6 +152,7 @@ export async function publishRunToAdo(loaded: LoadedConfig, o: AdoRunPublishOpti
   try {
     summary = await publishRun(run, {
       client,
+      ...(cfg.ado.testCaseTag ? { testCaseTag: await loadTestCaseTagMap(cfg.ado.testCaseTag, o.cwd) } : {}),
       planId: o.plan ?? ac.testPlanId,
       suiteId: o.suite ?? ac.testSuiteId,
       runName: o.runName,

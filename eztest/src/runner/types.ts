@@ -26,8 +26,12 @@ export interface StepContext {
   evidence: EvidenceWriter;
   /** Current interpolation variables (journey < run < ledger). */
   vars(): Record<string, unknown>;
-  /** Interpolate ${var} placeholders with `vars()`. */
+  /** Interpolate ${var} placeholders and inline expressions (`${unique("VIS-")}`) with `vars()`. */
   interpolate(s: string): string;
+  /** The attempt's inline-expression record (each expression evaluated once per attempt); set by the web runner. */
+  expressions?: import('./inline-values.js').ExpressionRecord;
+  /** Cleanup actions of the attempt (run in reverse after the journey); set by the web runner. */
+  cleanup?: import('./cleanup.js').AttemptCleanup;
   /** Tabs, frames, dialogs and recorded browser events of this journey attempt (set by the runner). */
   session?: BrowserSession;
   /**
@@ -68,6 +72,10 @@ export interface DbHandler {
   namedQuery?(name: string, connection: string, call: { binds?: Record<string, string | number | boolean | null>; params?: Array<string | number | boolean | null> }): Promise<{ connection: string; sql: string; params: unknown[] }>;
   /** Call a stored procedure with OUT parameters; returns the OUT values by name. */
   callProcedure?(connection: string, name: string, params: Array<string | number | boolean | null>, out: Array<{ name: string; type: string }>): Promise<Record<string, unknown>>;
+  /** Run `fn` in one transaction on one connection of the alias: commit when it resolves, roll back when it throws. */
+  transaction?<T>(connection: string, fn: (tx: { query(sql: string, params: DbQueryParams): Promise<Array<Record<string, unknown>>> }) => Promise<T>): Promise<T>;
+  /** The `:bind` names a catalogue query declares (snapshot / restore cleanups bind only those). */
+  queryParams?(name: string): Promise<string[]> | string[];
 }
 /** Finds or creates test data for a data need; the record lands in the ledger under `need.as`. */
 export type DataHandler = (need: DataNeed, ctx: StepContext) => Promise<Record<string, unknown>>;
@@ -170,8 +178,15 @@ export interface RunOptions {
   workers?: 'inline' | 'process';
   /** Builds the handler options in each worker process (the engine sets it; see src/runner/workers/protocol.ts). */
   workerSetup?: import('./workers/protocol.js').WorkerSetup;
+  /** Folder of the cleanup journal for registered cleanup queries (the engine sets `.eztest/cleanup`). */
+  cleanupDir?: string;
   /** Register a secret value found in a worker process with the run's masking. */
   addSecret?: (value: string) => void;
+  /**
+   * Resolve a `secret://store/key` reference or an `ENC(...)` value used in a step argument, a data table cell
+   * or an Examples value (Gherkin step definitions); the engine wires it to the secret stores and the master key.
+   */
+  resolveSecret?: (ref: string) => Promise<string>;
   /** The secret values the run masks now (handed to worker processes). */
   knownSecrets?: () => string[];
   /** Journey-level retries. Default 0. */
@@ -205,6 +220,10 @@ export interface RunOptions {
   /** Live step debugger; forces concurrency 1. */
   debug?: DebugController;
   variables?: Record<string, string>;
+  /** Built-in run variables (`${env}`, `${project}`): below the journey's own and the run's variables of the same name. */
+  builtinVariables?: Record<string, string>;
+  /** Console messages matching one of these regular expressions are noise: not counted by "no console errors" checks or diagnostics. */
+  consoleIgnore?: string[];
   events?: EventBus;
   logger?: Logger;
   healer?: Healer;

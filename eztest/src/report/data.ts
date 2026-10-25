@@ -162,7 +162,7 @@ export interface TestModel {
   /** Network entries of the failing step (or the last ones before the failure). */
   network?: Array<{ method: string; url: string; status: number; ms?: number; failure?: string }>;
   /** Browser console: level, text, ms after the test started, step number, source location. */
-  console?: Array<{ l: string; t: string; at?: number; step?: number; loc?: string }>;
+  console?: Array<{ l: string; t: string; at?: number; step?: number; loc?: string; ig?: number }>;
   manual?: { type: string; testers: string[]; pending: number };
   steps: StepModel[];
 }
@@ -329,7 +329,7 @@ export interface StepArtifacts {
   /** journeyId -> network entries of the journey's browser log. */
   network: Map<string, NetworkEntry[]>;
   /** journeyId -> browser console entries (level, text, time, step). */
-  console: Map<string, Array<{ l: string; t: string; at?: number; stepId?: string; loc?: string }>>;
+  console: Map<string, Array<{ l: string; t: string; at?: number; stepId?: string; loc?: string; ig?: number }>>;
   /** journeyId -> video chapters [start s, end s, text]. */
   chapters?: Map<string, Array<[number, number, string]>>;
   /** Evidence id -> file size and chain position (from the manifest). */

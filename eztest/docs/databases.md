@@ -203,6 +203,35 @@ back as rows.
 Catalogue queries are described below. The full list of phrasings is in
 [ez-language.md](ez-language.md#databases).
 
+### Transactions
+
+```
+In a transaction on clinic
+  Run query "INSERT_VISIT" on clinic with visit_id=${visitId}, pet_id=${petId}, reason="check-up" as visit
+  Run query "INSERT_INVOICE" on clinic with visit_id=${visitId}, amount=45 as invoice
+End
+```
+
+The query steps inside the block run on one connection of the alias, in one transaction, on every
+driver (SQLite, PostgreSQL, SQL Server, Oracle, MySQL and MariaDB): committed when every step passed,
+rolled back when one failed (the block then fails with that step's error). The block's result says
+`committed` or `rolled back` and how many statements ran, and its evidence lists each statement with the
+number of bound values (never the values). Steps that do not use the alias run as usual. In code:
+`db.transaction(async (tx) => ..., { connection })` and `db.executeAll([...], { connection })`
+([sdk.md](sdk.md#transactions)).
+
+### Cleanup queries
+
+```
+Snapshot query "PET_ROW" on clinic with pet_id=${petId} and restore it with "RESTORE_PET" after the journey
+On cleanup run query "DELETE_VISIT" on clinic with visit_id=${visitId}
+```
+
+Both register an action that runs after the journey, newest first, also when it failed. They are written
+to the cleanup journal first, so the next run's orphan sweep runs them when this run crashed
+([reliability.md](reliability.md#cleanup-that-survives-crashes)). `RESTORE_PET` gets the snapshot row's
+values for its `:binds`.
+
 ## The named-query catalogue
 
 Teams with hundreds of queries keep them as files instead of strings in code.

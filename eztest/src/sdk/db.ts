@@ -12,6 +12,7 @@
  */
 import type { DbQuery } from '../core/index.js';
 import { literal, run, show, tempKey } from './internal.js';
+import { callSite } from './callsite.js';
 import { currentHost } from './runtime.js';
 import type { Row } from './types.js';
 
@@ -129,9 +130,61 @@ function surface(connection?: string, base: DbOptions = {}) {
 
 type Surface = ReturnType<typeof surface>;
 
-export interface DbSurface extends Surface {
-  /** The same surface bound to a connection alias. */
-  on(connection: string): Surface;
+/** One statement of `db.executeAll`: a catalogue query and its values. */
+export type Statement = { query: string; params?: Record<string, BindValue> | BindValue[] } | [string, (Record<string, BindValue> | BindValue[])?];
+
+export interface TransactionOptions {
+  /** Connection alias the transaction runs on (default: the surface's `db.on(alias)`). */
+  connection?: string;
 }
 
-export const db: DbSurface = { ...surface(), on: (connection: string) => surface(connection) };
+interface TransactionSurface {
+  /**
+   * Run `fn` in one transaction: every query and execute on the connection inside (through `tx` or `db`)
+   * shares it. Committed when `fn` resolves, rolled back when a step fails or `fn` throws. The statements
+   * are the evidence of the commit (or rollback) step.
+   */
+  transaction<T>(fn: (tx: Surface) => Promise<T>, o?: TransactionOptions): Promise<T>;
+  /** Run catalogue queries in order in one transaction; returns each one's rows. */
+  executeAll<T extends object = Row>(statements: Statement[], o?: TransactionOptions): Promise<Array<{ rows: T[]; rowCount: number }>>;
+}
+
+export interface DbSurface extends Surface, TransactionSurface {
+  /** The same surface bound to a connection alias. */
+  on(connection: string): Surface & TransactionSurface;
+}
+
+function transactions(bound?: string): TransactionSurface {
+  const conn = (o?: TransactionOptions) => {
+    const c = o?.connection ?? bound;
+    if (!c) throw new TypeError('db.transaction needs a connection: db.transaction(fn, { connection: "alias" }) or db.on("alias").transaction(fn)');
+    return c;
+  };
+  const transaction = async <T>(fn: (tx: Surface) => Promise<T>, o?: TransactionOptions): Promise<T> => {
+    const c = conn(o);
+    const host = currentHost('db.transaction');
+    if (!host.transaction) throw new TypeError("db.transaction needs EZTest's runner");
+    const tx = surface(c);
+    return host.transaction(c, () => fn(tx), callSite());
+  };
+  return {
+    transaction,
+    async executeAll<T extends object = Row>(statements: Statement[], o?: TransactionOptions) {
+      if (!Array.isArray(statements)) throw new TypeError('db.executeAll needs a list of statements: [{ query: "INSERT_VISIT", params: { ... } }, ...]');
+      return transaction(async (tx) => {
+        const out: Array<{ rows: T[]; rowCount: number }> = [];
+        for (const st of statements) {
+          const [name, params] = Array.isArray(st) ? st : [st.query, st.params];
+          out.push(await tx.execute<T>(name, params));
+        }
+        return out;
+      }, o);
+    },
+  };
+}
+
+export const db: DbSurface = {
+  ...surface(),
+  ...transactions(),
+  on: (connection: string) => ({ ...surface(connection), ...transactions(connection) }),
+};

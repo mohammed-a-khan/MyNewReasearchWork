@@ -45,6 +45,50 @@ import { bddRecord } from './bdd-run.js';
 import { applyJourneyClock, clockVars, usesClock } from './clock.js';
 import { manualSummary } from './manual.js';
 import { adaptiveTimeout, startLoadSampling, type Probeable } from './reliability/load.js';
+import { AttemptCleanup, cleanupJournal } from './cleanup.js';
+import { consoleNoise } from './console-noise.js';
+import { EXPRESSIONS_KEY, inlineExpressions, interpolateInline, type ExpressionRecord } from './inline-values.js';
+
+/**
+ * Row values named `pet.name` (the live data of `resolve with query ... as pet`) are also readable as `${pet.name}`:
+ * dotted keys become nested values under their first part, when that name is not a value of its own.
+ */
+function nestDotted(vars: Record<string, unknown>): Record<string, unknown> {
+  const dotted = Object.keys(vars).filter((k) => k.includes('.'));
+  if (!dotted.length) return vars;
+  const out: Record<string, unknown> = { ...vars };
+  for (const k of dotted) {
+    const parts = k.split('.');
+    let cur = out;
+    let ok = true;
+    for (const p of parts.slice(0, -1)) {
+      const next = cur[p];
+      if (next === undefined) cur[p] = {};
+      else if (!next || typeof next !== 'object') {
+        ok = false;
+        break;
+      }
+      cur = cur[p] as Record<string, unknown>;
+    }
+    if (ok && cur[parts[parts.length - 1]] === undefined) cur[parts[parts.length - 1]] = vars[k];
+  }
+  return out;
+}
+
+/** Variables whose text holds an inline expression, with the expression evaluated (once per attempt, through `rec`). */
+function withInlineValues(base: Record<string, unknown>, scope: () => Record<string, unknown>, rec: ExpressionRecord): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const [k, v] of Object.entries(base)) {
+    if (typeof v !== 'string' || !v.includes('${') || !inlineExpressions(v).length) continue;
+    out ??= { ...base };
+    try {
+      out[k] = interpolateInline(v, scope(), rec);
+    } catch {
+      // A failing expression stays as written; the step that uses it reports the error.
+    }
+  }
+  return out ?? base;
+}
 
 export interface JourneyRunEnv extends StepRuntime {
   runId: string;
@@ -79,23 +123,24 @@ interface NetEntry {
   actor?: string;
 }
 
-type ConsoleEntry = { type: string; text: string; at: string; actor?: string };
+type ConsoleEntry = { type: string; text: string; at: string; actor?: string; ignored?: boolean };
 
-function attachLogs(page: Page, journeyId: string, currentStep: () => string | undefined, actor?: string) {
+function attachLogs(page: Page, journeyId: string, currentStep: () => string | undefined, actor?: string, noise?: (text: string) => boolean) {
   const consoleLog: ConsoleEntry[] = [];
   const network: NetEntry[] = [];
   const pending: Array<Promise<void>> = [];
   // Popups and new tabs (and the pages of other actors) are logged into the same console/network logs.
-  const attachAs = (p: Page, who: string | undefined, step: () => string | undefined) => wire(p, journeyId, step, consoleLog, network, pending, who);
+  const attachAs = (p: Page, who: string | undefined, step: () => string | undefined) => wire(p, journeyId, step, consoleLog, network, pending, who, noise);
   const attach = (p: Page) => attachAs(p, actor, currentStep);
   attach(page);
   return { consoleLog, network, attach, attachAs, settle: () => Promise.allSettled(pending) };
 }
 
-function wire(page: Page, journeyId: string, currentStep: () => string | undefined, consoleLog: ConsoleEntry[], network: NetEntry[], pending: Array<Promise<void>>, actor?: string): void {
+function wire(page: Page, journeyId: string, currentStep: () => string | undefined, consoleLog: ConsoleEntry[], network: NetEntry[], pending: Array<Promise<void>>, actor?: string, noise?: (text: string) => boolean): void {
   const who = actor ? { actor } : {};
-  page.on('console', (m) => consoleLog.push({ type: m.type(), text: m.text(), at: nowIso(), ...who }));
-  page.on('pageerror', (e) => consoleLog.push({ type: 'pageerror', text: e.message, at: nowIso(), ...who }));
+  const ig = (text: string) => (noise?.(text) ? { ignored: true } : {});
+  page.on('console', (m) => consoleLog.push({ type: m.type(), text: m.text(), at: nowIso(), ...who, ...ig(m.text()) }));
+  page.on('pageerror', (e) => consoleLog.push({ type: 'pageerror', text: e.message, at: nowIso(), ...who, ...ig(e.message) }));
   page.on('requestfinished', (req) => {
     pending.push(
       (async () => {
@@ -219,8 +264,16 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   // today() / now() follow the journey's browser clock once one is installed.
   // Journey variables may refer to run and config variables, to each other (`last=Okafor${tag}`) and to the values
   // the run's Setup: journeys returned or Depends on: handed over (`last=Okafor${runTag}`).
-  const startVars = resolveVariableRefs({ ...journey.variables, ...(opts.variables ?? {}) }, seed ?? {});
-  const vars = (): Record<string, unknown> => ({ ...startVars, ...ledger.view(), ...clockVars(clockContext) });
+  const startVars = nestDotted(resolveVariableRefs({ ...(opts.builtinVariables ?? {}), ...journey.variables, ...(opts.variables ?? {}) }, seed ?? {}));
+  // Inline expressions (`${unique("VIS-")}`, derived Examples columns) are evaluated once per attempt: every step sees one value.
+  const exprRecord: ExpressionRecord = {
+    values: new Map(),
+    onEvaluate: (expression, value) => ledger.set(EXPRESSIONS_KEY, { ...((ledger.get(EXPRESSIONS_KEY) as Record<string, unknown> | undefined) ?? {}), [expression]: value }),
+  };
+  // Variables whose value is (or holds) an inline expression get the evaluated value, on first use (after the clock is set).
+  let startEvaluated: Record<string, unknown> | undefined;
+  const evaluatedStart = (): Record<string, unknown> => (startEvaluated ??= withInlineValues(startVars, () => ({ ...startVars, ...ledger.view(), ...clockVars(clockContext) }), exprRecord));
+  const vars = (): Record<string, unknown> => ({ ...evaluatedStart(), ...ledger.view(), ...clockVars(clockContext) });
   // `Base URL: ${PARTNER_URL}` reads the same variables as the steps; a name nothing sets stops the journey with
   // that name (inside the try below), not with "Invalid URL" at the first Open.
   const journeyBase = journey.baseUrl !== undefined ? journeyBaseUrl(journey.baseUrl, vars()) : undefined;
@@ -252,10 +305,11 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   const page = await context.newPage();
   if (pooled) env.contextPool!.track(page);
   let currentStepId: string | undefined;
-  const logs = attachLogs(page, jid, () => currentStepId, multi ? primaryName : undefined);
+  const noise = consoleNoise(opts.consoleIgnore);
+  const logs = attachLogs(page, jid, () => currentStepId, multi ? primaryName : undefined, noise);
   // Tabs, popups, frames, dialogs and recorded events; `ctx.page` is always the current tab.
   const session = new BrowserSession(context, page, {
-    mask: opts.mask, logger: env.logger, dialogs: opts.dialogs,
+    mask: opts.mask, logger: env.logger, dialogs: opts.dialogs, ...(noise ? { consoleIgnore: noise } : {}),
     onNewPage: (p) => {
       logs.attach(p);
       if (pooled) env.contextPool!.track(p);
@@ -282,7 +336,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
         const step = () => slot.currentStepId;
         logs.attachAs(p, name, step);
         slot.context = c;
-        slot.session = new BrowserSession(c, p, { mask: opts.mask, logger: env.logger, dialogs: opts.dialogs, onNewPage: (np) => logs.attachAs(np, name, step) });
+        slot.session = new BrowserSession(c, p, { mask: opts.mask, logger: env.logger, dialogs: opts.dialogs, ...(noise ? { consoleIgnore: noise } : {}), onNewPage: (np) => logs.attachAs(np, name, step) });
       } catch (e) {
         await c.close().catch(() => undefined);
         throw e;
@@ -335,17 +389,22 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   };
   const slotOf = (scope?: FlowScope): ActorSlot => slots.get(scope?.actor ?? primaryName) ?? primarySlot;
 
+  // Cleanup actions registered by the steps (On cleanup ..., Snapshot ..., cleanup.add): run in reverse after the journey.
+  const cleanup = new AttemptCleanup({ journeyId: jid, journal: cleanupJournal(opts.cleanupDir) });
   const ctxFor = (step: Step, scope?: FlowScope): StepContext => {
     const j = scope?.journey ?? journey;
     const l = scope?.ledger ?? ledger;
     const v = scope && scope.ledger !== ledger
-      ? (): Record<string, unknown> => ({ ...resolveVariableRefs({ ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}) }, seed ?? {}), ...l.view(), ...clockVars(clockContext) })
+      ? (): Record<string, unknown> => {
+        const base = resolveVariableRefs({ ...(opts.builtinVariables ?? {}), ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}) }, seed ?? {});
+        return { ...withInlineValues(base, () => ({ ...base, ...l.view(), ...clockVars(clockContext) }), exprRecord), ...l.view(), ...clockVars(clockContext) };
+      }
       : vars;
     const slot = slotOf(scope);
     const s = slot.session ?? session;
     return {
       runId: env.runId, runDir: env.runDir, journey: j, step, get page() { return s.page; }, context: slot.context ?? context, ledger: l, attempt, baseUrl, logger: env.logger, evidence,
-      vars: v, interpolate: (str: string) => interpolate(str, v()), session: s, ...(labelled() ? { actor: slot.name } : {}), rootJourneyId: journey.id,
+      vars: v, interpolate: (str: string) => interpolateInline(str, v(), exprRecord), expressions: exprRecord, cleanup, session: s, ...(labelled() ? { actor: slot.name } : {}), rootJourneyId: journey.id,
     };
   };
   const jx = env.extensions?.startJourney({ journey, attempt, page, context, ledger, vars, ctxFor: (s) => ctxFor(s), runtime: env, browserName: env.browserName });
@@ -410,6 +469,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
     actors,
   };
   const scope: FlowScope = { journey, ledger, prefix, depth: 0 };
+  cleanup.exec = (step) => executeStep(step, { ...scope }, flow.opts.signal?.aborted && opts.teardownOnCancel ? { ...flow, opts: { ...opts, signal: undefined } } : flow);
 
   try {
     if (journeyBase?.problem && !opts.baseUrlOverride) throw new Error(journeyBase.problem);
@@ -468,6 +528,8 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
     const cancelled = !!opts.signal?.aborted;
     const teardownFlow: FlowEnv = cancelled && opts.teardownOnCancel ? { ...flow, opts: { ...opts, signal: undefined } } : flow;
     if (!cancelled || opts.teardownOnCancel) for (const h of opts.hooks?.afterEach ?? []) result.steps.push(await executeStep(hookStep('after-each', h), scope, teardownFlow));
+    // Registered cleanup actions run last, in reverse, also after a failure (a Gherkin scenario ran its own already).
+    if (cleanup.size && (!cancelled || opts.teardownOnCancel)) result.steps.push(...(await cleanup.runAll()));
     result.status = journeyStatusFrom(result.steps);
     const manual = manualSummary(journey, result.steps);
     if (manual) result.manual = manual;
@@ -489,6 +551,8 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
       result.steps = journey.steps.map((s) => skippedStep(s, 'not run: data problem (see the journey error)'));
     }
     env.logger.error('journey error', { journeyId: jid, message: err.message });
+    // What the journey registered before it stopped is still cleaned up.
+    if (cleanup.size) result.steps.push(...(await cleanup.runAll().catch(() => [])));
   } finally {
     await logs.settle();
     await jx?.finish(result);

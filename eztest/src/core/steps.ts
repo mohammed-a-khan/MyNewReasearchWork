@@ -7,7 +7,7 @@ import type { Step } from './journey.js';
 import type { StepResult } from './results.js';
 
 /** Action types whose step holds child steps and is executed by the flow engine. */
-export const BLOCK_ACTIONS: ReadonlySet<string> = new Set(['if', 'repeat', 'forEach', 'while', 'retry', 'try', 'group', 'frame', 'actor', 'parallel']);
+export const BLOCK_ACTIONS: ReadonlySet<string> = new Set(['if', 'repeat', 'forEach', 'while', 'retry', 'try', 'group', 'frame', 'actor', 'parallel', 'transaction']);
 
 /** True when a step is a block (has children, or is a block action that needs them). */
 export function isBlockStep(step: Pick<Step, 'action' | 'steps'>): boolean {

@@ -3,7 +3,8 @@
  * login with TOTP, session caching (storageState per role + environment with a
  * max age) and API tokens per role.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { MASTER_KEY_ENV, decryptValue, encryptValue } from '../config/crypto.js';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Locator, Page } from '../browser/index.js';
@@ -52,6 +53,19 @@ export interface RoleDefinition {
   totpOptions?: { digits?: number; algorithm?: TotpAlgorithm; step?: number };
   /** API access for this role: an OAuth2 client config or any TokenProvider. */
   api?: RoleApi | TokenProvider;
+  /**
+   * Passwords to try in order (password rotation with `overlapDays`): the last one that worked is tried first
+   * (an encrypted cache per role next to the sessions), then the others. Each try counts toward the lockout guard.
+   */
+  passwordCandidates?: () => Promise<string[]>;
+}
+
+/** Called around each sign-in attempt (the pooled login counts them toward identity.lockout). */
+export interface SignInHooks {
+  /** Before attempt `index` (0-based): may wait or throw to stop. */
+  beforeAttempt?(index: number): Promise<void>;
+  /** After an attempt that failed. */
+  failedAttempt?(error: Error, index: number): Promise<void>;
 }
 
 /** OAuth 2.0 for a role's API calls (docs/api-contracts.md, "OAuth for API steps"). */
@@ -423,7 +437,7 @@ export class IdentityVault {
   };
 
   /** Like login(), but reports whether a cached session was reused. */
-  async signIn(page: Page, role: string, ctx?: unknown): Promise<LoginOutcome> {
+  async signIn(page: Page, role: string, ctx?: unknown, hooks?: SignInHooks): Promise<LoginOutcome> {
     const r = this.role(role);
     const base = this.baseFrom(ctx);
     if (await this.tryReuse(page, role, r, base)) {
@@ -438,10 +452,70 @@ export class IdentityVault {
         this.logger.debug(`Role ${role}: reused the session another worker signed in`);
         return { role, reused: true, url: page.url(), sessionFile: this.sessionFile(role) };
       }
-      return await this.freshSignIn(page, role, r, base);
+      return await this.freshSignIn(page, role, r, base, hooks);
     } finally {
       await release();
     }
+  }
+
+  // ------------------------------------------------------------- password candidates and the last-known-good cache
+
+  /** The encrypted last-known-good password of a role (password rotation). */
+  lastKnownGoodFile(role: string): string {
+    return `${this.sessionFile(role)}.lkg`;
+  }
+
+  /** The cache key: EZTEST_MASTER_KEY when set, else a random key kept (0600) in the session folder. */
+  private async cacheKey(): Promise<string> {
+    const env = process.env[MASTER_KEY_ENV];
+    if (env && env.length >= 16) return env;
+    const file = join(this.sessionDir, '.password-cache.key');
+    try {
+      return (await readFile(file, 'utf8')).trim();
+    } catch {
+      await mkdir(this.sessionDir, { recursive: true, mode: 0o700 });
+      const key = randomBytes(32).toString('hex');
+      await writeFile(file, key, { mode: 0o600, flag: 'wx' }).catch(() => undefined);
+      return (await readFile(file, 'utf8')).trim();
+    }
+  }
+
+  private async readLastKnownGood(role: string): Promise<string | undefined> {
+    try {
+      const v = decryptValue((await readFile(this.lastKnownGoodFile(role), 'utf8')).trim(), await this.cacheKey());
+      this.registry.masker.add(v);
+      return v;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async saveLastKnownGood(role: string, password: string): Promise<void> {
+    if ((await this.readLastKnownGood(role)) === password) return;
+    await mkdir(this.sessionDir, { recursive: true, mode: 0o700 });
+    const tmp = `${this.lastKnownGoodFile(role)}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(tmp, encryptValue(password, await this.cacheKey()), { mode: 0o600 });
+    await rename(tmp, this.lastKnownGoodFile(role));
+  }
+
+  /** Forget the cached password (it was not accepted). */
+  async clearLastKnownGood(role: string): Promise<void> {
+    await rm(this.lastKnownGoodFile(role), { force: true });
+  }
+
+  /** The passwords to try, in order; `[undefined]` means the role's single password. */
+  private async passwordsFor(role: string, r: ResolvedRole): Promise<{ list: Array<string | undefined>; cached?: string }> {
+    if (!r.def.passwordCandidates) return { list: [undefined] };
+    const all = await r.def.passwordCandidates();
+    for (const p of all) this.registry.masker.add(p);
+    const cached = await this.readLastKnownGood(role);
+    if (cached !== undefined && !all.includes(cached)) {
+      // The cache is from another period: it no longer applies.
+      await this.clearLastKnownGood(role);
+      return { list: all.length ? all : [undefined] };
+    }
+    const list = cached !== undefined ? [cached, ...all.filter((p) => p !== cached)] : all;
+    return { list: list.length ? list : [undefined], ...(cached !== undefined ? { cached } : {}) };
   }
 
   /**
@@ -484,10 +558,40 @@ export class IdentityVault {
     }
   }
 
-  private async freshSignIn(page: Page, role: string, r: ResolvedRole, base: string | undefined): Promise<LoginOutcome> {
-    if (r.def.login?.type === 'entra') return this.entraSignIn(page, role, r, base, r.def.login);
+  private async freshSignIn(page: Page, role: string, r: ResolvedRole, base: string | undefined, hooks?: SignInHooks): Promise<LoginOutcome> {
+    if (r.def.login?.type === 'entra') {
+      await hooks?.beforeAttempt?.(0);
+      try {
+        return await this.entraSignIn(page, role, r, base, r.def.login);
+      } catch (e) {
+        await hooks?.failedAttempt?.(e as Error, 0);
+        throw e;
+      }
+    }
+    const { list, cached } = await this.passwordsFor(role, r);
+    let last: unknown;
+    for (let i = 0; i < list.length; i++) {
+      const pw = list[i];
+      await hooks?.beforeAttempt?.(i);
+      try {
+        const out = await this.formSignIn(page, role, r, base, pw);
+        if (pw !== undefined) await this.saveLastKnownGood(role, pw).catch((e: Error) => this.logger.warn(`Role ${role}: the password cache was not written: ${e.message}`));
+        return out;
+      } catch (e) {
+        last = e;
+        await hooks?.failedAttempt?.(e as Error, i);
+        if (pw !== undefined && pw === cached) await this.clearLastKnownGood(role);
+        if ((e as EzTestError).code !== 'LOGIN_FAILED' || i === list.length - 1) throw e;
+        this.logger.info(`Role ${role}: password ${i + 1} of ${list.length} was not accepted; trying the next one`);
+        await page.context().clearCookies().catch(() => undefined);
+      }
+    }
+    throw last;
+  }
+
+  private async formSignIn(page: Page, role: string, r: ResolvedRole, base: string | undefined, password?: string): Promise<LoginOutcome> {
     await page.goto(this.url(r.def.loginUrl, base));
-    const formUrl = await this.enterCredentials(page, role, r);
+    const formUrl = await this.enterCredentials(page, role, r, password);
 
     if (r.def.successUrl) {
       const spec = r.def.successUrl;
@@ -511,7 +615,7 @@ export class IdentityVault {
   }
 
   /** Fill the sign-in form on the current page: username (identifier-first too), password, submit, TOTP. Returns the form's URL. */
-  private async enterCredentials(page: Page, role: string, r: ResolvedRole): Promise<string> {
+  private async enterCredentials(page: Page, role: string, r: ResolvedRole, password?: string): Promise<string> {
     const f = r.def.fields ?? {};
     const user = await this.findField(page, this.usernameCandidates(page, f.username), this.timeoutMs);
     if (!user) throw new EzTestError(`Role ${role}: username field not found on ${page.url()}`, 'LOGIN_FIELD');
@@ -526,7 +630,7 @@ export class IdentityVault {
       pass = await this.findField(page, this.passwordCandidates(page, f.password), this.timeoutMs);
     }
     if (!pass) throw new EzTestError(`Role ${role}: password field not found on ${page.url()}`, 'LOGIN_FIELD');
-    await pass.fill(await r.password.resolve());
+    await pass.fill(password ?? (await r.password.resolve()));
     await this.submit(page, this.submitCandidates(page, f.submit), f.submit ? undefined : pass);
 
     if (r.totp) {

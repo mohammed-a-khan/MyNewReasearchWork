@@ -47,6 +47,26 @@ async function fileInputFor(target: Locator, step: Step): Promise<Locator> {
   );
 }
 
+/** Sign the context out: its cookies, and local and session storage of every open page. */
+async function clearSignIn(ctx: StepContext): Promise<void> {
+  await ctx.context.clearCookies();
+  for (const p of ctx.context.pages()) {
+    if (p.isClosed()) continue;
+    await p.evaluate(() => {
+      try {
+        localStorage.clear();
+      } catch {
+        /* storage may be disabled */
+      }
+      try {
+        sessionStorage.clear();
+      } catch {
+        /* storage may be disabled */
+      }
+    }).catch(() => undefined);
+  }
+}
+
 /** True when this step needs its target resolved before acting. */
 export function needsTarget(step: Step): boolean {
   if (step.action === 'wait' && step.args?.for !== undefined) {
@@ -384,8 +404,14 @@ export async function performAction(step: Step, loc: Locator | undefined, ctx: S
       if (!opts.login) throw new EzTestError('No login handler configured (RunOptions.login)', 'NO_HANDLER');
       const role = step.value !== undefined ? ctx.interpolate(step.value) : ctx.journey.role;
       if (!role) throw new EzTestError('login step has no role and the journey has no role', 'MISSING_VALUE');
+      // Signing in as another role in a context that is signed in already: its cookies and storage go first,
+      // so the new role's session is applied to a clean context (no mixed cookies, no leftover tokens).
+      const was = ctx.session?.signedInAs;
+      const switched = was !== undefined && was !== role;
+      if (switched) await clearSignIn(ctx);
       await opts.login(page, role, ctx);
-      return {};
+      if (ctx.session) ctx.session.signedInAs = role;
+      return switched ? { captured: { signedOut: was, signedIn: role } } : {};
     }
     case 'useData': {
       if (!opts.data) throw new EzTestError('No data handler configured (RunOptions.data)', 'NO_HANDLER');

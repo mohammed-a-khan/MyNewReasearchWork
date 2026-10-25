@@ -23,6 +23,7 @@ import { integrationAction } from '../integration/action.js';
 import { componentAction } from './components/action.js';
 import { voiceAction } from './voice-steps.js';
 import { storeAction } from '../store/action.js';
+import { cleanupAction } from './cleanup-steps.js';
 
 /** Whether an advanced step needs its target strictly resolved (and healable) before acting. */
 export function advancedNeedsTarget(step: Step): boolean {
@@ -165,6 +166,7 @@ export async function performAdvancedAction(step: Step, loc: Locator | undefined
     case 'set': return setAction(step, ctx);
     case 'integration': return integrationAction(step, ctx, opts, timeout);
     case 'store': return storeAction(step, ctx, opts);
+    case 'cleanup': return cleanupAction(step, ctx, opts);
     case 'component': return componentAction(step, loc, ctx, opts, timeout);
     case 'if': case 'repeat': case 'forEach': case 'while': case 'retry': case 'try': case 'group': case 'runJourney':
       throw new EzTestError(`"${step.action}" is a block step and is run by the flow engine; it has no ${step.action === 'runJourney' ? 'journey' : 'children'} here`, 'BAD_BLOCK');

@@ -8,7 +8,8 @@ import { relative, sep } from 'node:path';
 import type { Journey } from '../core/index.js';
 import { ezFallback } from './fallback.js';
 import { loadFeatureJourneys, loadGlue, type BddOptions } from './load.js';
-import { matchStep } from './registry.js';
+import { matchStep, type Glue } from './registry.js';
+import { unresolvedNames } from '../core/util.js';
 import { snippet } from './snippets.js';
 import { validateExamplesSource } from '../runner/examples-source.js';
 
@@ -24,6 +25,23 @@ export interface FeatureValidation {
   problems: FeatureProblem[];
   /** Steps bound to a definition / to an EZTest phrasing. */
   bound: { definition: number; ez: number };
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Does this step set the variable `name`? An EZTest phrasing that captures `as name`, or a step definition whose
+ * code names it in a `vars.set(...)` (or another `.set('name', ...)` call). Read statically, nothing runs.
+ */
+function stepSets(s: Journey['steps'][number], name: string, glue: Glue): boolean {
+  const a = (s.args ?? {}) as { type?: 'context' | 'action' | 'outcome'; docString?: { content: string }; dataTable?: string[][] };
+  const text = s.value ?? '';
+  const hits = matchStep(glue, text);
+  const setCall = new RegExp(`\\.set\\(\\s*['"\`]${escapeRe(name)}['"\`]`);
+  if (hits.some((h) => setCall.test(String(h.definition.fn)))) return true;
+  if (hits.length) return false;
+  const fb = ezFallback({ text, type: a.type ?? 'context', ...(a.docString ? { docString: a.docString } : {}), ...(a.dataTable ? { dataTable: a.dataTable } : {}) });
+  return !!fb?.steps.some((x) => x.captureAs === name);
 }
 
 export async function validateFeature(file: string, o: BddOptions & { cwd?: string; variables?: Record<string, unknown> } = {}): Promise<FeatureValidation> {
@@ -48,6 +66,25 @@ export async function validateFeature(file: string, o: BddOptions & { cwd?: stri
     }
   }
   const show = (f: string) => relative(cwd, f).split(sep).join('/');
+  // Examples rows that refer to a value an earlier step fetches ("${dbOwnerName}"): some step before must set it.
+  const warned = new Set<string>();
+  for (const j of journeys) {
+    const row = j.bdd?.examples?.row;
+    if (!row) continue;
+    const known = { env: '', project: '', ...(o.variables ?? {}), ...j.variables };
+    const refs = [...new Set(Object.values(j.variables).flatMap((v) => unresolvedNames(v, known)))];
+    if (!refs.length) continue;
+    for (const ref of refs) {
+      const root = ref.split('.')[0];
+      const user = j.steps.findIndex((s) => (s.value ?? '').includes(`\${${ref}`) || JSON.stringify(s.args ?? {}).includes(`\${${ref}`));
+      const earlier = user < 0 ? j.steps : j.steps.slice(0, user);
+      if (earlier.some((s) => stepSets(s, root, glue))) continue;
+      const key = `${row.line}\u0000${ref}`;
+      if (warned.has(key)) continue;
+      warned.add(key);
+      problems.push({ severity: 'warning', line: row.line, message: `Examples row uses \${${ref}}, but no earlier step sets "${root}" (capture it in a Background or earlier step, e.g. "... as ${root}" or vars.set('${root}', ...))` });
+    }
+  }
   for (const j of journeys) {
     for (const s of j.steps) {
       const a = (s.args ?? {}) as { type?: 'context' | 'action' | 'outcome'; docString?: { content: string }; dataTable?: string[][]; empty?: boolean };

@@ -46,6 +46,7 @@ bddDir: features               # Gherkin .feature files (docs/bdd.md); default f
 bdd:
   steps: ["**/*.steps.ts"]     # step definition globs (default: *.steps.* and step_definitions/ folders)
   fallback: true               # steps without a definition may run as EZTest phrasings
+  resolveArguments: true       # ${var}, inline expressions and secrets in definition arguments, cells and doc strings
   language: en                 # for files without "# language:"
   worldParameters: {}          # passed to every World
 outputDir: eztest-results
@@ -185,6 +186,7 @@ ado:                                     # docs/azure-devops.md
   pat: secret://env/ADO_PAT                # or auth: { type: workload-identity | service-principal | managed-identity | system-access-token, ... }
   testPlanId: 417                          # per environment in config/<env>.yaml
   testSuiteId: 418
+  testCaseTag: { pattern: "@TC-([A-Z0-9_]+)", map: ado-cases.yaml }   # custom test-id tags -> test case ids (TC-ABC_1: 1234)
   createBugs: false
   publishResults: false                  # true: eztest run publishes to Test Plans and links the report (docs/reports.md)
   configurations: { chromium: "Windows + Chrome" }
@@ -207,6 +209,12 @@ report:                                  # docs/reports.md
 security:
   allowPageScripts: false          # "Run script" / "Run JavaScript" steps (they run in the page, never in Node)
 
+console:
+  ignore: ["ResizeObserver loop", "^chat-widget:"]   # console noise (regular expressions, any case): left out of
+                                                     # "no console errors" checks and failure diagnostics, counted as
+                                                     # "n ignored" in reports; base, project and environment patterns add up
+run:
+  excludeTags: ["@skip"]           # left out of runs unless --tags names the tag (default [])
 dialogs:                           # alert/confirm/prompt nobody armed for: recorded as evidence, warned about
   default: dismiss                 # or accept
   beforeunload: accept             # leave the page by default
@@ -400,7 +408,8 @@ templates:
 db:
   queries: { dir: queries }               # named query catalogue: <dir>/<NAME>.sql
 dates:
-  holidays: config/holidays.yaml          # or an inline list of YYYY-MM-DD dates
+  holidays: config/holidays.yaml          # or an inline list of YYYY-MM-DD dates,
+                                          # or { query: CLINIC_HOLIDAYS, column: day, connection: clinic } (read at start)
   weekend: [0, 6]                         # 0 = Sunday
 ```
 
@@ -539,6 +548,7 @@ identity:
         format: YYYYMM                         # YYYY YY MMMM MMM MM M
         rotatesOn: first-friday                # a day number, or first|second|third|fourth|last-<weekday>
         timezone: Europe/London                # optional
+        overlapDays: 2                         # optional: also try the neighbouring period's password near the boundary
 ```
 
 The Entra recipe handles these screens in whatever order they appear:
@@ -550,6 +560,14 @@ The Entra recipe handles these screens in whatever order they appear:
 - "Stay signed in?".
 
 It stops when `successUrl` matches, or when the browser leaves the sign-in host.
+
+With `overlapDays: N`, a sign-in within N days of a rotation boundary tries more than one password, in
+order: the current period's, then the previous one's (just after the rotation day, when the account may not
+have been changed yet) or the next one's (just before it, when it was changed early). The password that
+worked is kept per role in an encrypted cache next to the cached sessions (`identity.sessionDir`, encrypted
+with `EZTEST_MASTER_KEY` or a random key kept in that folder) and is tried first next time; when it is
+refused, it is dropped. Every attempt counts toward `identity.lockout`: with `maxFailures: 1`, one refused
+password stops the second attempt, so a rotation can never lock the account.
 
 `passwordRotation` exists for shared test accounts whose password rotates on a schedule. No formula is built into EZTest: the parts come from secret stores and the rule from your configuration. Anyone who can read the rule can work out the password, so treat this as a temporary bridge and move those accounts to vault-managed passwords. You can add other providers with `registerPasswordRotationProvider(type, factory)`.
 

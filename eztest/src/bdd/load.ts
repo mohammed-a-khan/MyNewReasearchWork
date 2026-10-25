@@ -23,6 +23,8 @@ export interface BddOptions {
   /** Step definition globs, relative to the project. */
   steps?: string[];
   fallback?: boolean;
+  /** Interpolate definition arguments before a definition runs (default true). */
+  resolveArguments?: boolean;
   language?: string;
   worldParameters?: Record<string, unknown>;
 }
@@ -71,11 +73,35 @@ export function featureIdBase(file: string, cwd: string): string {
   return slugify(rel.replace(/\//g, '-')) || 'feature';
 }
 
-const META_TAG = /^@(id|req|requirement|risk|role|platform|app|browser|capability):(.+)$/i;
+const META_TAG = /^@(id|req|requirement|risk|role|platform|app|browser|capability|actors|depends-on):(.+)$/i;
+
+/** `@actors:desk=receptionist,doc=vet` (a bare name is a web user without a role). */
+function actorsFromTags(values: string[]): Record<string, { role?: string }> | undefined {
+  const out: Record<string, { role?: string }> = {};
+  for (const v of values) {
+    for (const part of v.split(',').map((x) => x.trim()).filter(Boolean)) {
+      const m = /^([A-Za-z_][\w.-]*)(?:=([\w.@#-]+))?$/.exec(part);
+      if (!m) throw new EzTestError(`@actors:${v}: expected name=role pairs separated by commas (desk=receptionist,doc=vet), got "${part}"`, 'BAD_TAG');
+      out[m[1]] = m[2] ? { role: m[2] } : {};
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** `@depends-on:<journey-id> with visitId, ownerId`: the prerequisite and the ledger values it hands over. */
+function dependsOnFromTags(values: string[]): Array<{ journey: string; take: string[] }> {
+  return values.map((v) => {
+    const m = /^([^\s]+)(?:\s+with\s+(.+))?$/i.exec(v.trim());
+    if (!m) throw new EzTestError(`@depends-on:${v}: expected @depends-on:<journey-id> [with value, ...]`, 'BAD_TAG');
+    const take = (m[2] ?? '').split(/\s*,\s*|\s+and\s+|\s+/).map((x) => x.trim()).filter(Boolean);
+    for (const t of take) if (!/^[A-Za-z_][\w.-]*$/.test(t)) throw new EzTestError(`@depends-on:${v}: "${t}" is not a value name`, 'BAD_TAG');
+    return { journey: m[1], take };
+  });
+}
 
 function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: string[], ids: Map<string, number>, rowNo: number | undefined): Journey {
   // `@id:` only sets the journey id; the other meta tags (@req:, @risk:, @role:) stay tags as well.
-  const tags = p.tags.filter((t) => !/^@id:/i.test(t)).map((t) => t.replace(/^@/, ''));
+  const tags = p.tags.filter((t) => !/^@(?:id|depends-on):/i.test(t)).map((t) => t.replace(/^@/, ''));
   const meta = p.tags.map((t) => META_TAG.exec(t)).filter((m): m is RegExpExecArray => !!m);
   const metaOf = (k: string) => meta.filter((m) => m[1].toLowerCase() === k).map((m) => m[2]);
   const scenarioId = metaOf('id').at(-1) ?? `${featureIdBase(file, cwd)}--${slugify(p.scenario.name) || `l${p.scenario.line}`}`;
@@ -117,6 +143,9 @@ function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: s
     const v = i < 0 ? 'true' : c.slice(i + 1);
     return [i < 0 ? c : c.slice(0, i), v === 'true' ? true : v === 'false' ? false : /^-?\d+(?:\.\d+)?$/.test(v) ? Number(v) : v];
   }));
+  // Several users (@actors:desk=receptionist,doc=vet) and a cross-feature handoff (@depends-on:<id> with visitId).
+  const actors = actorsFromTags(metaOf('actors'));
+  const dependsOn = dependsOnFromTags(metaOf('depends-on'));
   const input: JourneyInput = {
     id,
     name: named,
@@ -129,6 +158,8 @@ function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: s
     ...(app ? { app } : {}),
     ...(browsers.length ? { browsers } : {}),
     ...(Object.keys(capabilities).length ? { capabilities } : {}),
+    ...(actors ? { actors } : {}),
+    ...(dependsOn.length ? { dependsOn } : {}),
     variables: values ?? {},
     ...(p.examples?.source ? { examplesFrom: p.examples.source } : {}),
     code: { file, name: p.name, line: p.examples?.row?.line ?? p.scenario.line },
@@ -143,7 +174,7 @@ function journeyFor(p: Pickle, file: string, cwd: string, o: BddOptions, glue: s
           ...(p.examples.row ? { row: { line: p.examples.row.line, index: p.examples.row.index } } : {}),
         },
       } : {}),
-      glue, fallback: o.fallback ?? true,
+      glue, fallback: o.fallback ?? true, resolveArguments: o.resolveArguments ?? true,
       ...(o.worldParameters && Object.keys(o.worldParameters).length ? { worldParameters: o.worldParameters } : {}),
     },
     steps: steps.length ? steps : [{ id: 'empty', intent: `${p.scenario.keyword}: ${p.name} (no steps)`, action: 'code', handler: 'bdd', value: '', args: { keyword: '', type: 'context', empty: true } }],

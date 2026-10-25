@@ -156,10 +156,10 @@ export async function collectStepArtifacts(runDir: string, run: RunResult, evide
       const raw = JSON.parse(await readFile(abs, 'utf8')) as unknown;
       if (isCon) {
         const t0 = Date.parse(run.journeys.find((j) => j.journeyId === ev.journeyId)?.startedAt ?? '');
-        const list = Array.isArray(raw) ? (raw as Array<{ type?: string; text?: string; at?: string; stepId?: string; location?: string }>) : [];
+        const list = Array.isArray(raw) ? (raw as Array<{ type?: string; text?: string; at?: string; stepId?: string; location?: string; ignored?: boolean }>) : [];
         const entries = list.filter((c) => c && typeof c.text === 'string').map((c) => {
           const at = Date.parse(c.at ?? '');
-          return { l: String(c.type ?? 'log'), t: String(c.text).slice(0, 1000), ...(Number.isFinite(at) && Number.isFinite(t0) ? { at: Math.max(0, at - t0) } : {}), ...(c.stepId ? { stepId: c.stepId } : {}), ...(c.location ? { loc: c.location } : {}) };
+          return { l: String(c.type ?? 'log'), t: String(c.text).slice(0, 1000), ...(Number.isFinite(at) && Number.isFinite(t0) ? { at: Math.max(0, at - t0) } : {}), ...(c.stepId ? { stepId: c.stepId } : {}), ...(c.location ? { loc: c.location } : {}), ...(c.ignored ? { ig: 1 } : {}) };
         });
         if (entries.length) out.console.set(ev.journeyId!, [...(out.console.get(ev.journeyId!) ?? []), ...entries]);
         continue;

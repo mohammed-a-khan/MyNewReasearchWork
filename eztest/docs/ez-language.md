@@ -63,7 +63,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (375 phrasings)
+## Actions (378 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -262,11 +262,17 @@ Times read as `YYYY-MM-DD[ HH:mm[:ss]]` in the journey's `Timezone:`, else the r
 | Named queries | `Run query "OPEN_INVOICES" on ledger with customer_id=${customerId}, status="OPEN" and store the rows as invoices` · `Run query "OPEN_INVOICES" with customer_id=7 as invoices` (connection from the query's header) · `Run query "BY_POSITION" on ledger with params '[1, "x"]' as rows` |
 | Named-query values | `Get the value of query "INVOICE_TOTAL" on ledger with invoice_no=${no} as total` · `Get the first row of query "ANY_OPEN_INVOICE" as pick` · `Get the row count of query "OPEN_INVOICES" with customer_id=7 as n` |
 | Named-query checks | `Expect query "OPEN_INVOICES" on ledger with customer_id=7 returns 2 rows` · `... returns at least 1 row` · `... returns no rows` · `Wait until query "INVOICE_POSTED" with invoice_no=${no} returns 1 row within 30 seconds every 2 seconds` |
+| Cleanup | `On cleanup run query "DELETE_VISIT" on clinic with visit_id=${visitId}` · `Snapshot query "PET_ROW" on clinic with pet_id=${petId} and restore it with "RESTORE_PET" after the journey` |
+| Transactions | `In a transaction on clinic` ... `End` (the query steps inside share one transaction) |
 | Compare | `Compare ${dbRows} with ${uiRows} by id` · `Compare rows dbRows to apiRows by id, name ignoring case and store the result as diff` |
 | Rows vs a named query | `Expect rows rows equal query "INVOICE_LINES" on ledger by key "Id" ignoring columns "Updated" with tolerance 0.01` · `... with params "OPEN", ${orderKey} ...` · `... on ledger with status="OPEN", region=${region} by key ...` (named binds) · `Expect rows uiRows equal rows dbRows by key "Id"` (a step of its own; column names match case-insensitively) |
 | Check | `Expect query "SELECT id FROM orders WHERE status = '${status}'" on shop returns 3 rows` (inline SQL; a step of its own) · `Expect query rows returns 2 rows` · `Expect the query rows returns more than 2 rows` · `Expect ${rows.0.status} equals "Open"` |
 
 **SQL is never built from values.** Every `${var}` in SQL (and every quoted literal that contains one, such as `'%${name}%'`) becomes a bound parameter in the connection's placeholder style (`?`, `$n`, `@pN`, `:n` on Oracle). A captured value like `EU' OR '1'='1` stays a value.
+
+**Cleanup actions** run after the journey, newest first, also when it failed; each is a cleanup step of the result. `On cleanup run query` resolves its values when the step runs. `Snapshot query ... and restore it with ...` reads the query's first row now (it lands in the ledger as `snapshot_PET_ROW`, or `... as name`) and afterwards runs the restore query with the row's values for its `:binds` (by column name, any case; the snapshot's own binds fill the rest). Both are written to the run's cleanup journal first, so when a run crashes, the next run's orphan sweep runs what is left ([reliability.md](reliability.md#cleanup-that-survives-crashes)).
+
+**Transactions.** The query steps of an `In a transaction on <alias>` block run on one connection in one transaction: committed when every step passed, rolled back when one failed. The block's result says `committed` or `rolled back` and how many statements ran; its evidence lists them (SQL and the number of bound values). Blocks on the same alias do not nest.
 
 **Named queries** come from the catalogue (`db.queries`, one `NAME.sql` file per query; see [databases.md](databases.md)). A quoted *name* (letters, digits, `_ . -`) selects the catalogue; quoted SQL text runs as inline SQL. Values after `with` are bound to the query's `:name` binds: quoted values are text, bare numbers, `true`/`false` and `null` are typed, and `${var}` is the variable's value (a lone `${var}` keeps its type). `Expect query "NAME" ... returns N rows` is a step of its own (it runs the query) and keeps the rows under `query_NAME`. Column lookups ignore case, so `${row.customer_name}` reads Oracle's `CUSTOMER_NAME`. In YAML/JSON: `- query: OPEN_INVOICES` with `on:`, `with: { customer_id: 7 }`, `as:`, `capture: value | row | count`, `returns: 2` and `within: 30 seconds`, or the canonical `{ action: db, db: { connection, query, binds }, captureAs }`.
 
@@ -362,6 +368,10 @@ A step of its own, not a post-condition, even when it starts with `Expect`. It r
 |---|---|
 | Set | `Set variable total to ${price} * ${qty}` · `Set var greeting = upper(name)` · `Set ${due} to addDays(today(), 3)` · `Let label = "ORD-" + id` · `Calculate net as round(gross / 1.19, 2)` · `Increment count` · `Decrease stock by 2` |
 
+**Inline expressions.** A `${...}` in a step's text that holds a call is evaluated as an expression: `Type "${unique('VIS-')}" into the "Reference" field`, `Expect the "Due" field has value "${format(addBusinessDays(today(), 2), "MM/DD/YYYY")}"`, `${uuid()}`. Each distinct expression is evaluated once per journey attempt, so the same text is the same value in every step (and in Examples values and derived columns); the values are kept in the ledger under `$expressions`. `$${...}` is a literal.
+
+**Built-in variables.** `${env}` is the environment of the run (`-e sit`, `EZTEST_ENV`, else the config's `environment`) and `${project}` the project (`--project`). A variable of the same name set anywhere else wins.
+
 Expressions are parsed by a small, safe evaluator, never by JavaScript. They support numbers, quoted text (with `${var}` inside), variables (`order.lines.0.sku`, `items[1]`), lists `[1, 2]`, `+ - * / %`, comparisons `== != < <= > >=`, `and or not`, `contains`, `in`, `matches`, `startsWith`, `endsWith`, and `cond ? a : b`. `+` adds when both sides are numbers (or numeric text) and joins text otherwise. Functions: `today now addDays addHours addMinutes addMonths daysBetween format formatNumber upper lower trim len substring replace split join concat contains startsWith endsWith padStart number int string round floor ceil abs min max sum random randomString uuid first last at keys pluck json parseJson match isEmpty coalesce range`.
 
 **Values supplied at run time.** A `${name}` that nothing sets (a recorded password, for example) is never typed literally: the step fails with `MISSING_VARIABLE` before touching the page. Supply it per run on the Studio Run page (a "Variables" field appears for each such name; the editor's Run button asks for them), with `eztest run --var password=...`, with the environment variable `EZTEST_VAR_password`, or once for the project with `vars: { password: secret://env/APP_PASSWORD }` in `eztest.config.yaml`. Names that look secret (`password`, `token`, `pin`, `apiKey`, ...) are masked in logs and results; Studio values are used for that run only and never saved.
@@ -370,7 +380,7 @@ Expressions are parsed by a small, safe evaluator, never by JavaScript. They sup
 
 | Purpose | Examples |
 |---|---|
-| Shared store | `Save ${orderId} to the shared store as "pending-order"` · `Save ${orderId} to the shared store as "pending-order" for 2 days in namespace "sit"` · `Save ${token} to the shared store as "api-token" as a secret for the pipeline` · `Load "pending-order" from the shared store as orderId` · `Load "pending-order" from the shared store as orderId or use "ORD-0"` · `Delete "pending-order" from the shared store` |
+| Shared store | `Save ${orderId} to the shared store as "pending-order"` · `Save ${orderId} to the shared store as "pending-order" for 2 days in namespace "sit"` · `Save ${token} to the shared store as "api-token" as a secret for the pipeline` · `Load "pending-order" from the shared store as orderId` · `Load "pending-order" from the shared store as orderId or use "ORD-0"` · `Load "open-visit" from the shared store as visitId or run query "ANY_OPEN_VISIT" on clinic as visit` · `Delete "pending-order" from the shared store` |
 | Data pools | `Add ${policy} to pool "approvable-policies"` · `Fill pool "approvable-policies" from "data/policies.csv" column "policyNo"` · `Take one item from pool "approvable-policies" as policy` · `Take one item from pool "accounts" as account and keep it` · `Expect pool "approvable-policies" has at least 3 items` |
 
 ### Flow control and reuse
@@ -451,7 +461,9 @@ Examples: from query "OPEN_ORDERS" on shop with region="EU" where status != clos
 ```
 
 - Paths are relative to the project directory (where `eztest run` runs). `path` is a JSONPath to the row list; `sheet` picks a worksheet.
-- The `where` filter compares columns with `=`, `!=`, `>`, `<`, `>=`, `<=` and `~` (contains), combined with `and`, `or`, `not` and parentheses (`and` binds tighter than `or`). Column names match case-insensitively; `=`, `!=` and `~` compare text case-insensitively, and numbers numerically. Quote values with spaces; `${var}` in a value is a run variable.
+- The `where` filter compares columns with `=`, `!=`, `>`, `<`, `>=`, `<=`, `~` (contains), `^=` (starts with), `$=` (ends with) and `in (a, b, "c d")` (any of the values), combined with `and`, `or`, `not` and parentheses (`and` binds tighter than `or`). Column names match case-insensitively; `=`, `!=` and `~` compare text case-insensitively, and numbers numerically. Quote values with spaces; `${var}` in a value is a run variable.
+- Derived columns follow the filter: `Examples: from data "data/visits.csv" where species in (cat, dog) with ref = unique("VIS-"), due = addDays(today(), 14)`. Each row gets the columns as inline expressions, evaluated once per journey attempt with the row's values as variables.
+- Live data per row: `... resolve with query "FIND_PET_FOR_STATE" on clinic with state=<requiredState> as pet when dataMode = live`. For the rows matching `when` (all rows without it; it reads the row and the run variables), the query runs with the binds (`<column>` is the row's value) and its first row joins the row as `pet.<column>` (`<pet.name>`, `${pet.name}`). A row whose query finds nothing does not run: it is an error named `DataPrecondition` (test data, not the product), unless the clause ends with `or keep row values`.
 - `from query` rows come from the named-query catalogue (`db.queries`, see [databases.md](databases.md)) through the run's data-source resolver (`RunOptions.dataSourceResolver`).
 - In YAML/JSON journeys: `examples: { from: data/orders.json, path: $.orders, where: "runFlag = Yes" }` or `examples: { query: OPEN_ORDERS, on: shop, with: { region: EU } }`.
 - A source that yields no rows (or a missing file) does not run its journey: the run reports it as skipped with the reason. `eztest validate` checks sources before a run: missing files (error), filters that match nothing or name unknown columns, and placeholder values such as `REPLACE_WITH_*` left in the matched rows (`--placeholder <regex>` changes the pattern).

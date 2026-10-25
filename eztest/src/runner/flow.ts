@@ -19,6 +19,7 @@ import { frameAction } from './advanced.js';
 import { evaluateConditionOnce } from './conditions.js';
 import { safeName } from './evidence.js';
 import { Ledger } from './ledger.js';
+import { runInTransaction, transactionEvidence } from './db-tx.js';
 import { envFor, skippedStep } from './step.js';
 import type { RunOptions, StepContext } from './types.js';
 import type { ActorRuntime } from './actors.js';
@@ -272,6 +273,22 @@ async function runBlock(step: Step, scope: FlowScope, env: FlowEnv): Promise<Ste
       case 'group':
         error = (await runList(step.steps, scope, env, children, { branch: 'body' })).error;
         break;
+      case 'transaction': {
+        // "In a transaction on clinic": the query steps inside share one transaction; a failure rolls it back.
+        const ctx = env.ctx(step, scope);
+        const connection = ctx.interpolate(String(step.args?.connection ?? ''));
+        let inner: string | undefined;
+        const out = await runInTransaction(env.opts.db, connection, async () => {
+          inner = (await runList(step.steps, scope, env, children, { branch: 'body' })).error;
+          if (inner) throw new EzTestError(inner, 'DB_TX_STEP');
+        });
+        captured.transaction = out.committed ? 'committed' : 'rolled back';
+        captured.statements = out.statements.length;
+        const ref = await ctx.evidence.store('data', `${scope.prefix}/${safeName(step.id)}.transaction.json`, transactionEvidence(connection, out, env.opts.mask), { journeyId: scope.journey.id, stepId: step.id, description: `transaction on ${connection} (${captured.transaction})` });
+        nativeEvidence.push(ref.id);
+        if (!out.committed) error = inner ?? `transaction on ${connection} rolled back: ${out.error instanceof Error ? out.error.message.split('\n')[0] : String(out.error)}`;
+        break;
+      }
       case 'frame': {
         const ctx = env.ctx(step, scope);
         if (!ctx.session) throw new EzTestError('frame blocks need a browser session', 'NO_SESSION');

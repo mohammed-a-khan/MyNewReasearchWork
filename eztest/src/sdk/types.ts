@@ -14,6 +14,7 @@ import type { Vars } from './vars.js';
 import type { Log } from './log.js';
 import type { Expect } from './expect.js';
 import type { Actors } from './actors.js';
+import type { CleanupSurface } from './cleanup.js';
 
 /** Options of a code journey. Tags, filters, retries, quarantine, readiness and ADO publishing treat them like `.ez` headers. */
 export interface JourneyOptions {
@@ -81,6 +82,10 @@ export interface SdkContext {
   soft<T>(fn: () => Promise<T>): Promise<T>;
   /** Multi-actor journeys: `actors.manager.ui.click(...)`, each actor in its own browser context. */
   actors: Actors;
+  /** Actions run in reverse after the journey (also when it failed): `cleanup.add`, `cleanup.query`, `cleanup.snapshot`. */
+  cleanup: CleanupSurface;
+  /** Call `fn` until it returns a truthy value, every `every` ms for at most `within` ms. */
+  poll<T>(fn: () => Promise<T> | T, o?: { within?: number; every?: number; message?: string }): Promise<T>;
 }
 
 /** The function behind a code journey. */

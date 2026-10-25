@@ -43,7 +43,8 @@ async function check(p: Precondition, ctx: StepContext, opts: RunOptions): Promi
     case 'expr': {
       try {
         const v = evaluateExpression(p.expr, ctx.vars());
-        return truthy(v) ? res(true) : res(false, `${p.expr} is ${JSON.stringify(v)}`);
+        // A precondition that is false by construction (a row whose live data was not found) says only what it is.
+        return truthy(v) ? res(true) : p.expr === 'false' && p.text ? res(false) : res(false, `${p.expr} is ${JSON.stringify(v)}`);
       } catch (e) {
         return res(false, (e as Error).message);
       }

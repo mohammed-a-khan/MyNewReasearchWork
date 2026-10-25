@@ -130,6 +130,19 @@ the same as `actors[name].run(fn)`. Plain `ui.*` calls run as the primary
 actor (the first declared one). `actors:` takes a role string or a full
 declaration (`{ role, emulation }`). Native actors are .ez / YAML only.
 
+## Gherkin scenarios
+
+```gherkin
+@actors:desk=receptionist,doc=vet
+Scenario: The front desk and the vet
+  Given I act as "desk"
+  When I continue as "doc"
+```
+
+`@actors:name=role,...` declares the actors of a scenario (or of every scenario of a feature);
+`I act as "desk"`, `I continue as "doc"` and `I switch to user "doc"` switch the actor of the following
+steps, and `ctx.actors` reaches every actor from a step definition. See [bdd.md](bdd.md#several-users-in-one-scenario).
+
 ## Native-app actors (web + mobile in one journey)
 
 ```

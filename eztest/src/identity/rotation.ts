@@ -18,6 +18,11 @@ export interface PasswordRotationProvider {
   readonly type: string;
   /** The password valid at `now`. */
   current(now?: Date): Promise<string>;
+  /**
+   * The passwords to try at `now`, in order: the current one first, then (within `overlapDays` of a rotation
+   * boundary) the neighbouring period's. Without it, only `current`.
+   */
+  candidates?(now?: Date): Promise<string[]>;
   /** A description without any secret part (for reports and the Studio). */
   describe(): string;
 }
@@ -118,12 +123,49 @@ registerPasswordRotationProvider('monthly-formula', (config, ctx) => {
   const part = (v: unknown, label: string) => (typeof v === 'string' && v !== '' ? ctx.registry.from(v, `${ctx.role}.${label}`) : undefined);
   const prefix = part(c.prefix, 'prefix');
   const suffix = part(c.suffix, 'suffix');
+  const overlap = typeof c.overlapDays === 'number' ? c.overlapDays : 0;
+  const passwordOf = async (period: { year: number; month: number }) => `${prefix ? await prefix.resolve() : ''}${formatPeriod(period, format)}${suffix ? await suffix.resolve() : ''}`;
   return {
     type: 'monthly-formula',
     async current(now = new Date()) {
-      const period = rotationPeriod(now, rule, c.timezone);
-      return `${prefix ? await prefix.resolve() : ''}${formatPeriod(period, format)}${suffix ? await suffix.resolve() : ''}`;
+      return passwordOf(rotationPeriod(now, rule, c.timezone));
     },
-    describe: () => `monthly formula: ${prefix ? 'prefix + ' : ''}${format}${suffix ? ' + suffix' : ''}, rotates on ${String(rule)}${c.timezone ? ` (${c.timezone})` : ''}`,
+    async candidates(now = new Date()) {
+      const periods = overlapPeriods(now, rule, overlap, c.timezone);
+      const out: string[] = [];
+      for (const p of periods) {
+        const pw = await passwordOf(p);
+        if (!out.includes(pw)) out.push(pw);
+      }
+      return out;
+    },
+    describe: () => `monthly formula: ${prefix ? 'prefix + ' : ''}${format}${suffix ? ' + suffix' : ''}, rotates on ${String(rule)}${c.timezone ? ` (${c.timezone})` : ''}${overlap ? `, ${overlap} day(s) overlap` : ''}`,
   };
 });
+
+const shiftMonth = (p: { year: number; month: number }, by: number) => {
+  const i = p.year * 12 + (p.month - 1) + by;
+  return { year: Math.floor(i / 12), month: (i % 12) + 1 };
+};
+
+/**
+ * The periods whose password may be valid at `now`, in the order to try them: the current period, then the
+ * previous one when `now` is less than `overlapDays` days after the rotation day (the change may not have
+ * happened yet), or the next one when it is less than `overlapDays` days before the next rotation day (it may
+ * have happened early).
+ */
+export function overlapPeriods(now: Date, rule: string | number = 1, overlapDays = 0, timeZone?: string): Array<{ year: number; month: number }> {
+  const cur = rotationPeriod(now, rule, timeZone);
+  if (overlapDays <= 0) return [cur];
+  const { y, m, day } = partsIn(now, timeZone);
+  const today = Date.UTC(y, m - 1, day);
+  const startOf = (p: { year: number; month: number }) => Date.UTC(p.year, p.month - 1, rotationDay(p.year, p.month, rule));
+  const DAY = 86_400_000;
+  const sinceStart = Math.round((today - startOf(cur)) / DAY);
+  const next = shiftMonth(cur, 1);
+  const untilNext = Math.round((startOf(next) - today) / DAY);
+  const out = [cur];
+  if (sinceStart < overlapDays) out.push(shiftMonth(cur, -1));
+  if (untilNext <= overlapDays) out.push(next);
+  return out;
+}

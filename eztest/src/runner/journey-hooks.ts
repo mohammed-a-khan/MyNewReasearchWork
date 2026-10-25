@@ -8,6 +8,7 @@ import type { BrowserSession } from './session.js';
 import type { JourneyRunEnv } from './journey.js';
 import type { RunOptions } from './types.js';
 import { fillXPath } from './reliability/xpath.js';
+import { DATA_PROBLEM_KEY } from './examples-source.js';
 
 /** A "Run journey" step that runs a hook journey inside the current journey's browser context. */
 export function hookStep(kind: 'before-each' | 'after-each', hook: Journey): Step {
@@ -30,8 +31,10 @@ export function expandExamples(journeys: Journey[]): Journey[] {
       continue;
     }
     const used = new Set<string>();
-    j.examples.forEach((row, i) => {
-      const fill = (s: string) => s.replace(/<([A-Za-z_][\w -]*)>/g, (w, k: string) => (k in row ? row[k] : w));
+    j.examples.forEach((given, i) => {
+      // A row whose live data could not be found (`resolve with query`) is a test-data problem: it fails as a precondition.
+      const { [DATA_PROBLEM_KEY]: problem, ...row } = given;
+      const fill = (s: string) => s.replace(/<([A-Za-z_][\w .-]*)>/g, (w, k: string) => (k in row ? row[k] : w));
       const { examples: _drop, ...base } = j;
       const firstVal = Object.values(row)[0];
       let suffix = firstVal ? slugify(firstVal).slice(0, 30) : String(i + 1);
@@ -52,6 +55,7 @@ export function expandExamples(journeys: Journey[]): Journey[] {
         variables: { ...j.variables, ...row },
         steps,
         ...(base.preconditions ? { preconditions: fill(base.preconditions) } : {}),
+        ...(problem !== undefined ? { requires: [...(base.requires ?? []), { kind: 'expr' as const, expr: 'false', text: problem }] } : {}),
       });
     });
   }

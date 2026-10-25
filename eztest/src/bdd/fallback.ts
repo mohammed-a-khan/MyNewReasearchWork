@@ -36,6 +36,8 @@ export interface FallbackStep {
 const ALIASES: Array<[RegExp, (m: RegExpExecArray) => string]> = [
   // "I am on "/login"", "I am on the "/login" page", "the user is on "/orders""
   [/^(?:(?:i|we)\s+am|(?:i|we)\s+are|(?:the\s+)?user\s+is|i'm)\s+on\s+(?:the\s+)?("[^"]*"|'[^']*'|\S+)(?:\s+page)?$/i, (m) => `Open ${m[1]}`],
+  // "I act as "desk"", "I am acting as desk" (several users: @actors:desk=receptionist,...)
+  [/^(?:(?:i|we)\s+(?:act|am\s+acting|are\s+acting)|(?:the\s+)?user\s+acts)\s+as\s+("[^"]*"|'[^']*'|[A-Za-z_][\w.-]*)$/i, (m) => `Switch to user ${m[1]}`],
   // "I am logged in as "manager"", "I am signed in as manager"
   [/^(?:(?:i|we)\s+am|(?:the\s+)?user\s+is|i'm)\s+(?:logged|signed)\s+in\s+as\s+(.+)$/i, (m) => `Log in as ${m[1]}`],
 ];

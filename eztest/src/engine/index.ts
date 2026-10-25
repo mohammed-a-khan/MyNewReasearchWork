@@ -12,12 +12,13 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { Journey, Logger, RunResult, DataNeed } from '../core/index.js';
 import { EzTestError, setBusinessCalendar, silentLogger } from '../core/index.js';
-import { loadHolidays, type EzTestConfig, type LoadedConfig, type DocumentCheckConfig } from '../config/index.js';
+import { MASTER_KEY_ENV, decryptValue, isEncryptedValue, loadHolidays, type EzTestConfig, type LoadedConfig, type DocumentCheckConfig } from '../config/index.js';
 import { AccountPool, LockoutGuard, createPooledLogin, identityVaultFromConfig, resolveClientCertificates, type IdentityVault } from '../identity/index.js';
 import { DbRegistry, ApiClient, type DbConnectionSpec, type OracleDbClient } from '../surfaces/index.js';
 import { QueryCatalogue, resolveQueryExamples, type QueryValue } from '../queries/index.js';
 import {
   CleanupJournal,
+  sweepOrphans,
   DataFabric,
   LeaseRegistry,
   SqlDataProvider,
@@ -35,6 +36,7 @@ import type { CompareDocumentHandler, DataHandler, DbHandler, Lens, RunHooks, Ru
 import { loadJourneyFile } from '../intent/index.js';
 import { SmtpSink, TwilioSmsProvider, TwilioVoiceProvider, loadTranscriptFixtures } from '../messaging/index.js';
 import { defaultFingerprintStorePath, runJourneys } from '../runner/index.js';
+import { isQueryCleanup } from '../runner/cleanup.js';
 import { ResultsClient } from '../server/client.js';
 import { storeFromConfig, type SharedStore } from '../store/index.js';
 import { branchBaselineDir, seedBranchBaselinesSync } from '../git/branch.js';
@@ -448,6 +450,36 @@ export async function messagingFromConfig(config: EzTestConfig, vault: IdentityV
   return out;
 }
 
+/** `${env}` (the environment of `-e` / EZTEST_ENV, else the config's environment) and `${project}` (`--project`). */
+export function builtInRunVariables(loaded: Pick<LoadedConfig, 'env' | 'project' | 'config'>): Record<string, string> {
+  const env = loaded.env ?? loaded.config.environment;
+  const project = loaded.project ?? (loaded.config as { project?: string }).project;
+  return { ...(env ? { env } : {}), ...(project ? { project } : {}) };
+}
+
+/**
+ * The holiday calendar of `dates.holidays`: a file, an inline list, or the rows of a named query
+ * (`{ query, column, connection? }`), read when the engine starts.
+ */
+export async function holidaysFromConfig(spec: EzTestConfig['dates']['holidays'], cwd: string, db: Pick<DbHandler, 'query' | 'namedQuery'>): Promise<string[]> {
+  if (spec === undefined || typeof spec === 'string' || Array.isArray(spec)) return loadHolidays(spec, cwd);
+  if (!db.namedQuery) throw new EzTestError('dates.holidays from a query needs the db.queries catalogue', 'HOLIDAYS_QUERY');
+  const compiled = await db.namedQuery(spec.query, spec.connection ?? '', {});
+  const rows = await db.query(compiled.connection, compiled.sql, compiled.params as never);
+  const out = new Set<string>();
+  const col = spec.column.toLowerCase();
+  for (const r of rows) {
+    const key = Object.keys(r).find((k) => k.toLowerCase() === col);
+    if (key === undefined) throw new EzTestError(`dates.holidays: query ${spec.query} has no column "${spec.column}" (columns: ${Object.keys(r).join(', ')})`, 'HOLIDAYS_QUERY');
+    const v = r[key];
+    if (v === null || v === undefined || v === '') continue;
+    const d = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new EzTestError(`dates.holidays: query ${spec.query} returned "${String(v)}" in ${spec.column}, not a date (YYYY-MM-DD)`, 'HOLIDAYS_QUERY');
+    out.add(d);
+  }
+  return [...out].sort();
+}
+
 export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & { addons?: Omit<Addons, 'off'> } = {}): Promise<Engine> {
   const cwd = opts.cwd ?? process.cwd();
   const logger = opts.logger ?? silentLogger;
@@ -470,6 +502,8 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
       const c = cat.compile(name, call, client.dialect);
       return { connection: conn, sql: c.sql, params: c.params };
     },
+    transaction: async (connection, fn) => (await dbs.get(connection)).transaction((tx) => fn({ query: (sql, params) => tx.query(sql, (params ?? []) as never) })),
+    queryParams: async (name) => (await queries()).paramsOf(name).map((p) => p.name),
     callProcedure: async (connection, name, params, out) => {
       const client = await dbs.get(connection);
       if (client.dialect !== 'oracle') throw new EzTestError(`OUT parameters are supported on Oracle connections; "${connection}" is ${client.dialect}`, 'NOT_SUPPORTED');
@@ -518,7 +552,7 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     : pooled?.login ?? (hasRoles ? vault.login : undefined);
   const outputDir = resolvePath(cwd, config.outputDir);
   // Business-day functions (addBusinessDays, ...) use the configured holiday calendar.
-  setBusinessCalendar({ holidays: await loadHolidays(config.dates.holidays, cwd), weekend: config.dates.weekend });
+  setBusinessCalendar({ holidays: await holidaysFromConfig(config.dates.holidays, cwd, db), weekend: config.dates.weekend });
   const clientCertificates = config.api.clientCertificates.length
     ? await resolveClientCertificates(config.api.clientCertificates, { cwd, registry: vault.registry })
     : undefined;
@@ -552,6 +586,17 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     queriesDir: resolvePath(cwd, config.db.queries?.dir ?? 'queries'),
     ...(await loadElementRepository(cwd, config.elements, logger)),
     ...(Object.keys(config.vars).length ? { variables: await resolveVarSecrets(config.vars, (ref) => vault.registry.resolve(ref), (v) => loaded.masker.add(v)) } : {}),
+    // ${env} (the -e environment) and ${project}: below every other variable of the same name.
+    builtinVariables: builtInRunVariables(loaded),
+    // secret:// and ENC(...) values in Gherkin step arguments, cells and Examples values: resolved when the step runs, masked.
+    resolveSecret: async (ref: string) => {
+      const t = ref.trim();
+      const v = isEncryptedValue(t as unknown) ? decryptValue(t, loaded.variables[MASTER_KEY_ENV] ?? process.env[MASTER_KEY_ENV]) : await vault.registry.resolve(t);
+      loaded.masker.add(v);
+      return v;
+    },
+    cleanupDir,
+    ...(config.console.ignore.length ? { consoleIgnore: config.console.ignore } : {}),
     outputDir,
     concurrency: config.concurrency,
     retries: config.retries,
@@ -655,8 +700,19 @@ export async function createEngine(loaded: LoadedConfig, opts: EngineOptions & {
     runOptions,
     async run(journeys) {
       // Orphan sweep: delete test data that crashed runs created and never removed.
-      if (rel.orphanSweep && Object.keys(config.data.entities).length && existsSync(cleanupDir)) {
-        await (await ensureFabric()).sweepOrphans(cleanupDir).catch((e: Error) => logger.warn('orphan sweep failed', { message: e.message }));
+      if (rel.orphanSweep && existsSync(cleanupDir)) {
+        const fabricFor = Object.keys(config.data.entities).length ? await ensureFabric() : undefined;
+        await sweepOrphans(cleanupDir, async (e) => {
+          // Cleanup queries registered by journeys (On cleanup run query ..., Snapshot ...) are run again.
+          if (isQueryCleanup(e)) {
+            const r = e.record;
+            const compiled = await db.namedQuery!(r.query, r.connection, { binds: r.binds });
+            await db.query(compiled.connection, compiled.sql, compiled.params as never);
+            logger.info(`cleanup: ran "${r.description}" left by a crashed run of ${r.journeyId}`);
+            return true;
+          }
+          return fabricFor ? fabricFor.removeOrphan(e) : false;
+        }).catch((e: Error) => logger.warn('orphan sweep failed', { message: e.message }));
       }
       const configHooks = await hooksFromConfig(config, [...(runOptions.library ?? []), ...journeys], runOptions.resolveJourney);
       // `Setup:` / `Teardown:` journeys run once, before / after all others; a setup's Returns: become run-wide values.

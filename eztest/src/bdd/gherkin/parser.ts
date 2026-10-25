@@ -233,6 +233,12 @@ export function parseGherkinLenient(text: string, uri = 'feature.feature', opts:
       for (const m of body.matchAll(/\S+/g)) {
         const tok = m[0];
         const at = offset + (m.index ?? 0);
+        // EZTest extension: `@depends-on:<journey-id> with visitId, ownerId` keeps its handoff list in the tag.
+        const prev = tags[tags.length - 1];
+        if (prev && /^@depends-on:/i.test(prev.name) && !tok.startsWith('@') && (/\swith\s/i.test(`${prev.name} `) || /^with$/i.test(tok))) {
+          prev.name = `${prev.name} ${tok}`;
+          continue;
+        }
         if (!tok.startsWith('@') || tok.length < 2) err(ln, at + 1, `"${tok}" is not a tag (tags start with "@" and contain no spaces)`);
         else tags.push({ name: tok, location: { line: ln, column: at + 1 } });
       }

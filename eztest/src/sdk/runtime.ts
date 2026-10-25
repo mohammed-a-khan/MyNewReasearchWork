@@ -56,6 +56,12 @@ export interface SdkHost {
   page(): unknown;
   /** Objects kept for the whole journey attempt (`journeyInstance`). */
   instances(): Map<unknown, unknown>;
+  /** A reported group tried again until it passes (`poll`, step definitions with `{ retry }`). */
+  retrying?<T>(name: string, fn: () => Promise<T>, o: { attempts?: number; within?: number; every?: number; message?: string }, source?: StepSource): Promise<T>;
+  /** Register a code cleanup action, run after the journey (`cleanup.add`). */
+  addCleanup?(description: string, fn: () => Promise<unknown>): void;
+  /** Run `fn` with a transaction open on a connection alias (`db.transaction`). */
+  transaction?<T>(connection: string, fn: () => Promise<T>, source?: StepSource): Promise<T>;
   readonly signal?: AbortSignal;
 }
 

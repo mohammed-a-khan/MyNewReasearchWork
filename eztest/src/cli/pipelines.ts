@@ -21,7 +21,7 @@ import {
   buildDeploymentRecord, checkRequires, detectCi, detectVersion, planPipeline, pipelineRunSettings, reportDeploymentToAdo, resolvePipeline, tagsReport,
   writeDeploymentFiles, type CiContext, type DeploymentRecord, type PipelinePlan, type PipelineResolution, type ReadinessLike,
 } from '../pipelines/index.js';
-import { hasAdoCredentials, adoSettings, publishRun, pipelineLinksFromEnv } from '../alm-ado/index.js';
+import { hasAdoCredentials, adoSettings, loadTestCaseTagMap, publishRun, pipelineLinksFromEnv } from '../alm-ado/index.js';
 import { storeFromConfig, type SharedStore } from '../store/index.js';
 import { MASK } from '../config/masker.js';
 import { loadJourneys } from './journeys.js';
@@ -115,7 +115,8 @@ export async function finishPipelineRun(p: PipelineRun, runDir: string, readines
     try {
       const ado = await adoClientFor(ctx.loaded, ctx.io.cwd, ctx.io.env);
       const attachments = ['report.html', 'junit.xml'].map((f) => join(runDir, f)).filter((f) => existsSync(f)).map((path) => ({ path }));
-      const s = await publishRun(run, { client: ado, planId: entry.testPlan, suiteId: entry.testSuite, links: pipelineLinksFromEnv(ctx.io.env), attachments, runName: `EZTest ${name} ${environment} ${p.version}` });
+      const testCaseTag = await loadTestCaseTagMap(cfg.ado.testCaseTag, ctx.io.cwd);
+      const s = await publishRun(run, { client: ado, ...(testCaseTag ? { testCaseTag } : {}), planId: entry.testPlan, suiteId: entry.testSuite, links: pipelineLinksFromEnv(ctx.io.env), attachments, runName: `EZTest ${name} ${environment} ${p.version}` });
       rec.testPlan = { planId: entry.testPlan, ...(entry.testSuite ? { suiteId: entry.testSuite } : {}), testRunId: s.runId, results: s.results.length };
       rec.evidence = { ...(rec.evidence ?? {}), testRunUrl: `${ado.projectUrl}/_testManagement/runs?runId=${s.runId}` };
       ctx.out(`test plan ${entry.testPlan}: ${s.results.length} result(s) in test run ${s.runId}${s.unmapped.length ? ` (${s.unmapped.length} journey(s) without a test case)` : ''}`);

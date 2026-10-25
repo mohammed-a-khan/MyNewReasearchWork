@@ -66,6 +66,11 @@ export type HookFn<W = World> = (this: W, ctx: BddContext<W> & { result?: HookRe
 export interface StepDefinitionOptions {
   /** Step timeout for SDK calls inside (ms); default the run's step timeout. */
   timeout?: number;
+  /**
+   * Run the definition again when it fails: up to `attempts` tries in all (default 3), `every` ms apart
+   * (default 1000). Only the last try's calls are kept in the report; earlier failures are warnings.
+   */
+  retry?: { attempts?: number; every?: number };
 }
 
 export interface StepDefinition {

@@ -238,6 +238,28 @@ parameter and is never spliced into the text. Use `{ connection }` or `db.on(nam
 a connection. Every call is a runner step with the query, its parameters and its row count
 in the evidence.
 
+### Transactions
+
+```ts
+await db.transaction(async (tx) => {
+  await tx.execute('INSERT_VISIT', { visit_id: id, pet_id: 12, reason: 'check-up' });
+  await tx.execute('INSERT_INVOICE', { visit_id: id, amount: 45 });
+}, { connection: 'clinic' });                          // or db.on('clinic').transaction(async (tx) => ...)
+
+const [visit, count] = await db.executeAll([
+  { query: 'INSERT_VISIT', params: { visit_id: 'V-2', pet_id: 12, reason: 'x-ray' } },
+  ['VISIT_COUNT', { pet_id: 12 }],
+], { connection: 'clinic' });
+```
+
+Every query and execute on that connection inside `fn` (through `tx`, or through `db` itself) runs on
+one connection in one transaction, on every driver (SQLite, PostgreSQL, SQL Server, Oracle, MySQL and
+MariaDB). It commits when `fn` resolves and rolls back when a step fails or `fn` throws. The report shows
+a "Transaction on clinic" step with the statements as children and a "Commit the transaction" (or "Roll
+back the transaction") step whose evidence lists each statement (its SQL and the number of bound values,
+never the values). `db.executeAll` runs catalogue queries in order in one transaction and returns each
+one's `{ rows, rowCount }`. Transactions on one alias do not nest.
+
 ## `data`
 
 - `data.row`: the current Examples row.
@@ -278,6 +300,44 @@ These are the expression-language functions, so `.ez` and code agree to the day:
 - `vars.resolve('${x} {config:Y}')` expands EZ `${}` and the placeholder forms `{config:X}`, `{scenario:x}` and `{{x}}` that migrated code often uses.
 - `vars.config(key, fallback?)` reads a config variable.
 - `log.debug | info | warn | error(message, data?)` writes to the step log and the report.
+- `await log.pass(message, data?)` records a passed check of its own (for a verification done in plain
+  code), with `data` as its captured values.
+
+## `poll(fn, { within, every, message })`
+
+```ts
+const status = await poll(async () => (await api.get(`/api/visits/${id}`)).body.status === 'confirmed' && 'confirmed',
+  { within: 30_000, every: 1000, message: 'the visit is confirmed' });
+```
+
+Calls `fn` until it returns a truthy value (`false`, `0`, `''` and `null` mean "not yet"; a throw is a
+failed try), every `every` ms (default 500) for at most `within` ms (default 10 000), and returns what it
+returned. The report has one step, "Poll until the visit is confirmed", with the last try's SDK calls as
+children and each earlier failed try as a warning. When time runs out the step fails with "the visit is
+confirmed did not happen within 30000 ms".
+
+## `cleanup`
+
+```ts
+cleanup.add('cancel the visit in the app', async () => { await api.delete(`/api/visits/${id}`); });
+await cleanup.query('DELETE_VISIT', { visit_id: id }, { connection: 'clinic' });
+const before = await cleanup.snapshot('PET_ROW', { pet_id: 12 }, { restore: 'RESTORE_PET' });
+```
+
+Actions registered here run in reverse order after the journey (after a Gherkin scenario's After hooks),
+also when it failed, each as a cleanup step of the result ("Cleanup: run query DELETE_VISIT on clinic with
+visit_id=V-1"). A failing cleanup fails the journey, and the others still run.
+
+- `cleanup.add(description, fn)`: `fn`'s SDK calls are the cleanup step's children.
+- `cleanup.query(NAME, binds, { connection?, description? })`: a catalogue query, with the values given
+  now.
+- `cleanup.snapshot(NAME, binds, { restore, connection? })`: reads the query's first row now (and returns
+  it); afterwards runs `restore` with the row's values for its `:binds` (by column name, any case; `binds`
+  fill the rest).
+
+Query actions are written to the run's cleanup journal (`.eztest/cleanup`) before the journey goes on and
+marked done when they ran, so a crashed run's leftovers are run by the next run's orphan sweep
+([reliability.md](reliability.md#cleanup-that-survives-crashes)). A code action runs only in this run.
 
 Values from code are passed to the runner literally, so a `${` in data is never
 interpolated a second time.

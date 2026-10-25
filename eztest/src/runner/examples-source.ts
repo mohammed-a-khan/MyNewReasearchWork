@@ -100,10 +100,59 @@ export function rowToStrings(row: DataRow): Record<string, string> {
   return out;
 }
 
+/**
+ * Row key of a data problem found while preparing a row (`resolve with query` found nothing): the row's journey
+ * does not run its steps and is reported as a test-data problem, not a product failure.
+ */
+export const DATA_PROBLEM_KEY = '$dataProblem';
+
+/** `<column>` in a resolve bind is the row's value; `${var}` a run variable. */
+function bindFor(v: string, row: Record<string, string>, variables: Record<string, unknown>): string {
+  const whole = /^<([^<>]+)>$/.exec(v.trim());
+  if (whole) {
+    const key = Object.keys(row).find((k) => k.toLowerCase() === whole[1].toLowerCase());
+    if (key === undefined) throw new EzTestError(`resolve with query: the row has no column "${whole[1]}" (columns: ${Object.keys(row).join(', ')})`, 'BAD_DATA');
+    return row[key];
+  }
+  return interpolate(v.replace(/<([^<>]+)>/g, (w, k: string) => row[Object.keys(row).find((x) => x.toLowerCase() === k.toLowerCase()) ?? ''] ?? w), variables);
+}
+
+/** Derived columns and live data (`with ...`, `resolve with query ...`) for rows that were read and filtered. */
+export async function prepareRows(src: ExamplesSource, rows: Array<Record<string, string>>, opts: LoadRowsOptions = {}): Promise<Array<Record<string, string>>> {
+  const variables = opts.variables ?? {};
+  let out = rows;
+  if (src.resolve) {
+    const r = src.resolve;
+    if (!opts.resolver) throw new EzTestError(`Examples: resolve with query "${r.query}" needs the db.queries catalogue (run through the EZTest engine)`, 'NO_DATA_SOURCE');
+    const when = r.when ? parseRowFilter(r.when) : undefined;
+    const ctx: DataSourceContext = { baseDir: opts.baseDir ?? process.cwd(), variables, journey: opts.journey ?? ({ id: 'examples', name: 'examples' } as Journey) };
+    out = [];
+    for (const row of rows) {
+      if (when && !matchRow(when, { ...variables, ...row }, (s) => interpolate(s, variables))) {
+        out.push(row);
+        continue;
+      }
+      const binds = Object.fromEntries(Object.entries(r.binds).map(([k, v]) => [k, bindFor(v, row, variables)]));
+      const found = (await opts.resolver({ query: r.query, ...(r.connection ? { connection: r.connection } : {}), params: binds }, ctx)) ?? [];
+      if (found.length) {
+        const live = rowToStrings(found[0]);
+        out.push({ ...row, ...Object.fromEntries(Object.entries(live).map(([k, v]) => [`${r.as}.${k}`, v])) });
+      } else if (r.keepRowValues) out.push(row);
+      else {
+        const shown = Object.entries(binds).map(([k, v]) => `${k}=${v}`).join(', ');
+        out.push({ ...row, [DATA_PROBLEM_KEY]: `no test data: query ${r.query}${r.connection ? ` on ${r.connection}` : ''}${shown ? ` with ${shown}` : ''} returned no row for ${r.as}` });
+      }
+    }
+  }
+  // Derived columns are inline expressions, evaluated once per journey attempt (the same value in every step).
+  if (src.derive?.length) out = out.map((row) => ({ ...row, ...Object.fromEntries(src.derive!.map((d) => [d.name, `\${${d.expr}}`])) }));
+  return out;
+}
+
 /** Load and filter the rows of a source. */
 export async function loadExamplesRows(src: ExamplesSource, opts: LoadRowsOptions = {}): Promise<Array<Record<string, string>>> {
   const rows = await loadSourceRows(src, opts);
-  return filterRows(rows, src.where, opts.variables).map(rowToStrings);
+  return prepareRows(src, filterRows(rows, src.where, opts.variables).map(rowToStrings), opts);
 }
 
 export interface ResolvedExamples {

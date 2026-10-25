@@ -156,6 +156,24 @@ npx eztest ado publish eztest-results/<run> --trace --create-bugs --flaky --comm
 ```
 
 With `ado.publishResults: true`, `eztest run` publishes every run this way after its analysis.
+
+Journeys link to test cases with `@TestCaseId:1234` tags. Teams whose journeys carry their own test ids
+map them instead of retagging:
+
+```yaml
+ado:
+  testCaseTag: { pattern: "@TC-([A-Z0-9_]+)", map: ado-cases.yaml }
+```
+
+```yaml
+# ado-cases.yaml: test id -> Azure DevOps test case id
+TC-VISIT_1: 1234
+TC-VISIT_2: 1235
+```
+
+A tag matching `pattern` (its first group is the key) is looked up in the map by the whole tag
+(`TC-VISIT_1`) or by the group (`VISIT_1`), case-insensitively; a tag that is not in the map links
+nothing. `@TestCaseId` tags still work next to them.
 Either way the publish result (success, partial or failed, and why), the test run, each
 result, test case, plan and suite, the bugs, and the build and release are recorded in the run's
 `integrations.json`; the HTML report is rendered again with those links and attached to the test

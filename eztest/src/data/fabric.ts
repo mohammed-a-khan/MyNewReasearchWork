@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { DataNeed, EzTestError, silentLogger, type Logger } from '../core/index.js';
 import type { z } from 'zod';
-import { CleanupRegistry, sweepOrphans, type CleanupJournal, type CleanupReport, type SweepOptions, type SweepReport } from './cleanup.js';
+import { CleanupRegistry, sweepOrphans, type CleanupJournal, type CleanupReport, type JournalEntry, type SweepOptions, type SweepReport } from './cleanup.js';
 import { describeConstraints, matchesAll, parseWhere, type Constraint } from './constraints.js';
 import { LeaseRegistry, type Lease } from './lease.js';
 import type { DataProvider, DataRecord } from './providers.js';
@@ -157,15 +157,18 @@ export class DataFabric {
 
   /** Delete records that crashed runs created and never removed (their cleanup journals in `dir`). */
   async sweepOrphans(dir: string, o: SweepOptions = {}): Promise<SweepReport> {
-    const report = await sweepOrphans(dir, async (e) => {
-      const p = this.providers.find((x) => x.name === e.provider && x.supports(e.entity) && typeof x.delete === 'function');
-      if (!p) return false;
-      await p.delete!(e.entity, e.record as DataRecord);
-      return true;
-    }, o);
+    const report = await sweepOrphans(dir, (e) => this.removeOrphan(e), o);
     for (const r of report.removed) this.logger.info(`data: removed orphaned ${r.entity} ${r.recordId} (${r.provider}) left by a crashed run`);
     for (const f of report.failed) this.logger.warn(`data: could not remove orphaned ${f.entity} ${f.recordId}: ${f.error}`);
     return report;
+  }
+
+  /** Delete one record a crashed run left behind; false when no provider can delete it. */
+  async removeOrphan(e: JournalEntry): Promise<boolean> {
+    const p = this.providers.find((x) => x.name === e.provider && x.supports(e.entity) && typeof x.delete === 'function');
+    if (!p) return false;
+    await p.delete!(e.entity, e.record as DataRecord);
+    return true;
   }
 
   /** Resolve, run, and always clean up (even when fn throws). */

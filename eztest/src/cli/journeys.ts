@@ -115,9 +115,11 @@ const normTag = (t: string) => t.trim().replace(/^@/, '').toLowerCase();
  * Keep journeys that have any of `tags` and none of `exclude`; `grep` matches id or name.
  * A `tags` entry may be a tag expression (`@smoke and not @wip`, `(@a or @b) and not @slow`).
  */
-export function filterJourneys(js: Journey[], f: { tags?: string[]; exclude?: string[]; grep?: string; ids?: string[] }): Journey[] {
+export function filterJourneys(js: Journey[], f: { tags?: string[]; exclude?: string[]; grep?: string; ids?: string[]; configExclude?: string[] }): Journey[] {
   const wantTags = tagFilterFrom(f.tags);
-  const not = (f.exclude ?? []).map(normTag).filter(Boolean);
+  // run.excludeTags (config): left out unless --tags names the tag itself (`--tags @skip` runs the skipped ones).
+  const named = new Set((f.tags ?? []).flatMap((t) => t.match(/@?[^\s,()@]+/g) ?? []).map(normTag).filter((t) => !['and', 'or', 'not'].includes(t)));
+  const not = [...(f.exclude ?? []), ...(f.configExclude ?? []).filter((t) => !named.has(normTag(t)))].map(normTag).filter(Boolean);
   const re = f.grep ? new RegExp(f.grep, 'i') : undefined;
   return js.filter((j) => {
     const tags = j.tags.map(normTag);
@@ -130,13 +132,14 @@ export function filterJourneys(js: Journey[], f: { tags?: string[]; exclude?: st
 }
 
 /** The config's BDD settings (`bdd:`, `bddDir:`) as loader options. */
-export function bddOptionsFrom(cfg: { bddDir?: string; bdd?: { features?: string[]; steps?: string[]; fallback?: boolean; language?: string; worldParameters?: Record<string, unknown> } }): BddOptions {
+export function bddOptionsFrom(cfg: { bddDir?: string; bdd?: { features?: string[]; steps?: string[]; fallback?: boolean; resolveArguments?: boolean; language?: string; worldParameters?: Record<string, unknown> } }): BddOptions {
   const b = cfg.bdd ?? {};
   const features = featureDirsFrom(cfg);
   return {
     ...(features.length ? { features } : {}),
     ...(b.steps?.length ? { steps: b.steps } : {}),
     ...(b.fallback !== undefined ? { fallback: b.fallback } : {}),
+    ...(b.resolveArguments === false ? { resolveArguments: false } : {}),
     ...(b.language ? { language: b.language } : {}),
     ...(b.worldParameters && Object.keys(b.worldParameters).length ? { worldParameters: b.worldParameters } : {}),
   };

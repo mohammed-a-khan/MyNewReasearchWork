@@ -18,7 +18,7 @@ import { failureSignature, readEvidenceManifest, type FlakyScore, type TriageCat
 import { escapeHtml } from '../report/escape.js';
 import { AdoClient } from './client.js';
 import { actionPath, parseStepsXml, type TcStep } from './steps.js';
-import { parseAdoTags } from './tags.js';
+import { parseAdoTags, type TestCaseTagMap } from './tags.js';
 import { getWorkItems, workItemApiUrl } from './workitems.js';
 
 export type AdoOutcome = 'Passed' | 'Failed' | 'NotExecuted' | 'Error' | 'Blocked';
@@ -91,6 +91,8 @@ export interface PublishOptions {
   batchSize?: number;
   /** Per-step action results and iterations from the test cases' steps (default true). */
   stepResults?: boolean;
+  /** Custom test-id tags mapped to test case ids (config ado.testCaseTag, loaded with loadTestCaseTagMap). */
+  testCaseTag?: TestCaseTagMap;
   /** Mark results flaky through the flaky-test API: retried-then-passed journeys and these flaky scores. */
   flaky?: { enabled: boolean; scores?: FlakyScore[] };
   bugs?: {
@@ -257,7 +259,7 @@ export async function publishRun(run: RunResult, opts: PublishOptions): Promise<
   const unmapped: string[] = [];
   for (const j of run.journeys) {
     if (j.tags.includes('hook')) continue;
-    const t = parseAdoTags(j.tags);
+    const t = parseAdoTags(j.tags, opts.testCaseTag);
     const plan = t.planId ?? opts.planId;
     const suite = t.suiteId ?? opts.suiteId;
     if (t.testCaseIds.length === 0) {
@@ -628,7 +630,7 @@ export async function publishRun(run: RunResult, opts: PublishOptions): Promise<
         bugs.push({ journeyId: j.journeyId, signature: sig.hash, id: existingBug, action: 'deduped' });
         continue;
       }
-      const tcIds = parseAdoTags(j.tags).testCaseIds;
+      const tcIds = parseAdoTags(j.tags, opts.testCaseTag).testCaseIds;
       const evidence = [...(f?.evidence ?? []), ...j.evidence];
       const repro = `<p><b>Journey:</b> ${escapeHtml(j.name)} (<code>${escapeHtml(j.journeyId)}</code>), EZTest run ${escapeHtml(run.runId)}${run.environment?.gitCommit ? `, commit <code>${escapeHtml(run.environment.gitCommit.slice(0, 12))}</code>${run.environment.gitBranch ? ` on <code>${escapeHtml(run.environment.gitBranch)}</code>` : ''}` : ''}</p>
 <ol>${j.steps.map((s) => `<li>[${escapeHtml(s.status)}] ${escapeHtml(s.intent)}</li>`).join('')}</ol>

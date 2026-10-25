@@ -263,7 +263,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       // only some paths run: `eztest run journeys/portal` still finds the @library journeys in journeys/lib.
       const library = paths.length ? await libraryWith(all, cfg.journeysDir, io.cwd) : all;
       // Journeys tagged @library are reusable sub-journeys ("Run journey ..."): callable, not run on their own.
-      const filtered = filterJourneys(all, { tags: o.tags, exclude: o.excludeTags, grep: o.grep, ids: onlyIds }).filter((j) => !j.tags.includes('library'));
+      const filtered = filterJourneys(all, { tags: o.tags, exclude: o.excludeTags, grep: o.grep, ids: onlyIds, configExclude: cfg.run.excludeTags }).filter((j) => !j.tags.includes('library'));
       // Setup:/Teardown: journeys run around whatever is selected (not filtered by tags, not sharded).
       const around = filterJourneys(all, { exclude: o.excludeTags }).filter(isAroundJourney);
       let tests = filtered.filter((j) => !isAroundJourney(j));

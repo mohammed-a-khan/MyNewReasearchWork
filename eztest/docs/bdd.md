@@ -71,7 +71,11 @@ definition: they run as EZTest steps. The other two run the definitions.
 - **Tags** are inherited from Feature, Rule, Scenario and Examples. A few tags also fill journey
   fields: `@req:ORD-1` (or `@requirement:`) adds a requirement for traceability and readiness,
   `@risk:5` sets the risk, and `@role:manager` sets the Identity Vault role. `@TestCaseId:123`
-  links a scenario to an Azure DevOps test case, as for any journey.
+  links a scenario to an Azure DevOps test case, as for any journey (custom test-id tags such as
+  `@TC-VISIT_1` map to test cases with `ado.testCaseTag`, see [azure-devops.md](azure-devops.md#publish-results)).
+  `@actors:desk=receptionist,doc=vet` and `@depends-on:<journey-id> with visitId` are described below.
+  Scenarios tagged with one of `run.excludeTags` (for example `["@skip"]`) are left out unless `--tags`
+  names that tag.
 - **Native apps and browsers.** `@platform:android` (or `ios`) with `@app:com.shop.app` runs the
   scenario on the mobile driver ([mobile.md](mobile.md)): EZTest phrasings and the `ui.*` calls of
   step definitions become native steps on the device. `@capability:serial=R58M123` sets a
@@ -111,6 +115,7 @@ bdd:
     - "steps/**/*.steps.ts"
     - "features/**/step_definitions/**/*.ts"
   fallback: true                  # run EZTest phrasings for steps without a definition (default true)
+  resolveArguments: true          # interpolate definition arguments, cells and doc strings (default true)
   language: en                    # language of files without "# language:" (default en)
   worldParameters:                # passed to every World as `parameters`
     tenant: acme
@@ -134,11 +139,16 @@ Then('the totals are:', async ({ expect }, table: DataTable) => { /* the data ta
 When('I send this request:', async ({ api }, body: string) => { /* so is the doc string */ });
 Step('any keyword', async () => {});
 Given('a slow step', { timeout: 30_000 }, async () => {});
+Then('the lab result is in', { retry: { attempts: 5, every: 2000 } }, async ({ api, expect }) => { /* tried again until it passes */ });
 ```
 
+- **`retry`** runs the definition again when it fails: up to `attempts` tries in all (default 3),
+  `every` ms apart (default 1000). The report keeps the last try's calls; each earlier failure is a
+  warning on the step ("attempt 1 of 5 failed: ..."), and `captured.attempts` says how many it took.
+
 - **The first argument** is a context with the whole SDK (`ui`, `api`, `db`, `data`, `files`,
-  `dates`, `identity`, `vars`, `log`, `expect`, `step`, `run`, `soft`, `actors`; see
-  [sdk.md](sdk.md)), plus:
+  `dates`, `identity`, `vars`, `log`, `expect`, `step`, `run`, `soft`, `actors`, `cleanup`, `poll`;
+  see [sdk.md](sdk.md)), plus:
   - `world`: the scenario's World;
   - `scenario`: name, tags, feature, rule, file, line and the Examples row;
   - `gherkinStep`: keyword, text and line;
@@ -220,6 +230,120 @@ When('I do something nobody defined with {string} and {int}', async ({ ui, api, 
 A step that two or more definitions match fails as **ambiguous**, and the error lists each
 pattern with its `file:line`. `pending()` (exported) marks a definition as not done yet: the step
 fails as pending.
+
+## Values in steps: variables, expressions and secrets
+
+Before a step definition runs, EZTest resolves its captured arguments, every data table cell and the
+doc string the same way it resolves its own phrasings:
+
+| Written | Becomes |
+|---|---|
+| `${petId}`, `${visit.pet_id}`, `${rows.0.name}` | a journey, run or config variable; dotted paths read into objects and lists |
+| `${city:-Lyon}` | the variable, or `Lyon` when nothing sets it |
+| `$${petId}` | the literal text `${petId}` |
+| `${unique('VIS-')}`, `${uuid()}`, `${format(addBusinessDays(today(), 2), "MM/DD/YYYY")}` | an inline expression (see below) |
+| `secret://vault/VET_PIN`, `ENC(v1:...)` (a whole value) | the secret, resolved when the step runs and masked in every result |
+
+A `${name}` that nothing sets fails the step with `MISSING_VARIABLE` before the definition runs, so a
+definition never receives a placeholder as if it were data. `bdd.resolveArguments: false` hands the text
+over as written.
+
+**Fetch, then reference.** A Background (or an earlier step) fetches a value; an Examples row refers to
+it; the definition gets the value:
+
+```gherkin
+Background:
+  Given I get the value of query "OWNER_NAME" on clinic with owner_id=1 as dbOwnerName
+
+Scenario Outline: Book a visit for <ownerName>
+  When the owner "<ownerName>" books "<reason>"
+
+  Examples:
+    | ownerName      | reason   |
+    | ${dbOwnerName} | check-up |
+```
+
+`<ownerName>` becomes `${dbOwnerName}` in the step text, and the definition receives `Mira Okafor`.
+`eztest validate` warns when a row refers to a variable that no earlier step sets (an EZTest phrasing
+that captures it `as dbOwnerName`, or a definition that calls `vars.set('dbOwnerName', ...)`).
+
+**Inline expressions.** A `${...}` holding a call is evaluated by EZTest's safe expression evaluator (the
+functions of [ez-language.md](ez-language.md#variables-and-expressions), never JavaScript). Each distinct
+expression is evaluated once per scenario attempt: `${unique('VIS-')}` is the same visit reference in every
+step of the scenario, and a retry gets a new one. The values are kept in the attempt's ledger under
+`$expressions`, and on the result of the step that first used them. They work in step text, cells, doc
+strings, Examples values and in EZTest phrasings (`Type "${unique('VIS-')}" into the "Reference" field`).
+Inside a `{string}` argument, quote the expression's own text with single quotes.
+
+## Several users in one scenario
+
+Tag a scenario (or a feature) with its actors, then say who acts:
+
+```gherkin
+@actors:desk=receptionist,doc=vet
+Scenario: The front desk books, the vet confirms
+  Given I act as "desk"
+  And I am on "/visits/new"
+  When I continue as "doc"
+  And I am on "/visits"
+  Then the page contains "Biscuit"
+```
+
+- `@actors:name=role,...` declares the actors and their Identity Vault roles (a name without `=role` is a
+  plain web user). Each actor has its own browser context and session, as in
+  [multi-actor.md](multi-actor.md); the first one is the primary actor.
+- `I act as "desk"`, `I continue as "doc"` and `I switch to user "doc"` make the following steps run as
+  that actor. An actor with a role signs in when it first acts (a `Log in as` step under the switch).
+- Every step result says which actor it ran as. In a definition, `ctx.actors.doc.ui.click(...)` and
+  `ctx.actors.desk.expect.ui.page().toContainText(...)` act as a named actor.
+
+`Log in as <role>` (and `I am logged in as "<role>"`) in a context that is already signed in as another
+role first clears that context's cookies and local and session storage, then signs in. The step's
+`captured` says who was signed out and who signed in.
+
+## Depending on another feature
+
+```gherkin
+@depends-on:visits--book-a-visit with visitId
+Feature: Follow-up visits
+  Scenario: The vet closes the visit
+    Then the visit "${visitId}" is in the database
+```
+
+`@depends-on:<journey-id> with value, ...` (on a feature, a rule or a scenario) is the `Depends on:`
+handoff of `.ez` journeys ([reliability.md](reliability.md#dependencies-depends-on)): the prerequisite
+runs first, the named ledger values are handed over, and the scenario is skipped with the reason when the
+prerequisite did not pass. The `with ...` list is part of the tag (an EZTest extension; other Gherkin
+tools read `with` as an error).
+
+When the value usually comes from another pipeline stage, the shared store can fall back to the
+database:
+
+```gherkin
+Given I load "open-visit" from the shared store as visitId or run query "ANY_OPEN_VISIT" on clinic as visit
+```
+
+When the store has no `open-visit` (or it expired), the query runs: `visit` is its first row and
+`visitId` its first column ([shared-data.md](shared-data.md)).
+
+## Cleanup
+
+What a scenario creates, it can undo. Definitions register actions on `ctx.cleanup`; they run in reverse
+order after the scenario (after the After hooks), also when it failed, each as a cleanup step of the
+result:
+
+```ts
+When('the desk books visit {string} for {string}', async ({ db, cleanup }, id: string, pet: string) => {
+  await db.execute('INSERT_VISIT', { visit_id: id, pet_id: pet, reason: 'check-up' });
+  await cleanup.query('DELETE_VISIT', { visit_id: id }, { connection: 'clinic' });
+});
+```
+
+`cleanup.add(description, fn)`, `cleanup.query(NAME, binds, { connection })` and
+`cleanup.snapshot(NAME, binds, { restore: RESTORE_NAME })` are described in [sdk.md](sdk.md#cleanup).
+The EZTest phrasings `On cleanup run query "DELETE_VISIT" on clinic with visit_id=${visitId}` and
+`Snapshot query "PET_ROW" on clinic with pet_id=${petId} and restore it with "RESTORE_PET" after the journey`
+work as steps too.
 
 ## The World
 
@@ -354,11 +478,30 @@ Scenario Outline: Quote <sku> x <qty>
 
 The rows are read when the run starts: CSV, TSV, XLSX (with a sheet), JSON (with an optional
 JSONPath) or a named query from the `db.queries` catalogue. They are filtered with the same
-`where` language as `.ez` Examples (`=`, `!=`, `>`, `<`, `>=`, `<=`, `~`, `and`, `or`, `not`,
-parentheses). Each row is one journey (`<id>-<first value>`). A source that matches no rows is
-reported as skipped with the reason. `eztest validate` checks the file, the filter and the
-columns. This line is not standard Gherkin: other Gherkin tools read it as an Examples block named
-`from data ...` without a table.
+`where` language as `.ez` Examples (`=`, `!=`, `>`, `<`, `>=`, `<=`, `~`, `^=` starts with, `$=` ends
+with, `in (a, b)`, `and`, `or`, `not`, parentheses). Each row is one journey (`<id>-<first value>`). A
+source that matches no rows is reported as skipped with the reason. `eztest validate` checks the file,
+the filter and the columns. This line is not standard Gherkin: other Gherkin tools read it as an
+Examples block named `from data ...` without a table.
+
+Two more clauses come after the filter:
+
+```gherkin
+Examples: from data "data/visits.csv" where species in (cat, dog) with ref = unique("VIS-"), due = addDays(today(), 14)
+Examples: from data "data/treatments.csv" resolve with query "FIND_PET_FOR_STATE" on clinic with state=<requiredState> as pet when dataMode = live
+Examples: from data "data/treatments.csv" resolve with query "FIND_PET_FOR_STATE" on clinic with state=<requiredState> as pet or keep row values
+```
+
+- **Derived columns** (`with name = expression, ...`): each row gets these columns; they are inline
+  expressions, evaluated once per attempt with the row's values as variables (`<ref>` and `${ref}` are the
+  same value in every step).
+- **Live data per row** (`resolve with query ... as pet`): for each row matching `when` (every row without
+  it; the condition reads the row and the run variables), the named query runs with the binds (`<column>`
+  is the row's value, `${var}` a variable) and its first row joins the row as `pet.<column>`
+  (`<pet.name>` in steps, `${pet.name}` in values). A query that finds nothing makes that row a test-data
+  problem: the journey is an error named `DataPrecondition` ("no test data: query FIND_PET_FOR_STATE on
+  clinic with state=discharged returned no row for pet"), classified as data, not as a product failure.
+  With `or keep row values` the row runs with its own values instead.
 
 ## Gherkin coverage
 

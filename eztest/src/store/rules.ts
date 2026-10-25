@@ -16,6 +16,7 @@ import { literal, protectQuotes, quoteText } from '../intent/quotes.js';
 import type { IntentRule, StepBody } from '../intent/rules.js';
 import type { Step } from '../core/index.js';
 import { parseTtl, ttlText } from './types.js';
+import { parseQueryArgs } from '../intent/rules-queries.js';
 
 const Q = String.raw`⟦\d+⟧`;
 const NAME = String.raw`(${Q}|[A-Za-z0-9_][\w.:@/-]*)`;
@@ -35,14 +36,14 @@ const nameOf = (s: string, q: string[]) => (s.startsWith('⟦') ? literal(s, q) 
 
 /** Keep only defined keys, in a fixed order (the same args however the line was written). */
 function ordered(o: Args): Args {
-  const keys = ['op', 'key', 'pool', 'value', 'each', 'file', 'sheet', 'column', 'namespace', 'ttlMs', 'pipeline', 'secret', 'default', 'keep', 'min', 'max'];
+  const keys = ['op', 'key', 'pool', 'value', 'each', 'file', 'sheet', 'column', 'namespace', 'ttlMs', 'pipeline', 'secret', 'default', 'orQuery', 'keep', 'min', 'max'];
   const out: Args = {};
   for (const k of keys) if (o[k] !== undefined) out[k] = o[k];
   return out;
 }
 
 /** Trailing clauses in any order: namespace, ttl, pipeline, secret, default, keep. */
-function clauses(tail: string, q: string[], allowed: Array<'namespace' | 'ttl' | 'pipeline' | 'secret' | 'default' | 'keep'>): Args {
+function clauses(tail: string, q: string[], allowed: Array<'namespace' | 'ttl' | 'pipeline' | 'secret' | 'default' | 'keep' | 'orQuery'>): Args {
   const out: Args = {};
   let t = tail.trim();
   while (t) {
@@ -54,7 +55,13 @@ function clauses(tail: string, q: string[], allowed: Array<'namespace' | 'ttl' |
     else if (allowed.includes('secret') && (m = /^as\s+(?:a\s+)?secret\b/i.exec(t))) out.secret = true;
     else if (allowed.includes('keep') && (m = /^keep\s+it(?:\s+(?:even\s+)?(?:if|when)\s+the\s+journey\s+fails)?\b/i.exec(t))) out.keep = true;
     else if (allowed.includes('default') && (m = new RegExp(String.raw`^or\s+(?:use|default\s+to)\s+(${Q}|\$\{[\w.]+\}|-?\d+(?:\.\d+)?|true|false)`, 'i').exec(t))) out.default = literal(m[1], q);
-    else throw fatal(`cannot read "${t}" (expected ${allowed.map((a) => ({ namespace: 'in namespace "x"', ttl: 'for 2 days', pipeline: 'for the pipeline', secret: 'as a secret', default: 'or use "value"', keep: 'and keep it' })[a]).join(', ')})`);
+    else if (allowed.includes('orQuery') && (m = new RegExp(String.raw`^or\s+(?:run|use)\s+(?:the\s+)?(?:named\s+)?query\s+(${Q}|[A-Za-z_][\w.-]*)(?:\s+(?:on|against|using)\s+([\w.-]+))?(?:\s+with\s+(.+?))?\s+as\s+(${VAR})`, 'i').exec(t))) {
+      // The query's first row when the value is missing or expired (a value another run usually leaves behind).
+      const query = nameOf(m[1], q);
+      if (!/^[A-Za-z_][\w.-]*$/.test(query)) throw fatal(`"or run query" runs a catalogue query by name (db.queries), got "${query}"`);
+      out.orQuery = { query, ...(m[2] ? { connection: m[2] } : {}), binds: parseQueryArgs(m[3], q).binds ?? {}, as: m[4] };
+    }
+    else throw fatal(`cannot read "${t}" (expected ${allowed.map((a) => ({ namespace: 'in namespace "x"', ttl: 'for 2 days', pipeline: 'for the pipeline', secret: 'as a secret', default: 'or use "value"', keep: 'and keep it', orQuery: 'or run query "NAME" on <alias> as row' })[a]).join(', ')})`);
     t = t.slice(m[0].length).trim();
   }
   return out;
@@ -82,7 +89,8 @@ export const STORE_RULES: IntentRule[] = [
     re: new RegExp(String.raw`^(?:load|read|get|fetch|take)\s+${NAME}\s+from\s+${STORE}(?:\s+as\s+(${VAR}))?(.*)$`, 'i'),
     build(m, q): StepBody {
       const key = nameOf(m[1], q);
-      const c = clauses(m[3], q, ['namespace', 'default']);
+      const c = clauses(m[3], q, ['namespace', 'default', 'orQuery']);
+      if (c.default !== undefined && c.orQuery) throw fatal('give either "or use <default>" or "or run query ...", not both');
       return { action: 'store', captureAs: m[2] ?? key.replace(/[^\w]/g, '_'), args: ordered({ op: 'load', key, ...c }) };
     },
   },
@@ -184,8 +192,12 @@ export function storeStepToText(s: Step): string {
   switch (a.op) {
     case 'save':
       return `Save ${val(a.value)} to the shared store as ${q(a.key)}${a.ttlMs !== undefined ? ` for ${ttlText(Number(a.ttlMs))}` : ''}${ns}${a.pipeline ? ' for the pipeline' : ''}${a.secret ? ' as a secret' : ''}`;
-    case 'load':
-      return `Load ${q(a.key)} from the shared store as ${s.captureAs ?? String(a.key)}${ns}${a.default !== undefined ? ` or use ${val(a.default)}` : ''}`;
+    case 'load': {
+      const oq = a.orQuery as { query: string; connection?: string; binds?: Record<string, unknown>; as: string } | undefined;
+      const binds = oq?.binds && Object.keys(oq.binds).length ? ` with ${Object.entries(oq.binds).map(([k, v]) => `${k}=${typeof v === 'string' && !/^\$\{[\w.]+\}$/.test(v) ? q(v) : String(v)}`).join(', ')}` : '';
+      const or = oq ? ` or run query ${q(oq.query)}${oq.connection ? ` on ${oq.connection}` : ''}${binds} as ${oq.as}` : '';
+      return `Load ${q(a.key)} from the shared store as ${s.captureAs ?? String(a.key)}${ns}${a.default !== undefined ? ` or use ${val(a.default)}` : ''}${or}`;
+    }
     case 'delete':
       return `Delete ${q(a.key)} from the shared store${ns}`;
     case 'poolAdd':

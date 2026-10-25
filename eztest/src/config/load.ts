@@ -407,6 +407,12 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
   const masker = opts.masker ?? defaultMasker;
   const sources: string[] = ['defaults'];
   let raw: Obj = {};
+  const consoleIgnore: string[] = [];
+  const layer = (o: Obj): Obj => {
+    const c = isObj(o.console) ? o.console : undefined;
+    if (c && Array.isArray(c.ignore)) consoleIgnore.push(...c.ignore.map((x) => String(x)));
+    return o;
+  };
 
   // 2. base file
   const baseFile = opts.configFile
@@ -416,7 +422,7 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
       : firstExisting(cwd, 'eztest.config');
   if (baseFile) {
     if (!existsSync(baseFile)) throw new ConfigError(`Config file not found: ${baseFile}`);
-    raw = deepMerge(raw, readConfigFile(baseFile));
+    raw = deepMerge(raw, layer(readConfigFile(baseFile)));
     sources.push(baseFile);
   }
 
@@ -433,7 +439,7 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
     }
     overlay = o;
     const { environments: _envs, projects: _p, project: _n, ...rest } = o;
-    raw = deepMerge(raw, rest);
+    raw = deepMerge(raw, layer(rest));
     sources.push(`projects.${project}`);
   }
 
@@ -442,18 +448,18 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
     if (!NAME_RE.test(env)) throw new ConfigError(`Invalid environment name "${env}"`);
     const envFile = firstExisting(join(cwd, 'config'), env);
     if (envFile) {
-      raw = deepMerge(raw, readConfigFile(envFile));
+      raw = deepMerge(raw, layer(readConfigFile(envFile)));
       sources.push(envFile);
     }
     if (project && overlay) {
       const inline = isObj(overlay.environments) ? overlay.environments[env] : undefined;
       if (isObj(inline)) {
-        raw = deepMerge(raw, inline);
+        raw = deepMerge(raw, layer(inline));
         sources.push(`projects.${project}.environments.${env}`);
       }
       const projFile = firstExisting(join(cwd, 'config', project), env);
       if (projFile) {
-        raw = deepMerge(raw, readConfigFile(projFile));
+        raw = deepMerge(raw, layer(readConfigFile(projFile)));
         sources.push(projFile);
       }
     }
@@ -485,9 +491,11 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
 
   // 7. overrides
   if (opts.overrides && Object.keys(opts.overrides).length) {
-    raw = deepMerge(raw, opts.overrides);
+    raw = deepMerge(raw, layer(opts.overrides));
     sources.push('overrides');
   }
+  // console.ignore patterns add up across the layers (base, project, environment) instead of replacing each other.
+  if (consoleIgnore.length) raw.console = { ...(isObj(raw.console) ? raw.console : {}), ignore: [...new Set(consoleIgnore)] };
   if (env && raw.environment === undefined) raw.environment = env;
   if (project) raw.project = project;
   raw = normalizeRawConfig(raw);

@@ -269,6 +269,11 @@ deletes their records through the providers, and keeps anything it could not
 delete for a later sweep. `CleanupRegistry` still attempts every undo even when
 some fail.
 
+Cleanup queries that journeys register (`On cleanup run query ...`, `Snapshot query ... and restore it
+with ...`, `cleanup.query` and `cleanup.snapshot` in code) go into the same journal with their resolved
+values, and the sweep runs them through the query catalogue. Code actions (`cleanup.add`) run only in the
+run that registered them.
+
 ### Unique data
 
 `unique("ORD-")`, `unique("C", 12)` (max length) and `uniqueEmail()` in

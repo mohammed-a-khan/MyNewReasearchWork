@@ -136,6 +136,24 @@ export const QUERY_RULES: IntentRule[] = category([
       if (!name) return undefined;
       return { action: 'db', db: db(name, m[2], parseQueryArgs(m[3], q)), captureAs: m[4] ?? m[5] ?? 'rows' };
     } },
+  { name: 'cleanup-query', keywords: ['cleanup', 'clean', 'teardown'], example: 'On cleanup run query "DELETE_VISIT" on clinic with visit_id=${visitId}',
+    re: new RegExp(String.raw`^(?:on|at|during)\s+(?:the\s+)?(?:cleanup|clean-?up|teardown)(?:\s*,)?\s+(?:run|execute)\s+(?:the\s+)?(?:named\s+)?query\s+(${Q})${CONN}(?:\s+with\s+(.+?))?$`, 'i'),
+    build: (m, q) => {
+      const name = queryName(m[1], q);
+      if (!name) throw new Error('On cleanup runs a catalogue query by name (db.queries), not inline SQL');
+      return { action: 'cleanup', args: { op: 'query', query: name, ...(m[2] ? { connection: m[2] } : {}), binds: parseQueryArgs(m[3], q).binds ?? {} } };
+    } },
+  { name: 'cleanup-snapshot', keywords: ['snapshot', 'restore'], example: 'Snapshot query "PET_ROW" on clinic with pet_id=${petId} and restore it with "RESTORE_PET" after the journey',
+    re: new RegExp(String.raw`^(?:snapshot|keep\s+a\s+snapshot\s+of)\s+(?:the\s+)?(?:named\s+)?query\s+(${Q})${CONN}(?:\s+with\s+(.+?))?\s+and\s+restore\s+it\s+(?:with|using)\s+(${Q}|[A-Za-z_][\w.-]*)(?:\s+after\s+the\s+(?:journey|scenario|test))?(?:\s+as\s+${KEY})?$`, 'i'),
+    build: (m, q) => {
+      const name = queryName(m[1], q);
+      if (!name) throw new Error('Snapshot reads a catalogue query by name (db.queries), not inline SQL');
+      const restore = m[4].startsWith('⟦') ? literal(m[4], q) : m[4];
+      return { action: 'cleanup', ...(m[5] ? { captureAs: m[5] } : {}), args: { op: 'snapshot', query: name, ...(m[2] ? { connection: m[2] } : {}), binds: parseQueryArgs(m[3], q).binds ?? {}, restore } };
+    } },
+  { name: 'transaction-block', keywords: ['transaction', 'begin'], example: 'In a transaction on clinic',
+    re: /^(?:in\s+(?:a|one|the\s+same)\s+(?:database\s+)?transaction|begin\s+(?:a\s+)?transaction|within\s+a\s+transaction)\s+(?:on|against|in|using)\s+([\w.-]+)\s*:?$/i,
+    build: (m) => ({ action: 'transaction', args: { connection: m[1] }, steps: [] }) },
   { name: 'call-procedure-out', keywords: ['call', 'execute', 'exec'], example: 'Call procedure "billing.close_invoice" on ledger with params \'[42]\' and out status, total:number as closed',
     re: new RegExp(String.raw`^(?:call|execute|run|exec)\s+(?:the\s+)?(?:stored\s+)?procedure\s+(${Q}|[\w.]+)\s+(?:on|against|in|using)\s+([\w.-]+)(?:\s+with\s+params?\s+(\S+))?\s+(?:and\s+)?(?:with\s+)?out(?:put)?\s+(?:params?\s+|parameters?\s+)?(.+?)\s+(?:and\s+(?:store\s+(?:them\s+)?)?)?as\s+${KEY}$`, 'i'),
     build: (m, q) => {
@@ -155,6 +173,16 @@ function renderValue(v: BindValue): string {
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (/^\$\{[A-Za-z_][\w.]*\}$/.test(v)) return v;
   return quoteText(v);
+}
+
+/** Canonical .ez line of a cleanup step (On cleanup run query ..., Snapshot query ...) or a transaction block opener. */
+export function cleanupStepToText(s: Pick<Step, 'action' | 'args' | 'captureAs'>): string {
+  const a = (s.args ?? {}) as { op?: string; query?: string; connection?: string; binds?: Record<string, BindValue>; restore?: string };
+  if (s.action === 'transaction') return `In a transaction on ${a.connection ?? ''}`;
+  const on = a.connection ? ` on ${a.connection}` : '';
+  const binds = a.binds && Object.keys(a.binds).length ? ` with ${Object.entries(a.binds).map(([k, v]) => `${k}=${renderValue(v)}`).join(', ')}` : '';
+  if (a.op === 'snapshot') return `Snapshot query ${quoteText(a.query ?? '')}${on}${binds} and restore it with ${quoteText(a.restore ?? '')} after the journey${s.captureAs ? ` as ${s.captureAs}` : ''}`;
+  return `On cleanup run query ${quoteText(a.query ?? '')}${on}${binds}`;
 }
 
 /** Canonical .ez line for a catalogue-query or OUT-param procedure step (undefined for other db steps). */

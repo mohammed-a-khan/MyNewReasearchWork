@@ -29,6 +29,22 @@ import { openCodeHost, type CodeHostHandle } from './code-host.js';
 import type { FlowEnv, FlowScope } from './flow.js';
 import { skippedStep } from './step.js';
 import { beforeAllFor } from './bdd-all.js';
+import { missingVariables } from './actions.js';
+import { isSecretValue, missingNames } from './inline-values.js';
+import { MASTER_KEY_ENV, decryptValue, isEncryptedValue } from '../config/crypto.js';
+import { literal } from '../sdk/internal.js';
+
+/**
+ * `I continue as "doc"`, `I act as "desk"`, `I switch to user "doc"`: the following steps run as that actor
+ * (scenarios tagged `@actors:desk=receptionist,doc=vet`; an actor with a role signs in when it first acts).
+ */
+const ACTOR_STEP = /^(?:(?:I|we|the user)\s+)?(?:continue|act|am acting|switch\s+to\s+(?:user|actor)|switch)\s+as\s+(?:"([^"]+)"|'([^']+)'|([A-Za-z_][\w.-]*))$|^(?:(?:I|we)\s+)?switch\s+to\s+(?:user|actor)\s+(?:"([^"]+)"|'([^']+)'|([A-Za-z_][\w.-]*))$/i;
+
+/** The actor a step switches to, or undefined. */
+export function actorOfStep(text: string): string | undefined {
+  const m = ACTOR_STEP.exec(text.trim());
+  return m ? (m.slice(1).find((x) => x !== undefined) as string) : undefined;
+}
 
 interface BddStepArgs {
   keyword: string;
@@ -172,6 +188,45 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
     for (const hk of list) await hk.fn.call(world, { ...ctx, ...(result ? { result } : {}) });
   };
 
+  // ---------------------------------------------------------------- argument resolution (bdd.resolveArguments)
+  const secretValue = async (v: string): Promise<string> => {
+    if (flow.opts.resolveSecret) return flow.opts.resolveSecret(v);
+    const t = v.trim();
+    if (isEncryptedValue(t as unknown)) {
+      const plain = decryptValue(t, process.env[MASTER_KEY_ENV]);
+      flow.opts.addSecret?.(plain);
+      return plain;
+    }
+    throw new Error(`${t.split('/').slice(0, 3).join('/')}/... cannot be resolved here: run through the EZTest engine (eztest run) so the secret stores are configured`);
+  };
+  type Resolved = { args: unknown[]; dataTable?: string[][]; docString?: string; evaluated: Record<string, unknown> };
+  /** Interpolate the captured arguments, cells and doc string; a `${name}` nothing sets fails before the definition runs. */
+  const resolveValues = async (s: Step, args: unknown[], table: string[][] | undefined, doc: string | undefined): Promise<Resolved | { missing: string[] }> => {
+    const c = flow.ctx(s, scope);
+    const vars = c.vars();
+    const strings = [...args.filter((x): x is string => typeof x === 'string'), ...(table?.flat() ?? []), ...(doc !== undefined ? [doc] : [])];
+    const missing = [...new Set(strings.flatMap((t) => missingNames(t, vars)))];
+    if (missing.length) return { missing };
+    const seen = new Set(c.expressions?.values.keys() ?? []);
+    const one = async (t: string): Promise<string> => {
+      const v = t.includes('${') ? c.interpolate(t) : t;
+      return isSecretValue(v) ? secretValue(v) : v;
+    };
+    const out: Resolved = { args: [], evaluated: {} };
+    for (const x of args) out.args.push(typeof x === 'string' ? await one(x) : x);
+    if (table) {
+      out.dataTable = [];
+      for (const row of table) {
+        const cells: string[] = [];
+        for (const cell of row) cells.push(await one(cell));
+        out.dataTable.push(cells);
+      }
+    }
+    if (doc !== undefined) out.docString = await one(doc);
+    for (const [k, v] of c.expressions?.values ?? []) if (!seen.has(k)) out.evaluated[k] = v;
+    return out;
+  };
+
   const runStep = async (s: Step): Promise<StepResult | undefined> => {
     const a = (s.args ?? {}) as unknown as BddStepArgs;
     const g = info(s);
@@ -206,23 +261,65 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
         h.results.push({ stepId: s.id, intent: s.intent, status: 'failed', startedAt: nowIso(), durationMs: 0, conditions: [], evidence: [], error: { name: 'ParameterError', message: `A parameter of "${text}" could not be converted: ${(e as Error).message}` } });
         return annotate(h, before, { ...g, match: 'definition', location: `${rel(d.file, baseDir)}:${d.line}`, pattern: String(d.pattern) });
       }
-      const extra = dataTable ? [dataTable] : docString ? [docString.content] : [];
+      const mark = { ...g, match: 'definition' as const, location: `${rel(d.file, baseDir)}:${d.line}`, pattern: String(d.pattern) };
+      // Arguments, cells and the doc string get EZTest's interpolation first: ${var}, ${a.b.0}, ${x:-default},
+      // inline expressions, secret:// and ENC(...) values. A ${name} nothing sets fails before the definition runs.
+      let stepCtx = ctx;
+      let table = dataTable;
+      let doc = docString;
+      let evaluated: Record<string, unknown> = {};
+      if (b.resolveArguments !== false) {
+        let r: Awaited<ReturnType<typeof resolveValues>>;
+        try {
+          r = await resolveValues(s, args, a.dataTable, docString?.content);
+        } catch (e) {
+          h.results.push({ stepId: s.id, intent: s.intent, status: 'failed', startedAt: nowIso(), durationMs: 0, conditions: [], evidence: [], error: { name: 'ArgumentError', message: `An argument of "${text}" could not be resolved: ${(e as Error).message.split('\n')[0]}` } });
+          return annotate(h, before, mark);
+        }
+        if ('missing' in r) {
+          h.results.push({ stepId: s.id, intent: s.intent, status: 'failed', startedAt: nowIso(), durationMs: 0, conditions: [], evidence: [], error: { name: 'MISSING_VARIABLE', message: missingVariables(r.missing).message } });
+          return annotate(h, before, mark);
+        }
+        args = r.args;
+        evaluated = r.evaluated;
+        if (r.dataTable) table = new DataTable(r.dataTable);
+        if (r.docString !== undefined && docString) doc = { ...docString, content: r.docString };
+        if (table !== dataTable || doc !== docString) stepCtx = ctxFor({ gherkinStep: gStep, ...(table ? { dataTable: table } : {}), ...(doc ? { docString: doc } : {}) });
+      }
+      const extra = table ? [table] : doc ? [doc.content] : [];
+      const body = async () => {
+        await runStepHooks(beforeStep, stepCtx);
+        let err: unknown;
+        try {
+          await withTimeout(Promise.resolve(d.fn.call(world, stepCtx, ...args, ...extra)), d.options.timeout, `Step "${text}"`);
+        } catch (e) {
+          err = e;
+        }
+        await runStepHooks(afterStep, stepCtx, err ? { status: 'failed', error: { message: (err as Error).message ?? String(err) } } : { status: 'passed' });
+        if (err) throw err;
+      };
       try {
-        await h.group(s.intent, async () => {
-          await runStepHooks(beforeStep, ctx);
-          let err: unknown;
-          try {
-            await withTimeout(Promise.resolve(d.fn.call(world, ctx, ...args, ...extra)), d.options.timeout, `Step "${text}"`);
-          } catch (e) {
-            err = e;
-          }
-          await runStepHooks(afterStep, ctx, err ? { status: 'failed', error: { message: (err as Error).message ?? String(err) } } : { status: 'passed' });
-          if (err) throw err;
-        }, source);
+        // `{ retry: { attempts, every } }`: the definition runs again until it passes; only the last try is kept.
+        if (d.options.retry) await h.retrying(s.intent, body, { attempts: d.options.retry.attempts ?? 3, every: d.options.retry.every ?? 1000 }, source);
+        else await h.group(s.intent, body, source);
       } catch {
         // recorded as the step's failure
       }
-      return annotate(h, before, { ...g, match: 'definition', location: `${rel(d.file, baseDir)}:${d.line}`, pattern: String(d.pattern) });
+      const r = annotate(h, before, mark);
+      // Inline expressions evaluated for this step are recorded with it (and in the attempt's ledger).
+      if (r && Object.keys(evaluated).length) r.captured = { ...(r.captured ?? {}), ...evaluated };
+      return r;
+    }
+
+    // Multi-user scenarios: `I continue as "doc"` / `I act as "desk"` switches the actor of the following steps.
+    const actor = actorOfStep(text);
+    if (actor !== undefined) {
+      try {
+        await h.exec({ id: s.id, intent: s.intent, action: 'actor', value: literal(actor) }, source ? { source } : {});
+      } catch {
+        // recorded as the step's failure
+      }
+      return annotate(h, before, { ...g, match: 'ez', location: 'actor' });
     }
 
     const fb = b.fallback ? ezFallback({ text, type: a.type, ...(docString ? { docString } : {}), ...(a.dataTable ? { dataTable: a.dataTable } : {}) }) : undefined;
@@ -284,6 +381,8 @@ export async function runBddScenario(journey: Journey, scope: FlowScope, flow: F
       attachments = [];
       const r = await runStep(s);
       takeAttachments(r);
+      // Several users (@actors:...): every Gherkin step says whose session it ran in.
+      if (r && flow.actors?.labelled && !r.actor) r.actor = scope.actor ?? flow.actors.primary;
       if (failedHard(r)) blocked = `not run: step "${s.intent}" ${r!.status}`;
     }
     // After hooks run even when a step failed (not when the run was cancelled, unless teardownOnCancel).

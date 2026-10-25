@@ -94,10 +94,16 @@ export function identityVaultFromConfig(
   for (const [name, r] of Object.entries(config.identity.roles)) {
     const { passwordRotation, password, ...rest } = r;
     let pw: RoleDefinition['password'];
-    if (passwordRotation) pw = rotationHandle(createPasswordRotationProvider(passwordRotation, { registry, role: name }), registry, name);
+    let passwordCandidates: RoleDefinition['passwordCandidates'];
+    if (passwordRotation) {
+      const provider = createPasswordRotationProvider(passwordRotation, { registry, role: name });
+      pw = rotationHandle(provider, registry, name);
+      // overlapDays: the passwords around a rotation boundary are tried in order (the last one that worked first).
+      if (provider.candidates && passwordRotation.overlapDays) passwordCandidates = () => provider.candidates!();
+    }
     else if (password !== undefined) pw = password;
     else if (!(r.api && r.username === undefined && r.loginUrl === undefined)) throw new EzTestError(`Role ${name}: needs "password" or "passwordRotation"`, 'IDENTITY_CONFIG');
-    roles[name] = { ...rest, password: pw };
+    roles[name] = { ...rest, password: pw, ...(passwordCandidates ? { passwordCandidates } : {}) };
   }
   return new IdentityVault({
     // Account pools: every pooled account is a role of its own (role#1, role#2, ...) with its own cached session.

@@ -6,6 +6,7 @@
  * (or a quoted literal containing one, e.g. '%${name}%') becomes a bound
  * parameter in the connection's placeholder style.
  */
+import { activeTransaction } from './db-tx.js';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 import {
@@ -214,7 +215,7 @@ export function procedureSql(name: string, n: number, dialect: Dialect): string 
 }
 
 /** A catalogue bind value: a lone "${var}" keeps the variable's type, other strings are interpolated. */
-function bindFromStep(v: BindValue, ctx: StepContext): BindValue {
+export function bindFromStep(v: BindValue, ctx: StepContext): BindValue {
   if (typeof v !== 'string') return v;
   const whole = /^\$\{([A-Za-z_][\w.]*)\}$/.exec(v);
   if (whole) return sqlParam(lookupVar(ctx.vars(), whole[1]), whole[1]);
@@ -253,7 +254,9 @@ export async function dbAction(step: Step, ctx: StepContext, opts: RunOptions): 
     const dialect: Dialect = (await opts.db.dialect?.(q.connection)) ?? 'sqlite';
     bound = q.procedure ? { sql: procedureSql(q.procedure, given.length, dialect), params: given } : bindSql(q.sql, given, ctx.vars(), dialect);
   }
-  const rows = await opts.db.query(connection, bound.sql, bound.params as DbQueryParams);
+  // Inside "In a transaction on <alias>" (or db.transaction in code) the statement runs in that transaction.
+  const tx = activeTransaction(connection);
+  const rows = tx ? await tx.query(bound.sql, bound.params as DbQueryParams) : await opts.db.query(connection, bound.sql, bound.params as DbQueryParams);
   let v: unknown = rows;
   switch (q.capture ?? 'rows') {
     case 'row':

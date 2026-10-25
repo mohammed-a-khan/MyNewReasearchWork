@@ -21,6 +21,7 @@ import { evaluateConditions } from './conditions.js';
 import { safeName } from './evidence.js';
 import { executeStep, type FlowEnv, type FlowScope } from './flow.js';
 import { envFor, skippedStep } from './step.js';
+import { runInTransaction, transactionEvidence } from './db-tx.js';
 import { basename, dirname, resolve } from 'node:path';
 
 /** A step group (the journey root, a `step()` or a `Run code` step) collecting child results. */
@@ -211,6 +212,76 @@ class Host implements SdkHost {
       throw error;
     }
     return value as T;
+  }
+
+  /**
+   * A reported group whose body is tried again until it passes: `attempts` times at most, or until `within` ms
+   * passed, waiting `every` ms in between. Only the last attempt's steps are kept; each earlier failure is a
+   * warning on the group ("attempt 1 of 3 failed: ..."). Throws the last failure when no attempt passed.
+   */
+  async retrying<T>(name: string, fn: () => Promise<T>, o: { attempts?: number; within?: number; every?: number; message?: string }, source?: StepSource): Promise<T> {
+    const step = Step.parse({ id: this.idFor(source, name), intent: name, action: 'group', value: name, steps: [], ...(source ? { source } : {}) });
+    this.checkCancelled(step);
+    const parent = this.node();
+    const every = Math.max(0, o.every ?? 500);
+    const max = o.attempts ?? (o.within !== undefined ? Number.POSITIVE_INFINITY : 3);
+    const deadline = o.within !== undefined ? Date.now() + o.within : Number.POSITIVE_INFINITY;
+    const warnings: string[] = [];
+    this.flow.onStep?.(step.id);
+    for (let attempt = 1; ; attempt++) {
+      const { result, value, error } = await this.runGroup(step, fn, true);
+      const failed = error !== undefined || result.status === 'failed';
+      const more = attempt < max && Date.now() + every < deadline && !this.flow.opts.signal?.aborted;
+      if (!failed || !more) {
+        if (attempt > 1) result.captured = { ...(result.captured ?? {}), attempts: attempt };
+        if (warnings.length) result.warnings = [...warnings, ...(result.warnings ?? [])];
+        if (failed && o.message) result.error = { message: `${o.message}${result.error?.message ? ` (${result.error.message})` : ''}` };
+        parent.children.push(result);
+        if (error !== undefined) {
+          if (recorded.has(error as object)) parent.thrown.add(result);
+          if (o.message) {
+            const e = new StepFailure(`${name}: ${result.error?.message ?? 'failed'}`, result);
+            recorded.add(e);
+            parent.thrown.add(result);
+            throw e;
+          }
+          throw error;
+        }
+        return value as T;
+      }
+      warnings.push(`attempt ${attempt}${Number.isFinite(max) ? ` of ${max}` : ''} failed: ${result.error?.message ?? 'failed'}`);
+      if (every) await new Promise((r) => setTimeout(r, every));
+    }
+  }
+
+  /** Run `fn` as a group that is not added to any parent (cleanup actions after the journey). */
+  async detached(name: string, fn: () => Promise<unknown>, id: string): Promise<StepResult> {
+    const step = Step.parse({ id, intent: name, action: 'group', value: name, steps: [] });
+    const { result } = await this.runGroup(step, fn, false);
+    return result;
+  }
+
+  /** The attempt's cleanup actions (`cleanup.add` registers a code action here). */
+  addCleanup(description: string, fn: () => Promise<unknown>): void {
+    const c = this.ctx().cleanup;
+    if (!c) throw new EzTestError('cleanup.add needs the web journey runner (cleanup actions run after the journey)', 'NO_HANDLER');
+    c.addCode(description, (id) => this.detached(`Cleanup: ${description}`, fn, id));
+  }
+
+  /** Run `fn` with a transaction open on `connection` (db.transaction): a reported group with the statements as evidence. */
+  async transaction<T>(connection: string, fn: () => Promise<T>, source?: StepSource): Promise<T> {
+    return this.group(`Transaction on ${connection}`, async () => {
+      const out = await runInTransaction(this.flow.opts.db, connection, fn);
+      const ref = await this.evidence('data', `transaction-${slugify(connection)}-${++this.seq}.json`, transactionEvidence(connection, out, this.flow.opts.mask), `transaction on ${connection} (${out.committed ? 'committed' : 'rolled back'})`);
+      const why = out.error instanceof Error ? out.error.message.split('\n')[0] : out.error !== undefined ? String(out.error) : '';
+      // The outcome is a step of its own, with the statements as evidence; a rollback fails the transaction.
+      await this.record(out.committed ? `Commit the transaction on ${connection} (${out.statements.length} statement(s))` : `Roll back the transaction on ${connection}`, async (rec) => {
+        rec.evidence(ref);
+        rec.capture('statements', out.statements.length);
+        if (!out.committed) rec.fail(`rolled back: ${why}`);
+      });
+      return out.value as T;
+    }, source);
   }
 
   /**
@@ -465,6 +536,8 @@ export interface CodeHostHandle {
   codeError(e: unknown): Promise<StepResult>;
   /** True when the error's failure is already a recorded step result. */
   isRecorded(e: unknown): boolean;
+  /** A group tried again until it passes (step definitions with `{ retry }`). */
+  retrying<T>(name: string, fn: () => Promise<T>, o: { attempts?: number; within?: number; every?: number }, source?: StepSource): Promise<T>;
 }
 
 export function openCodeHost(scope: FlowScope, flow: FlowEnv, file: string): CodeHostHandle {
@@ -478,5 +551,6 @@ export function openCodeHost(scope: FlowScope, flow: FlowEnv, file: string): Cod
     exec: (input, o) => host.exec(input, o),
     codeError: (e) => host.codeError(e),
     isRecorded: (e) => !!e && typeof e === 'object' && recorded.has(e),
+    retrying: (name, fn, o, source) => host.retrying(name, fn, o, source),
   };
 }

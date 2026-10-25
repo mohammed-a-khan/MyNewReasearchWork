@@ -103,6 +103,8 @@ export interface StepResult {
   manual?: ManualStepRecord;
   /** Gherkin scenarios (docs/bdd.md): the feature-file step or hook this result belongs to, and what it was bound to. */
   gherkin?: GherkinStepRecord;
+  /** A cleanup action the journey registered, run after it (docs/test-data.md, "Cleanup actions"). */
+  cleanup?: boolean;
 }
 
 /** How a Gherkin step (or hook) of a `.feature` scenario ran. */

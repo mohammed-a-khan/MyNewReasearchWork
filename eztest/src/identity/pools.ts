@@ -23,7 +23,7 @@ import type { Page } from '../browser/index.js';
 import { EzTestError, silentLogger, sleep, type Journey, type JourneyResult, type Logger } from '../core/index.js';
 import type { LeaseRegistry, Lease } from '../data/lease.js';
 import type { RoleDefinition } from './vault.js';
-import type { IdentityVault } from './vault.js';
+import type { IdentityVault, SignInHooks } from './vault.js';
 
 export interface PoolAccount {
   username: string;
@@ -319,12 +319,29 @@ export function createPooledLogin(o: PooledLoginOptions): PooledLogin {
         await sleep(c.waitMs);
       }
     }
+    // Every sign-in attempt counts (password rotation tries several passwords): the guard is asked before each
+    // further attempt and told about each failed one.
+    let counted = false;
+    const guard = o.guard;
+    const hooks: SignInHooks | undefined = guard ? {
+      beforeAttempt: async (i) => {
+        if (i === 0) return;
+        const c = await guard.check(key);
+        if (!c.allowed) throw new EzTestError(c.reason ?? `login as ${key} is blocked`, 'LOGIN_LOCKOUT_PROTECTION');
+        if (c.waitMs > 0) await sleep(c.waitMs);
+      },
+      failedAttempt: async (e) => {
+        if (!LOGIN_FAILURE_CODES.has((e as EzTestError).code)) return;
+        counted = true;
+        await guard.recordFailure(key, e.message);
+      },
+    } : undefined;
     try {
-      await o.vault.signIn(page, vaultRole, ctx);
+      await o.vault.signIn(page, vaultRole, ctx, hooks);
       await o.guard?.recordSuccess(key);
     } catch (e) {
       const code = (e as EzTestError).code;
-      if (o.guard && LOGIN_FAILURE_CODES.has(code)) await o.guard.recordFailure(key, (e as Error).message);
+      if (o.guard && !counted && LOGIN_FAILURE_CODES.has(code)) await o.guard.recordFailure(key, (e as Error).message);
       throw e;
     }
   };

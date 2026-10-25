@@ -789,7 +789,7 @@ function consoleView(t) {
   function draw() {
     tbody.textContent = '';
     rows.filter(function (c) { return on[c.l]; }).forEach(function (c) {
-      tbody.appendChild(el('tr', null, [el('td', { cls: 'num small', text: c.at !== undefined ? '+' + fmtMs(c.at) : '-' }), el('td', null, [badge(LEVEL_STATE[c.l] || 'skipped', c.l)]), el('td', { cls: 'num', text: c.step ? String(c.step) : '-' }), el('td', null, [el('span', { cls: 'mono small', text: c.t }), c.loc ? el('div', { cls: 'small muted mono', text: c.loc }) : null])]));
+      tbody.appendChild(el('tr', null, [el('td', { cls: 'num small', text: c.at !== undefined ? '+' + fmtMs(c.at) : '-' }), el('td', null, [badge(LEVEL_STATE[c.l] || 'skipped', c.l)]), el('td', { cls: 'num', text: c.step ? String(c.step) : '-' }), el('td', null, [el('span', { cls: 'mono small' + (c.ig ? ' muted' : ''), text: c.t }), c.ig ? el('span', { cls: 'small muted', text: ' (ignored: console.ignore)' }) : null, c.loc ? el('div', { cls: 'small muted mono', text: c.loc }) : null])]));
     });
   }
   var chips = el('div', { cls: 'chips', role: 'group', 'aria-label': 'Console levels' }, Object.keys(levels).map(function (l) {
@@ -909,7 +909,10 @@ function renderDetail(t) {
     var ntb = el('tbody', null, t.network.map(function (n) { return el('tr', null, [el('td', { cls: 'mono', text: n.method }), el('td', { cls: 'mono', style: 'word-break:break-all', text: n.url }), el('td', null, [n.failure ? badge('failed', n.failure) : badge(n.status >= 400 ? 'failed' : 'passed', String(n.status))]), el('td', { cls: 'num', text: n.ms !== undefined ? fmtMs(n.ms) : '-' })]); }));
     kids.push(panel('Network', [el('div', { cls: 'tbl-wrap' }, [el('table', null, [el('caption', { text: 'Network around the failing step' }), el('thead', null, [el('tr', null, [el('th', { scope: 'col', text: 'Method' }), el('th', { scope: 'col', text: 'URL' }), el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Time' })])]), ntb])])]));
   }
-  if (t.console && t.console.length) kids.push(panel('Console', [consoleView(t)], [el('span', { cls: 'muted small', text: t.console.length + ' messages' })]));
+  if (t.console && t.console.length) {
+    var ignoredN = t.console.filter(function (c) { return c.ig; }).length;
+    kids.push(panel('Console', [consoleView(t)], [el('span', { cls: 'muted small', text: t.console.length + ' messages' + (ignoredN ? ', ' + ignoredN + ' ignored' : '') })]));
+  }
   if (t.attempts && t.attempts.length > 1) kids.push(panel('Retries', attemptsView(t), [el('span', { cls: 'muted small', text: t.attempts.length + ' attempts' })]));
   if (t.history) kids.push(panel('History', [el('p', null, ['Recent outcomes (oldest first): ', spark(t.history.sequence)]), dl([['State', t.history.state], ['Failure rate', Math.round(t.history.failRate * 100) + '% of ' + t.history.samples + ' runs'], ['Why', t.history.reasons.join('; ')]])]));
   if (t.row) {

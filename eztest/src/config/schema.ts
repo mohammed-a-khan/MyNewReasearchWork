@@ -111,6 +111,11 @@ export const RoleLoginSchema = z.discriminatedUnion('type', [
  */
 export const PasswordRotationSchema = z.object({
   type: z.string().min(1),
+  /**
+   * Days on each side of a rotation boundary during which the neighbouring period's password is also tried
+   * (current first, then the previous or next one), for accounts whose password changes a little early or late.
+   */
+  overlapDays: z.number().int().min(0).max(31).optional(),
 }).catchall(z.unknown());
 
 export const RoleSchema = z
@@ -451,6 +456,15 @@ export const AdoSchema = z.object({
   commentOnRequirements: z.boolean().default(false),
   /** Mark retried-then-passed and history-flaky results as flaky through the flaky-test API. */
   markFlaky: z.boolean().default(false),
+  /**
+   * Custom test-id tags mapped to Azure DevOps test case ids for publishing: `pattern` is a regular
+   * expression whose first group is the key (`@TC-([A-Z0-9_]+)`), `map` a YAML or JSON file of key -> id
+   * (`TC-ABC_1: 1234`; the key may be written with or without the tag's prefix).
+   */
+  testCaseTag: z.object({
+    pattern: z.string().min(1).refine((p) => { try { new RegExp(p); return true; } catch { return false; } }, { message: 'not a valid regular expression' }),
+    map: z.string().min(1),
+  }).optional(),
 });
 
 /** Git and hosting-provider integration (docs/git.md). */
@@ -522,7 +536,12 @@ export const TemplatesSchema = z.object({
 /** Date helpers used by addBusinessDays / isBusinessDay / nextBusinessDay. */
 export const DatesSchema = z.object({
   /** Holiday calendar: a file (YAML/JSON list, or one YYYY-MM-DD per line) or an inline list of dates. */
-  holidays: z.union([z.string().min(1), z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))]).optional(),
+  holidays: z.union([
+    z.string().min(1),
+    z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+    /** Rows of a named query (db.queries): `{ query: CLINIC_HOLIDAYS, column: day, connection?: clinic }`. */
+    z.object({ query: z.string().regex(/^[A-Za-z_][\w.-]*$/), column: z.string().min(1), connection: z.string().min(1).optional() }),
+  ]).optional(),
   /** Weekend days (0=Sunday..6=Saturday). Default [0, 6]. */
   weekend: z.array(z.number().int().min(0).max(6)).default([0, 6]),
 });
@@ -782,6 +801,11 @@ export const BddSchema = z.object({
   language: z.string().min(2).default('en'),
   /** Passed to every World as `parameters`. */
   worldParameters: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Interpolate step-definition arguments, data table cells and doc strings before the definition runs
+   * (`${var}`, `${a.b.0.c}`, `${x:-default}`, inline expressions, `secret://` / `ENC(...)` values). Default true.
+   */
+  resolveArguments: z.boolean().default(true),
 });
 
 const DURATION = /^\s*\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|weeks?)?\s*$/i;
@@ -934,6 +958,17 @@ export const EzTestConfigSchema = z.object({
   d365: z.record(z.string(), z.unknown()).optional(),
   security: SecuritySchema.prefault({}),
   dialogs: DialogsSchema.prefault({}),
+  /**
+   * Browser console noise: messages matching one of these regular expressions are left out of
+   * `no console errors` checks and failure diagnostics, and counted as "ignored" in reports.
+   * Patterns of the base file, the project and the environment add up.
+   */
+  console: z.object({ ignore: z.array(z.string().min(1).refine((p) => { try { new RegExp(p); return true; } catch { return false; } }, { message: 'not a valid regular expression' })).default([]) }).prefault({}),
+  /** Run selection defaults. */
+  run: z.object({
+    /** Journeys and scenarios with any of these tags are left out, unless `--tags` selects the tag by name. Default []. */
+    excludeTags: z.array(z.string().min(1)).default([]),
+  }).prefault({}),
   hooks: HooksSchema.prefault({}),
   email: EmailSchema.optional(),
   sms: SmsSchema.optional(),

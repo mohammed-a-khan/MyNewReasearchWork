@@ -227,7 +227,7 @@ export async function evaluateAdvancedCondition(c: Condition, env: ConditionEnv)
     case 'console': {
       if (!env.session) return fail(c, 'no browser session');
       const want = a.contains === undefined ? undefined : I(a.contains);
-      const hits = env.session.console.filter((m) => (a.level === 'any' || m.type === a.level || (a.level === 'error' && m.type === 'pageerror')) && (want === undefined || m.text.includes(want)));
+      const hits = env.session.console.filter((m) => !m.ignored && (a.level === 'any' || m.type === a.level || (a.level === 'error' && m.type === 'pageerror')) && (want === undefined || m.text.includes(want)));
       const n = hits.length;
       const tooMany = a.max !== undefined && n > a.max;
       const tooFew = a.min !== undefined ? n < a.min : a.max === undefined && n === 0;

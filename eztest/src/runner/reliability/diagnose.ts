@@ -21,7 +21,7 @@ export interface DiagnoseInput {
   error: string;
   conditions: ConditionResult[];
   /** Console entries of the attempt (type, text, ISO time). */
-  console: Array<{ type: string; text: string; at: string }>;
+  console: Array<{ type: string; text: string; at: string; ignored?: boolean }>;
   /** Network entries of the attempt (with the step id they happened in). */
   network: Array<{ method: string; url: string; status?: number; failure?: string; stepId?: string; resourceType?: string }>;
   /** When the step started (ms epoch). */
@@ -189,7 +189,7 @@ export async function diagnoseFailure(d: DiagnoseInput): Promise<FailureDiagnosi
     const resolvedNone = target ? !candidates.some((c) => c.matches === 1) : false;
     const similar = target && resolvedNone ? await similarElements(page, ctx, step, target, d.fingerprint) : [];
     const consoleErrors = d.console
-      .filter((c) => (c.type === 'error' || c.type === 'pageerror') && Date.parse(c.at) >= d.since - 1000)
+      .filter((c) => !c.ignored && (c.type === 'error' || c.type === 'pageerror') && Date.parse(c.at) >= d.since - 1000)
       .map((c) => c.text.slice(0, 300))
       .slice(-10);
     // Failed calls during the step: the session's live request records (status as soon as the response

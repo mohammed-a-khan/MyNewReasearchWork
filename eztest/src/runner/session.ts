@@ -16,6 +16,8 @@ export interface ConsoleRecord {
   url: string;
   at: string;
   seq: number;
+  /** Matched config console.ignore: noise, left out of console checks and diagnostics. */
+  ignored?: boolean;
 }
 
 export interface RequestRecord {
@@ -55,6 +57,8 @@ export interface SessionOptions {
   dialogs?: DialogPolicy;
   /** Called for each page opened after the first (popups, new tabs). */
   onNewPage?: (page: Page) => void;
+  /** Console noise (config console.ignore). */
+  consoleIgnore?: (text: string) => boolean;
 }
 
 const MAX_RECORDS = 5000;
@@ -72,6 +76,8 @@ export class BrowserSession {
   readonly sockets = new Map<string, WsClient>();
   /** Extra HTTP headers set by steps (merged into the context). */
   extraHeaders: Record<string, string> = {};
+  /** The role the last "Log in as" signed this context in as (a different role clears the context first). */
+  signedInAs?: string;
   /** Network routes installed by steps (mock, delay, block, headers), for "Stop mocking ...". */
   readonly routes: Array<{ id: number; url: string; op: string; matcher: (url: URL) => boolean; handler: (route: import('../browser/index.js').Route) => Promise<void> }> = [];
   /** Warnings not yet attached to a step result. */
@@ -127,8 +133,9 @@ export class BrowserSession {
 
   private attach(page: Page): void {
     this.dialogs.attach(page);
-    page.on('console', (m) => this.push(this.console, { type: m.type(), text: this.mask(m.text()), url: page.url(), at: nowIso(), seq: this.nextSeq() }));
-    page.on('pageerror', (e) => this.push(this.console, { type: 'pageerror', text: this.mask(e.message), url: page.url(), at: nowIso(), seq: this.nextSeq() }));
+    const noise = (text: string) => (this.opts.consoleIgnore?.(text) ? { ignored: true } : {});
+    page.on('console', (m) => this.push(this.console, { type: m.type(), text: this.mask(m.text()), url: page.url(), at: nowIso(), seq: this.nextSeq(), ...noise(m.text()) }));
+    page.on('pageerror', (e) => this.push(this.console, { type: 'pageerror', text: this.mask(e.message), url: page.url(), at: nowIso(), seq: this.nextSeq(), ...noise(e.message) }));
     page.on('request', (req) => {
       const post = req.postData();
       this.push(this.requests, {

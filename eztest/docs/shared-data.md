@@ -41,6 +41,7 @@ Delete "pending-order" from the shared store
 | `... for the pipeline` | Also handed to the CI pipeline (see [Pipeline stages](#pipeline-stages)). |
 | `Load "pending-order" from the shared store as orderId` | Loads it into `${orderId}`. Fails when the value is missing or expired, and says which, who saved it and when. |
 | `... or use "ORD-0"` | A default instead of failing. |
+| `... or run query "ANY_OPEN_VISIT" on clinic as visit` | When the value is missing or expired, the named query runs instead: `visit` is its first row and the load's own name (`visitId`) its first column. It fails when the query finds nothing either. |
 | `Delete "pending-order" from the shared store` | Deletes it. |
 
 Clauses can be combined in any order: `Save ${token} to the shared store as "api-token" as a secret for the pipeline for 1 day`. A clause EZTest cannot read is an error that says what it expected, never a silent guess.
