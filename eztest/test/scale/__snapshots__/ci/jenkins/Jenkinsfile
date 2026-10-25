@@ -85,7 +85,7 @@ H 2 * * *''')
                 dir("shards/${i}") { unstash "shard-${i}" }
               }
             }
-            sh 'npx eztest merge shards -o eztest-results/merged --reporter html,json,junit'
+            sh 'npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml'
             sh 'npx eztest evidence verify eztest-results/merged'
             sh 'npx eztest gate eztest-results/merged --on-no-go fail'
           }
@@ -108,7 +108,7 @@ H 2 * * *''')
       when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
       steps {
         sh 'npm ci && npx eztest install-browsers chromium'
-        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-sit'
+        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml'
       }
       post {
         always {
@@ -127,7 +127,7 @@ H 2 * * *''')
     stage('Test UAT') {
       when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
       steps {
-        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-uat'
+        sh 'npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml'
       }
       post {
         always {

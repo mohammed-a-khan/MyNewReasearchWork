@@ -53,16 +53,23 @@ identity:
 #   connections:
 #     shop: { driver: sqlite, file: ./shop.db }
 
-readiness:
-  policyPath: readiness-policy.yaml
+# Release readiness gate (opt-in, docs/configuration.md#readiness-policy): a pipeline step that fails on the
+# policy's NO_GO is   npx eztest analyze <runDir> --policy readiness-policy.yaml   (or eztest run --policy ...).
+# readiness:
+#   policyPath: readiness-policy.yaml   # evaluate the policy after every run
 
 # The HTML report (docs/reports.md). Default title and name: this folder's name.
 report:
   # title: Shop web - regression
-  # name: Contoso Shop               # shown above the title
-  # logo: branding/logo.svg          # .svg/.png/.jpg/.gif/.webp under 512 KiB, embedded in the report
-  # brandColor: "#0b5cad"            # header mark and accents
+  # name: Contoso Shop               # the project name in the header
   baseline: previous                 # compare each run with the previous one
+  # readiness: true                  # add a secondary "Policy" tab with the readiness policy's decision
+  # brand:                           # white-label branding of every output (docs/reports.md#branding)
+  #   company: Contoso QA
+  #   subtitle: Nightly regression
+  #   logo: branding/logo.svg        # .svg/.png/.jpg/.webp under 512 KiB, embedded in the report
+  #   colors: { primary: "#0b5cad" }
+  #   footer: Confidential - internal use only
 
 # Video per journey attempt for the report's player: off, on or retain-on-failure.
 video: retain-on-failure
@@ -96,7 +103,9 @@ Risk: 4
 Open "/"
 Expect the page to contain "Welcome"
 `,
-  'readiness-policy.yaml': `# Release readiness gates: GO / GO_WITH_RISKS / NO_GO with cited reasons.
+  'readiness-policy.yaml': `# Release readiness gates (opt-in): GO / GO_WITH_RISKS / NO_GO with cited reasons, for a pipeline step:
+#   npx eztest analyze <runDir> --policy readiness-policy.yaml   (exit code 1 on NO_GO)
+# The report shows the decision only with report.readiness: true (a secondary Policy tab).
 # Each gate needs its input in the run: noFailedCriticalJourneys needs a journey with Risk 4 or 5 (the example has one),
 # a11yNoCritical needs accessibility results (the a11y lens in eztest.config.yaml records them).
 version: 1

@@ -81,11 +81,14 @@ lint:
   maxWarnings: 0
   rules: {}
 
-readiness:
-  policyPath: readiness-policy.yaml
+# The release gate is opt-in: the pipeline passes --policy readiness-policy.yaml to the merge and deploy steps.
+# readiness:
+#   policyPath: readiness-policy.yaml   # evaluate the policy after every run, everywhere
 
 report:
   baseline: previous             # compare each run with the previous one
+  # readiness: true              # add a secondary "Policy" tab with the policy's decision
+  # brand: { company: Contoso QA, logo: branding/logo.svg, colors: { primary: "#0b5cad" } }   # docs/reports.md#branding
 
 # What each pipeline stage runs: eztest run --project <app> --pipeline <name> (docs/pipelines.md).
 pipelines:
@@ -198,9 +201,9 @@ npx eztest init --app billing    # apps/billing/, config/billing/<env>.yaml, pro
 const PIPELINE = `# EZTest on Azure Pipelines (written by eztest init --template enterprise; docs/project-guide.md#ci).
 #
 #   every run     -> Checks: eztest validate and element references per application, eztest lint (JUnit in the Tests tab)
-#   pull request  -> Smoke: @smoke on dev per application (pipelines.pr), the readiness gate, PR status
+#   pull request  -> Smoke: @smoke on dev per application (pipelines.pr), PR status
 #   schedule      -> Regression: @regression on SIT in 2 duration-balanced shards per application, merged
-#                    into one verified run, the readiness gate, results published to Azure Test Plans
+#                    into one verified run, the readiness policy gate (--policy), results published to Azure Test Plans
 #   main          -> TestSIT after the SIT deployment: deployment jobs in the "sit" environment
 #
 # Secrets: pipeline secret variables (or a variable group linked to Key Vault) named like .env.example,
@@ -305,7 +308,7 @@ stages:
               - script: npm ci
               - task: DownloadPipelineArtifact@2
                 inputs: { patterns: 'shard-\${{ app }}-*/**', path: shards }
-              - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+              - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
               - script: npx eztest evidence verify eztest-results/merged
               - task: PublishTestResults@2
                 condition: always()
@@ -337,7 +340,7 @@ stages:
                     - script: npm ci
                     - script: npx eztest install-browsers chromium
                     # deploy-sit: -e sit, the readiness gate (NO_GO fails the stage), a deployment record.
-                    - script: npx eztest run --project \${{ app }} --pipeline deploy-sit --headless --reporter html,json,junit
+                    - script: npx eztest run --project \${{ app }} --pipeline deploy-sit --policy readiness-policy.yaml --headless --reporter html,json,junit
                       env:
                         EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
                         EZTEST_SECRET___APPU___CLERK_PASSWORD: $(EZTEST_SECRET___APPU___CLERK_PASSWORD)

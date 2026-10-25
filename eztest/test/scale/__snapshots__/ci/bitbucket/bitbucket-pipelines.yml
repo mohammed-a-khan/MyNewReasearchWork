@@ -53,7 +53,7 @@ pipelines:
           script:
             - export EZTEST_SCHEDULED=true
             - npm ci
-            - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+            - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
             - npx eztest evidence verify eztest-results/merged
             - mkdir -p test-results && cp eztest-results/merged/junit.xml test-results/eztest.xml
             - npx eztest gate eztest-results/merged --on-no-go fail
@@ -71,7 +71,7 @@ pipelines:
           script:
             - export EZTEST_DEPLOY_ENVIRONMENT=sit EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
             - npm ci && npx eztest install-browsers chromium
-            - npx eztest run --reporter html,json,junit --pipeline deploy-sit; status=$?
+            - npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml; status=$?
             - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
             - exit $status
           artifacts: [eztest-results/**]
@@ -87,7 +87,7 @@ pipelines:
           script:
             - export EZTEST_DEPLOY_ENVIRONMENT=uat EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
             - npm ci && npx eztest install-browsers chromium
-            - npx eztest run --reporter html,json,junit --pipeline deploy-uat; status=$?
+            - npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml; status=$?
             - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
             - exit $status
           artifacts: [eztest-results/**]

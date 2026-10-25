@@ -84,7 +84,7 @@ object Regression : BuildType({
         }
     }
     steps {
-        script { name = "Merge"; scriptContent = "npm ci && npx eztest merge shards -o eztest-results/merged --reporter html,json,junit" }
+        script { name = "Merge"; scriptContent = "npm ci && npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml" }
         script { name = "Verify evidence"; scriptContent = "npx eztest evidence verify eztest-results/merged" }
         script { name = "Readiness gate"; scriptContent = "npx eztest gate eztest-results/merged --on-no-go fail" }
     }
@@ -122,7 +122,7 @@ object TestSit : BuildType({
     params { param("env.EZTEST_DEPLOY_ENVIRONMENT", "sit") }
     steps {
         script { name = "Install"; scriptContent = "npm ci && npx eztest install-browsers chromium" }
-        script { name = "SIT"; scriptContent = "npx eztest run --reporter html,json,junit --pipeline deploy-sit" }
+        script { name = "SIT"; scriptContent = "npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml" }
     }
     triggers { finishBuildTrigger { buildType = "${DeploySit.id}"; successfulOnly = true } }
     dependencies { snapshot(DeploySit) {} }
@@ -142,7 +142,7 @@ object TestUat : BuildType({
     params { param("env.EZTEST_DEPLOY_ENVIRONMENT", "uat") }
     steps {
         script { name = "Install"; scriptContent = "npm ci && npx eztest install-browsers chromium" }
-        script { name = "UAT"; scriptContent = "npx eztest run --reporter html,json,junit --pipeline deploy-uat" }
+        script { name = "UAT"; scriptContent = "npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml" }
     }
     triggers { finishBuildTrigger { buildType = "${DeployUat.id}"; successfulOnly = true } }
     dependencies { snapshot(DeployUat) {} }

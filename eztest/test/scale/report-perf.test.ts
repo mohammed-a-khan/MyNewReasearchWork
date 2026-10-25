@@ -70,35 +70,52 @@ describe('report of a 10,000-test run', () => {
     expect(scriptJson({ x: '</script><img src=x onerror=alert(1)>' })).not.toContain('</script>');
   });
 
+  it('a 5,000-test report is interactive within 2 seconds', async ({ skip }) => {
+    if (!browser) skip();
+    const small = syntheticRun(5000, { failEvery: 25, healEvery: 40 });
+    const d5 = join(dir, 'r5000');
+    await writeReports(d5, small.run, { formats: ['html'], evidence: small.evidence, context: { browsers: [], devices: [], eztestVersion: 'x', node: 'v22', machine: { os: 'linux' }, startedAt: small.run.startedAt, finishedAt: small.run.finishedAt, timeZone: 'UTC', extra: {} } });
+    const page = await browser!.newPage();
+    // Warm the browser once (process start-up is not the report's time).
+    await page.goto('about:blank');
+    const t = Date.now();
+    await page.goto(pathToFileURL(join(d5, 'report.html')).href + '#tests');
+    await page.waitForSelector('#vlist .row');
+    const ms = Date.now() - t;
+    console.log(`[report-perf] browser: 5000-test report interactive in ${ms} ms`);
+    expect(ms).toBeLessThan(2_000);
+    await page.close();
+  }, 120_000);
+
   it('opens fast in a browser, virtualises the list, searches, filters and opens any test', async ({ skip }) => {
     if (!browser) skip();
     const page = await browser!.newPage();
     const t = Date.now();
-    await page.goto(pathToFileURL(join(dir, 'report.html')).href);
+    await page.goto(pathToFileURL(join(dir, 'report.html')).href + '#tests');
     await page.waitForSelector('#vlist .row');
     const ms = Date.now() - t;
     console.log(`[report-perf] browser: ${N}-test report interactive in ${ms} ms`);
     expect(ms).toBeLessThan(15_000);
     await page.selectOption('#group', 'none');
     expect(await page.locator('#vlist .row').count()).toBeLessThan(100);
-    expect(await page.locator('#count').textContent()).toBe(`${N} of ${N} tests`);
+    expect(await page.locator('#count').textContent()).toBe('Showing all');
     const s = Date.now();
     await page.fill('#q', 'journey-9975');
-    await expect.poll(() => page.locator('#count').textContent()).toBe(`1 of ${N} tests matching "journey-9975"`);
+    await expect.poll(() => page.locator('#count').textContent()).toBe('1 shown for "journey-9975"');
     console.log(`[report-perf] search over ${N} tests: ${Date.now() - s} ms`);
     await page.locator('#vlist .row').first().click();
     await expect.poll(() => page.locator('#d-title').textContent()).toBe('Journey 9975: order flow variant 22');
     expect(await page.locator('#detail').textContent()).toContain('Error 500'); // 9975 % 25 === 0: a failed test shows its step error
     await page.fill('#q', '');
     await page.locator('.fchip[data-state="failed"]').click();
-    await expect.poll(() => page.locator('#count').textContent()).toBe(`${N / 25} of ${N} tests`);
+    await expect.poll(() => page.locator('#count').textContent()).toBe(`${N / 25} shown`);
     // scrolling far down renders the rows there
     await page.locator('.fchip[data-state="all"]').click();
     await page.locator('#vlist').evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
     await expect.poll(() => page.locator('#vlist .row').last().textContent()).toContain('Journey 9999');
     expect(await page.locator('#vlist .row').count()).toBeLessThan(100);
     // a permalink deep in the run
-    await page.goto(pathToFileURL(join(dir, 'report.html')).href + '#test/journey-7777');
+    await page.goto(pathToFileURL(join(dir, 'report.html')).href + '#tests/journey-7777');
     await expect.poll(() => page.locator('#d-title').textContent()).toBe('Journey 7777: order flow variant 7');
     await page.close();
   }, 120_000);

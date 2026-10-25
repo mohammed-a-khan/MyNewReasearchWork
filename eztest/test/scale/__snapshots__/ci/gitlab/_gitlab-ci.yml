@@ -59,7 +59,7 @@ eztest:merge:
   needs: [eztest:regression]
   before_script: [npm ci]
   script:
-    - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+    - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
     - npx eztest evidence verify eztest-results/merged
     - if [ -n "$EZTEST_SERVER_URL" ]; then npx eztest publish eztest-results/merged --server "$EZTEST_SERVER_URL"; fi
     - npx eztest gate eztest-results/merged --on-no-go fail
@@ -81,7 +81,7 @@ eztest:sit:
   needs: [deploy:sit]
   environment: { name: sit, action: verify }
   script:
-    - npx eztest run --reporter html,json,junit --pipeline deploy-sit
+    - npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml
   artifacts: *eztest-artifacts
 
 deploy:uat:
@@ -102,5 +102,5 @@ eztest:uat:
   needs: [deploy:uat]
   environment: { name: uat, action: verify }
   script:
-    - npx eztest run --reporter html,json,junit --pipeline deploy-uat
+    - npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml
   artifacts: *eztest-artifacts
