@@ -216,16 +216,21 @@ registerRunDetailTab({
 });
 ```
 
-Built-in tabs: Overview (10), Report (15), Timeline (20), Screenshots (30), Heal
-proposals (40), Quality (45), Triage (50) and Evidence (60).
+Built-in tabs: Report (5), Overview (10), Timeline (20), Screenshots (30), Video (35), Heal
+proposals (40), Quality (45), Triage (50), Features and Evidence (60).
 
-The Overview starts with the run report's analysis (`detail.reportSummary`, read from the run's
-`report-model.json`): the readiness verdict and the pass-rate trend, the key figures against the
-previous run, what needs attention (new failures, regressions, flaky, fixed, slower), the failure
-categories with each failing test's suggested next step, the quality lens counts and the report's
-files (`detail.exports`: PDF, Excel workbook, e-mail summary, one-page summary, JSON, JUnit, CSV).
-The Report tab shows the run's `report.html` in place (served with `frame-ancestors 'self'` and
-`X-Frame-Options: SAMEORIGIN`, so only Studio can frame it).
+A run with its HTML report opens on the **Report** tab: the run's `report.html` in place (served with
+`frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, so only Studio can frame it), with the
+report's files (`detail.exports`: PDF, Excel workbook, e-mail summary, one-page summary, JSON,
+JUnit, CSV). The report carries the overview, the tests, the failures by cause, the trends, the
+quality findings and the environment, in the project's branding, so Studio shows no overview of
+its own for such a run: Overview, Screenshots, Video and Triage appear only for a run without a
+report, and the Timeline (step deep links), Features (step bindings), Heal proposals and the
+verified Evidence vault stay. `#/runs/<runId>/<journeyId>/<stepId>/report` opens the report on
+that test. Neither the run detail, the Run page nor Home shows a readiness decision; the Quality
+Center's Readiness page is there for teams that use a readiness policy (docs/reports.md#readiness-policy-opt-in).
+`detail.reportSummary` (from the run's `report-model.json`) keeps the figures, categories and
+attention lists for extensions.
 
 Pages can join the "Quality" activity-bar group with `group: 'quality'`, and a
 two-segment route (`route: 'quality/heals'`) is matched before its first

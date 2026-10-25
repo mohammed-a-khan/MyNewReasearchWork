@@ -62,7 +62,7 @@ jobs:
       - checkout
       - run: npm ci
       - attach_workspace: { at: . }
-      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
       - run: npx eztest evidence verify eztest-results/merged
       - run:
           name: JUnit results

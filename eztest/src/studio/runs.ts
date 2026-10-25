@@ -451,7 +451,7 @@ export async function runDetail(outputDir: string, runId: string, masker?: Secre
       const a = attentionOf(m);
       const pick = (list: Array<{ id: string; name: string }>) => list.slice(0, 20).map((t) => ({ id: t.id, name: t.name }));
       reportSummary = {
-        verdict: { decision: m.verdict.decision, ...(m.verdict.score !== undefined ? { score: m.verdict.score } : {}), source: m.verdict.source },
+        ...(m.verdict ? { verdict: { decision: m.verdict.decision, ...(m.verdict.score !== undefined ? { score: m.verdict.score } : {}), source: m.verdict.source } } : {}),
         kpis: m.kpis,
         ...(m.previous ? { previous: { runId: m.previous.runId, kpis: m.previous.kpis } } : {}),
         categories: m.categories ?? {},

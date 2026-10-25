@@ -1,6 +1,6 @@
 /**
  * The run summary card for chat: a Microsoft Teams Adaptive Card and Slack
- * Block Kit blocks, built from the report model - verdict, key figures and
+ * Block Kit blocks, built from the report model - key figures and
  * the change against the previous run, context, the top failures (each linked
  * to its permalink in the report) and buttons to the report, the Azure DevOps
  * test run, the build and the pull request.
@@ -43,7 +43,7 @@ function topFailures(m: ReportModel, n = 5): TestModel[] {
   return m.tests.filter((t) => t.state === 'failed' || t.state === 'error').sort((a, b) => b.risk - a.risk).slice(0, n);
 }
 
-const permalink = (report: string | undefined, id: string) => (report && /report\.html(?:$|[?#])/.test(report) ? `${report.split('#')[0]}#test/${encodeURIComponent(id)}` : report);
+const permalink = (report: string | undefined, id: string) => (report && /report\.html(?:$|[?#])/.test(report) ? `${report.split('#')[0]}#tests/${encodeURIComponent(id)}` : report);
 
 function deltaText(m: ReportModel): string | undefined {
   const p = m.previous?.kpis;
@@ -56,8 +56,10 @@ function deltaText(m: ReportModel): string | undefined {
 /** Adaptive Card 1.5 content (wrap it in a Teams message attachment). */
 export function buildTeamsCard(m: ReportModel, links: CardLinks = {}): Record<string, unknown> {
   const k = m.kpis;
-  const v = m.verdict.decision;
-  const style = v === 'GO' ? 'good' : v === 'NO_GO' ? 'attention' : 'warning';
+  const v = m.verdict?.decision;
+  const bad = k.failed + k.errors > 0;
+  // The card's colour is the run's result (failures, flaky); the policy's decision only when report.readiness is on.
+  const style = v ? (v === 'GO' ? 'good' : v === 'NO_GO' ? 'attention' : 'warning') : bad ? 'attention' : k.flaky ? 'warning' : 'good';
   const kpi = (label: string, value: string, color?: string) => ({
     type: 'Column', width: 'stretch',
     items: [
@@ -72,7 +74,7 @@ export function buildTeamsCard(m: ReportModel, links: CardLinks = {}): Record<st
     ...(ctx?.commit ? [{ title: 'Commit', value: ctx.commit.sha.slice(0, 10) }] : []),
     ...(ctx?.build ? [{ title: 'Build', value: `${ctx.build.pipeline ? `${ctx.build.pipeline} ` : ''}${ctx.build.number ?? ctx.build.id ?? ''}`.trim() }] : []),
     { title: 'Run', value: `${m.runId} (${fmtMs(m.durationMs)})` },
-    ...(m.verdict.score !== undefined ? [{ title: 'Readiness score', value: `${m.verdict.score} / 100` }] : []),
+    ...(m.verdict ? [{ title: 'Readiness policy', value: `${VERDICT[m.verdict.decision]}${m.verdict.score !== undefined ? ` (${m.verdict.score} / 100)` : ''}` }] : []),
   ];
   const fails = topFailures(m);
   const delta = deltaText(m);
@@ -91,9 +93,9 @@ export function buildTeamsCard(m: ReportModel, links: CardLinks = {}): Record<st
       {
         type: 'Container', style, bleed: true,
         items: [
-          { type: 'TextBlock', text: m.brand.name, size: 'Small', weight: 'Bolder', isSubtle: true, spacing: 'None' },
+          { type: 'TextBlock', text: m.brand.company ?? m.brand.name, size: 'Small', weight: 'Bolder', isSubtle: true, spacing: 'None' },
           { type: 'TextBlock', text: m.title, size: 'Large', weight: 'Bolder', wrap: true, spacing: 'None' },
-          { type: 'TextBlock', text: `${VERDICT[v]} — ${headline(m)}`, weight: 'Bolder', color: style === 'good' ? 'Good' : style === 'attention' ? 'Attention' : 'Warning', wrap: true },
+          { type: 'TextBlock', text: headline(m), weight: 'Bolder', color: style === 'good' ? 'Good' : style === 'attention' ? 'Attention' : 'Warning', wrap: true },
         ],
       },
       { type: 'ColumnSet', spacing: 'Medium', columns: [kpi('Tests', String(k.total)), kpi('Passed', String(k.passed + k.healed + k.flaky), 'Good'), kpi('Failed', String(k.failed + k.errors), k.failed + k.errors ? 'Attention' : undefined), kpi('Flaky', String(k.flaky), k.flaky ? 'Warning' : undefined), kpi('Pass rate', fmtPct(k.passRate, 1))] },
@@ -131,9 +133,9 @@ const mrkdwn = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '
 /** Slack Block Kit message (text fallback plus blocks). */
 export function buildSlackMessage(m: ReportModel, links: CardLinks = {}): Record<string, unknown> {
   const k = m.kpis;
-  const v = m.verdict.decision;
-  const mark = v === 'GO' ? ':large_green_circle:' : v === 'NO_GO' ? ':red_circle:' : ':large_yellow_circle:';
-  const title = `${m.brand.name}: ${VERDICT[v]} — ${headline(m)}`;
+  const bad = k.failed + k.errors > 0;
+  const mark = bad ? ':red_circle:' : k.flaky ? ':large_yellow_circle:' : ':large_green_circle:';
+  const title = `${m.brand.company ?? m.brand.name}: ${headline(m)}`;
   const fails = topFailures(m);
   const delta = deltaText(m);
   const ctx = m.context;
@@ -151,7 +153,7 @@ export function buildSlackMessage(m: ReportModel, links: CardLinks = {}): Record
       { type: 'section', fields: [
         { type: 'mrkdwn', text: `*Tests*\n${k.total}` }, { type: 'mrkdwn', text: `*Pass rate*\n${fmtPct(k.passRate)}` },
         { type: 'mrkdwn', text: `*Failed*\n${k.failed + k.errors}` }, { type: 'mrkdwn', text: `*Flaky / healed*\n${k.flaky} / ${k.healed}` },
-        { type: 'mrkdwn', text: `*Duration*\n${fmtMs(m.durationMs)}` }, { type: 'mrkdwn', text: `*Readiness*\n${VERDICT[v]}${m.verdict.score !== undefined ? ` (${m.verdict.score})` : ''}` },
+        { type: 'mrkdwn', text: `*Duration*\n${fmtMs(m.durationMs)}` }, ...(m.verdict ? [{ type: 'mrkdwn', text: `*Readiness policy*\n${VERDICT[m.verdict.decision]}${m.verdict.score !== undefined ? ` (${m.verdict.score})` : ''}` }] : []),
       ] },
       ...(ctx ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: mrkdwn([ctx.environment, ctx.branch, ctx.commit?.sha.slice(0, 10), ctx.build?.number, m.runId].filter(Boolean).join(' · ')) }] }] : []),
       ...(fails.length ? [{ type: 'section', text: { type: 'mrkdwn', text: `*Top failures*\n${fails.map((t) => { const u = permalink(links.report, t.id); return `• ${u ? `<${u}|${mrkdwn(t.name)}>` : `*${mrkdwn(t.name)}*`} — ${mrkdwn((t.error?.message ?? '').split('\n')[0].slice(0, 140))}`; }).join('\n')}` } }] : []),

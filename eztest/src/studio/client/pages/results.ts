@@ -1,7 +1,10 @@
 /**
  * Results: run history (virtualized, sortable, filterable) and the run detail
- * with tabs contributed through `registerRunDetailTab` (Overview, Timeline,
- * Screenshots, Heal proposals, Triage, Evidence). Deep link:
+ * with tabs contributed through `registerRunDetailTab`. A run with its HTML
+ * report opens on the report (Report tab: overview, tests, failures, trends,
+ * quality, environment) next to Studio's own tools (Timeline, Features, Heal proposals,
+ * Evidence); a run without one gets Overview, Timeline, Screenshots, Video,
+ * Heal proposals, Triage and Evidence. Deep link:
  * `#/runs/<runId>/<journeyId>/<stepId>`.
  */
 import { api, runAsset } from '../core/api.js';
@@ -18,7 +21,7 @@ import { createTable } from '../ui/table.js';
 import { createTabs } from '../ui/tabs.js';
 import { toastError } from '../ui/toast.js';
 import { registerFeaturesTab } from './results-features.js';
-import { registerReportTab, reportSummaryView } from './results-report.js';
+import { registerReportTab } from './results-report.js';
 
 export interface RunListItem {
   runId: string;
@@ -128,17 +131,15 @@ function registerBuiltInTabs(): void {
     id: 'overview',
     title: 'Overview',
     order: 10,
+    // The report's Overview takes its place when the run has one.
+    when: (d) => !d.report,
     mount(el, d) {
       const s = d.run.summary;
-      const ins = (d.insights ?? {}) as { readiness?: { decision: string; score: number; rationale?: Array<{ text: string }> } };
       const v = d.verification;
       add(
         el,
-        reportSummaryView(d),
         h('div', { class: 'stats' }, stat(s.total, 'Journeys'), stat(s.passed, 'Passed', 'ok'), stat(s.passedHealed, 'Healed', 'heal'), stat(s.failed, 'Failed', 'bad'), stat(s.skipped, 'Skipped'), stat(s.errors, 'Errors', 'bad'), stat(ms(d.run.durationMs), 'Duration')),
-        h('div', { class: 'row wrap' }, v.ok ? badge('ok', `Evidence verified (${v.entries} entries)`) : badge('bad', 'Evidence NOT valid'), ins.readiness ? h('span', null, 'Release readiness: ', badge(ins.readiness.decision), h('span', { class: 'muted', text: ` score ${ins.readiness.score}` })) : null),
         !v.ok ? h('ul', { class: 'bullets warn-text' }, v.problems.slice(0, 10).map((p) => h('li', { text: p }))) : null,
-        ins.readiness?.rationale?.length ? h('ul', { class: 'bullets' }, ins.readiness.rationale.slice(0, 8).map((r) => h('li', { text: r.text }))) : null,
         h(
           'table',
           { class: 'table compact' },
@@ -204,7 +205,7 @@ function registerBuiltInTabs(): void {
     title: 'Screenshots',
     order: 30,
     badge: (d) => screenshots(d).length || undefined,
-    when: (d) => screenshots(d).length > 0,
+    when: (d) => !d.report && screenshots(d).length > 0,
     mount(el, d) {
       const shots = screenshots(d);
       const byJourney = new Map<string, number[]>();
@@ -223,7 +224,7 @@ function registerBuiltInTabs(): void {
     title: 'Video',
     order: 35,
     badge: (d) => videos(d).length || undefined,
-    when: (d) => videos(d).length > 0,
+    when: (d) => !d.report && videos(d).length > 0,
     mount(el, d) {
       for (const v of videos(d)) {
         const video = h('video', { controls: '', preload: 'metadata', playsinline: '', crossorigin: 'anonymous', src: v.src, class: 'detail-video' }) as HTMLVideoElement;
@@ -299,7 +300,7 @@ function registerBuiltInTabs(): void {
     id: 'triage',
     title: 'Triage',
     order: 50,
-    when: (d) => !!((d.insights as { triage?: { verdicts?: unknown[] } })?.triage?.verdicts ?? []).length,
+    when: (d) => !d.report && !!((d.insights as { triage?: { verdicts?: unknown[] } })?.triage?.verdicts ?? []).length,
     mount(el, d) {
       const verdicts = ((d.insights as { triage?: { verdicts?: Array<{ journeyName?: string; journeyId: string; category: string; confidence: number; status?: string; reasons?: string[] }> } }).triage?.verdicts ?? []);
       el.appendChild(
@@ -464,11 +465,11 @@ export function registerResultsPage(): void {
           h(
             'header',
             { class: 'detail-head' },
-            h('div', null, title, h('p', { class: 'muted', text: `${dateTime(d.run.startedAt)} · ${ms(d.run.durationMs)} · ${plural(d.run.journeys.length, 'journey')}` })),
+            h('div', null, title, h('p', { class: 'muted row wrap' }, h('span', { text: `${dateTime(d.run.startedAt)} · ${ms(d.run.durationMs)}` }), d.verification.ok ? badge('ok', `Evidence verified (${d.verification.entries} entries)`) : badge('bad', 'Evidence NOT valid'))),
             h(
               'div',
               { class: 'row' },
-              d.report ? h('a', { class: 'btn btn-sm', href: d.report, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span', { text: 'Open the full HTML report' })) : h('span', { class: 'muted', text: 'No HTML report' }),
+              d.report ? null : h('span', { class: 'muted', text: 'No HTML report' }),
               failedIds.length
                 ? button('Re-run failed', {
                     small: true,

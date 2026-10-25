@@ -102,8 +102,15 @@ journey('Stock message shows', { tags: ['@smoke'] }, async ({ ui }) => {
     expect(run.code, run.out).toBe(0);
     const results = join(project, 'eztest-results');
     const runDir = join(results, (await readdir(results)).filter((d) => d.startsWith('run-')).sort().at(-1)!);
-    const report = JSON.parse(await readFile(join(runDir, 'report.json'), 'utf8')) as { run: { journeys: Array<{ journeyId: string; status: string }> }; insights: { readiness: { decision: string; score: number; gates: Array<{ gate: string; status: string }> } } };
-    expect(report.run.journeys.map((j) => j.status)).toEqual(['passed', 'passed']);
+    const first = JSON.parse(await readFile(join(runDir, 'report.json'), 'utf8')) as { run: { journeys: Array<{ journeyId: string; status: string }> }; insights: { readiness?: unknown } };
+    expect(first.run.journeys.map((j) => j.status)).toEqual(['passed', 'passed']);
+    // No verdict by default: the run makes no readiness decision and the report shows none.
+    expect(first.insights.readiness).toBeUndefined();
+    expect(await readFile(join(runDir, 'report.html'), 'utf8')).not.toMatch(/NO GO|GO WITH RISKS|Release readiness/);
+    // The gate is opt-in: the policy in a pipeline step.
+    const analyzed = await eztest(['analyze', runDir, '--policy', 'readiness-policy.yaml', '--no-history']);
+    expect(analyzed.code, analyzed.out).toBe(0);
+    const report = JSON.parse(await readFile(join(runDir, 'report.json'), 'utf8')) as { insights: { readiness: { decision: string; score: number; gates: Array<{ gate: string; status: string }> } } };
     const rd = report.insights.readiness;
     expect(rd.gates.filter((g) => g.status !== 'pass'), JSON.stringify(rd.gates)).toEqual([]);
     expect(rd.decision).toBe('GO');

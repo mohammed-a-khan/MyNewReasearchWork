@@ -58,7 +58,9 @@ describe('authoring helpers', () => {
     for (const g of grammar()) {
       if (g.kind === 'header') continue;
       for (const ex of g.examples) {
-        expect(validateEz(`Journey: J\nOpen /\n${ex.text}\n`).ok, ex.text).toBe(true);
+        // A block opener ("In a transaction on clinic") is offered as the first line of a block with a step, closed by End.
+        const alone = validateEz(`Journey: J\nOpen /\n${ex.text}\n`).ok;
+        expect(alone || validateEz(`Journey: J\nOpen /\n${ex.text}\nRun query "SELECT 1" on clinic as r\nEnd\n`).ok, ex.text).toBe(true);
       }
     }
   });

@@ -95,7 +95,7 @@ function stepEntry(s: StepResult): BddStepEntry {
   };
 }
 
-function scenarioEntry(j: JourneyResult): BddScenarioEntry {
+export function scenarioEntry(j: JourneyResult): BddScenarioEntry {
   const b = j.bdd!;
   const steps = j.steps.filter((s) => s.gherkin?.kind === 'step');
   return {

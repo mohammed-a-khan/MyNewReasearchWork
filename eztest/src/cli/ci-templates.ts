@@ -131,7 +131,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { pattern: 'shard-*', path: shards }
       # One run: evidence re-chained and linked to every shard chain, history, triage, readiness, reports.
-      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
       - run: npx eztest evidence verify eztest-results/merged
       - if: vars.EZTEST_SERVER_URL != ''
         run: npx eztest publish eztest-results/merged --server "\${{ vars.EZTEST_SERVER_URL }}"
@@ -158,7 +158,7 @@ jobs:
       - run: npx eztest install-browsers chromium
       # deploy-sit: --env sit, the SIT test plan, a deployment record; values saved "for the pipeline" become job outputs.
       - id: eztest
-        run: ${RUN} --pipeline deploy-sit
+        run: ${RUN} --pipeline deploy-sit --policy readiness-policy.yaml
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: eztest-sit, path: eztest-results }
@@ -173,7 +173,7 @@ jobs:
       - run: npm ci
       - run: npx eztest install-browsers chromium
       # requires: [deploy-sit] in the config: the run stops unless SIT passed for this version (results server).
-      - run: ${RUN} --pipeline deploy-uat
+      - run: ${RUN} --pipeline deploy-uat --policy readiness-policy.yaml
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: eztest-uat, path: eztest-results }
@@ -232,7 +232,7 @@ stages:
           - task: PublishPipelineArtifact@1
             condition: always()
             inputs: { targetPath: '$(EZTEST_RUN_DIR)', artifact: eztest-smoke }
-          # PR status "EZTest: GO / NO_GO" and the summary thread (the run itself already failed on NO_GO).
+          # PR status (the counts, or the readiness decision when a policy is given) and the summary thread.
           - script: npx eztest pr report "$(EZTEST_RUN_DIR)"
             condition: always()
             env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
@@ -274,7 +274,7 @@ stages:
           - script: npm ci
           - task: DownloadPipelineArtifact@2
             inputs: { patterns: 'shard-*/**', path: shards }
-          - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+          - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
           - script: npx eztest evidence verify eztest-results/merged
           - script: npx eztest publish eztest-results/merged --server "$(EZTEST_SERVER_URL)"
             condition: and(succeededOrFailed(), ne(variables['EZTEST_SERVER_URL'], ''))
@@ -313,7 +313,7 @@ stages:
                 - script: npx eztest install-browsers chromium
                 # deploy-sit: --env sit, the SIT test plan, a deployment record, build tags and summary.
                 # Values saved "for the pipeline" become output variables of this step (eztest.<name>).
-                - script: ${RUN} --pipeline deploy-sit
+                - script: ${RUN} --pipeline deploy-sit --policy readiness-policy.yaml
                   name: eztest
                   env:
                     EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
@@ -347,7 +347,7 @@ stages:
                   inputs: { versionSpec: '22.x' }
                 - script: npm ci
                 - script: npx eztest install-browsers chromium
-                - script: ${RUN} --pipeline deploy-uat
+                - script: ${RUN} --pipeline deploy-uat --policy readiness-policy.yaml
                   name: eztest
                   env:
                     EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
@@ -422,7 +422,7 @@ eztest:merge:
   needs: [eztest:regression]
   before_script: [npm ci]
   script:
-    - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+    - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
     - npx eztest evidence verify eztest-results/merged
     - if [ -n "$EZTEST_SERVER_URL" ]; then npx eztest publish eztest-results/merged --server "$EZTEST_SERVER_URL"; fi
     - npx eztest gate eztest-results/merged --on-no-go fail
@@ -444,7 +444,7 @@ eztest:sit:
   needs: [deploy:sit]
   environment: { name: sit, action: verify }
   script:
-    - ${RUN} --pipeline deploy-sit
+    - ${RUN} --pipeline deploy-sit --policy readiness-policy.yaml
   artifacts: *eztest-artifacts
 
 deploy:uat:
@@ -465,7 +465,7 @@ eztest:uat:
   needs: [deploy:uat]
   environment: { name: uat, action: verify }
   script:
-    - ${RUN} --pipeline deploy-uat
+    - ${RUN} --pipeline deploy-uat --policy readiness-policy.yaml
   artifacts: *eztest-artifacts
 `;
 
@@ -534,7 +534,7 @@ ${[1, 2, 3, 4].map(SHARD_STAGE).join('\n')}
                 dir("shards/\${i}") { unstash "shard-\${i}" }
               }
             }
-            sh 'npx eztest merge shards -o eztest-results/merged --reporter html,json,junit'
+            sh 'npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml'
             sh 'npx eztest evidence verify eztest-results/merged'
             sh 'npx eztest gate eztest-results/merged --on-no-go fail'
           }
@@ -557,7 +557,7 @@ ${[1, 2, 3, 4].map(SHARD_STAGE).join('\n')}
       when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
       steps {
         sh 'npm ci && npx eztest install-browsers chromium'
-        sh '${RUN} --pipeline deploy-sit'
+        sh '${RUN} --pipeline deploy-sit --policy readiness-policy.yaml'
       }
       post {
         always {
@@ -576,7 +576,7 @@ ${[1, 2, 3, 4].map(SHARD_STAGE).join('\n')}
     stage('Test UAT') {
       when { allOf { branch 'main'; not { triggeredBy 'TimerTrigger' } } }
       steps {
-        sh '${RUN} --pipeline deploy-uat'
+        sh '${RUN} --pipeline deploy-uat --policy readiness-policy.yaml'
       }
       post {
         always {
@@ -675,7 +675,7 @@ object Regression : BuildType({
         }
     }
     steps {
-        script { name = "Merge"; scriptContent = "npm ci && npx eztest merge shards -o eztest-results/merged --reporter html,json,junit" }
+        script { name = "Merge"; scriptContent = "npm ci && npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml" }
         script { name = "Verify evidence"; scriptContent = "npx eztest evidence verify eztest-results/merged" }
         script { name = "Readiness gate"; scriptContent = "npx eztest gate eztest-results/merged --on-no-go fail" }
     }
@@ -713,7 +713,7 @@ object TestSit : BuildType({
     params { param("env.EZTEST_DEPLOY_ENVIRONMENT", "sit") }
     steps {
         script { name = "Install"; scriptContent = "npm ci && npx eztest install-browsers chromium" }
-        script { name = "SIT"; scriptContent = "${RUN} --pipeline deploy-sit" }
+        script { name = "SIT"; scriptContent = "${RUN} --pipeline deploy-sit --policy readiness-policy.yaml" }
     }
     triggers { finishBuildTrigger { buildType = "\${DeploySit.id}"; successfulOnly = true } }
     dependencies { snapshot(DeploySit) {} }
@@ -733,7 +733,7 @@ object TestUat : BuildType({
     params { param("env.EZTEST_DEPLOY_ENVIRONMENT", "uat") }
     steps {
         script { name = "Install"; scriptContent = "npm ci && npx eztest install-browsers chromium" }
-        script { name = "UAT"; scriptContent = "${RUN} --pipeline deploy-uat" }
+        script { name = "UAT"; scriptContent = "${RUN} --pipeline deploy-uat --policy readiness-policy.yaml" }
     }
     triggers { finishBuildTrigger { buildType = "\${DeployUat.id}"; successfulOnly = true } }
     dependencies { snapshot(DeployUat) {} }
@@ -795,7 +795,7 @@ pipelines:
           script:
             - export EZTEST_SCHEDULED=true
             - npm ci
-            - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+            - npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
             - npx eztest evidence verify eztest-results/merged
             - mkdir -p test-results && cp eztest-results/merged/junit.xml test-results/eztest.xml
             - npx eztest gate eztest-results/merged --on-no-go fail
@@ -813,7 +813,7 @@ pipelines:
           script:
             - export EZTEST_DEPLOY_ENVIRONMENT=sit EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
             - npm ci && npx eztest install-browsers chromium
-            - ${RUN} --pipeline deploy-sit; status=$?
+            - ${RUN} --pipeline deploy-sit --policy readiness-policy.yaml; status=$?
             - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
             - exit $status
           artifacts: [eztest-results/**]
@@ -829,7 +829,7 @@ pipelines:
           script:
             - export EZTEST_DEPLOY_ENVIRONMENT=uat EZTEST_APP_VERSION="$BITBUCKET_BUILD_NUMBER"
             - npm ci && npx eztest install-browsers chromium
-            - ${RUN} --pipeline deploy-uat; status=$?
+            - ${RUN} --pipeline deploy-uat --policy readiness-policy.yaml; status=$?
             - mkdir -p test-results && cp eztest-results/run-*/junit.xml test-results/ 2>/dev/null || true
             - exit $status
           artifacts: [eztest-results/**]
@@ -899,7 +899,7 @@ jobs:
       - checkout
       - run: npm ci
       - attach_workspace: { at: . }
-      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
       - run: npx eztest evidence verify eztest-results/merged
       - run:
           name: JUnit results

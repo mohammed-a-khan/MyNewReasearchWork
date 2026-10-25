@@ -188,6 +188,12 @@ export interface PdfDocOptions {
   height?: number;
   margin?: number;
   lang?: string;
+  /** The PDF producer (default "EZTest report PDF writer"). */
+  producer?: string;
+  /** Keywords metadata. */
+  keywords?: string;
+  /** The running footer's left text (default the title): a confidentiality notice, a company name. */
+  footer?: string;
 }
 
 /** A PDF being written page by page, with a top-down cursor (`y`) for flowing content. */
@@ -363,7 +369,7 @@ export class PdfDoc {
       const footer = `Page ${i + 1} of ${total}`;
       const fw = textWidth(footer, 8);
       p.ops.push(`BT /FR 8 Tf ${color([95, 94, 89])} rg ${num(this.width - this.margin - fw)} ${num(this.margin - 16)} Td ${pdfStr(footer)} Tj ET`);
-      p.ops.push(`BT /FR 8 Tf ${color([95, 94, 89])} rg ${num(this.margin)} ${num(this.margin - 16)} Td ${pdfStr(this.o.title.slice(0, 90))} Tj ET`);
+      p.ops.push(`BT /FR 8 Tf ${color([95, 94, 89])} rg ${num(this.margin)} ${num(this.margin - 16)} Td ${pdfStr((this.o.footer ?? this.o.title).slice(0, 100))} Tj ET`);
       const content = deflateSync(Buffer.from(p.ops.join('\n'), 'latin1'));
       const contentId = alloc();
       body.push({ id: contentId, dict: `<< /Length ${content.length} /Filter /FlateDecode >>`, stream: content });
@@ -390,7 +396,7 @@ export class PdfDoc {
     body.push({ id: catalogId, dict: `<< /Type /Catalog /Pages ${pagesId} 0 R${outlinesRef} /Lang ${pdfText(this.o.lang ?? 'en')} /ViewerPreferences << /DisplayDocTitle true >> >>` });
     body.push({ id: pagesId, dict: `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>` });
     const date = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    body.push({ id: infoId, dict: `<< /Title ${pdfText(this.o.title)}${this.o.author ? ` /Author ${pdfText(this.o.author)}` : ''}${this.o.subject ? ` /Subject ${pdfText(this.o.subject)}` : ''} /Producer ${pdfText('EZTest report PDF writer')} /CreationDate (D:${date}Z) >>` });
+    body.push({ id: infoId, dict: `<< /Title ${pdfText(this.o.title)}${this.o.author ? ` /Author ${pdfText(this.o.author)}` : ''}${this.o.subject ? ` /Subject ${pdfText(this.o.subject)}` : ''} ${this.o.keywords ? ` /Keywords ${pdfText(this.o.keywords)}` : ''} /Producer ${pdfText(this.o.producer ?? 'EZTest report PDF writer')} /CreationDate (D:${date}Z) >>` });
 
     push('%PDF-1.7\n%\xe2\xe3\xcf\xd3\n');
     for (const o of body.sort((a, b) => a.id - b.id)) {

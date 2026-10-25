@@ -110,7 +110,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { pattern: 'shard-*', path: shards }
       # One run: evidence re-chained and linked to every shard chain, history, triage, readiness, reports.
-      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+      - run: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
       - run: npx eztest evidence verify eztest-results/merged
       - if: vars.EZTEST_SERVER_URL != ''
         run: npx eztest publish eztest-results/merged --server "${{ vars.EZTEST_SERVER_URL }}"
@@ -137,7 +137,7 @@ jobs:
       - run: npx eztest install-browsers chromium
       # deploy-sit: --env sit, the SIT test plan, a deployment record; values saved "for the pipeline" become job outputs.
       - id: eztest
-        run: npx eztest run --reporter html,json,junit --pipeline deploy-sit
+        run: npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: eztest-sit, path: eztest-results }
@@ -152,7 +152,7 @@ jobs:
       - run: npm ci
       - run: npx eztest install-browsers chromium
       # requires: [deploy-sit] in the config: the run stops unless SIT passed for this version (results server).
-      - run: npx eztest run --reporter html,json,junit --pipeline deploy-uat
+      - run: npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: eztest-uat, path: eztest-results }

@@ -125,12 +125,13 @@ export async function suitesFromRuns(outputDir: string, max = 10): Promise<Map<s
 
 const shortDay = (iso: string) => iso.slice(5, 10);
 
-export function renderTrendsHtml(t: TrendsModel, o: { title?: string; brand?: string } = {}): string {
+/** The portfolio page; the readiness history only with `readiness: true` (report.readiness). */
+export function renderTrendsHtml(t: TrendsModel, o: { title?: string; brand?: string; readiness?: boolean; whiteLabel?: boolean } = {}): string {
   const title = o.title ?? 'Test portfolio trends';
   const runs = t.runs;
   const pass = runs.length >= 2 ? lineChart(runs.map((r, i) => ({ label: shortDay(r.startedAt), value: r.passRate, detail: `${r.total} tests, ${r.failed} failed`, current: i === runs.length - 1 })), { title: 'Pass rate per run', yMax: 1, yFormat: (v) => fmtPct(v, 0), series: 'series-1', area: true, width: 640 }) : '<p class="muted">Two or more runs are needed.</p>';
   const dur = runs.length ? columnChart(runs.map((r) => ({ label: shortDay(r.startedAt), value: r.durationMs, tip: `${r.runId}: ${fmtMs(r.durationMs)}` })), { title: 'Duration per run', yLabel: 'run', yFormat: fmtMs, width: 640 }) : '';
-  const ready = runs.filter((r) => r.readiness);
+  const ready = o.readiness ? runs.filter((r) => r.readiness) : [];
   const readiness = ready.length
     ? `<div class="tbl-wrap"><table><caption class="sr-only">Readiness history</caption><thead><tr><th scope="col">Run</th><th scope="col">Started</th><th scope="col">Decision</th><th scope="col">Score</th><th scope="col">Pass rate</th></tr></thead><tbody>${ready.slice(-30).reverse().map((r) => `<tr><td class="mono">${e(r.runId)}</td><td>${e(r.startedAt.replace('T', ' ').slice(0, 16))}</td><td><span class="badge ${r.readiness === 'GO' ? 'b-passed' : r.readiness === 'NO_GO' ? 'b-failed' : 'b-flaky'}">${e(r.readiness!.replace(/_/g, ' '))}</span></td><td class="num">${e(r.readinessScore ?? '')}</td><td class="num">${e(fmtPct(r.passRate))}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted">No readiness decisions recorded (configure readiness.policyPath).</p>';
@@ -143,17 +144,17 @@ export function renderTrendsHtml(t: TrendsModel, o: { title?: string; brand?: st
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <title>${e(title)}</title><style>${REPORT_CSS}</style></head><body><a class="skip" href="#main">Skip to the dashboard</a>
-<header class="topbar"><div class="topbar-in"><div class="brand"><span class="brand-mark" aria-hidden="true">${e((o.brand ?? 'EZ').slice(0, 2).toUpperCase())}</span><div class="brand-text"><div class="brand-name">${e(o.brand ?? 'EZTest')}</div><h1>${e(title)}</h1></div></div>
+<header class="topbar"><div class="topbar-in"><div class="brand"><span class="brand-mark" aria-hidden="true">${e((o.brand ?? 'EZ').slice(0, 2).toUpperCase())}</span><div class="brand-text"><div class="brand-name">${e(o.brand ?? (o.whiteLabel ? '' : 'EZTest'))}</div><h1>${e(title)}</h1></div></div>
 <span class="small muted">${e(k.runs)} runs${k.from ? ` &middot; ${e(k.from.slice(0, 10))} to ${e(k.to!.slice(0, 10))}` : ''}</span><div class="top-actions"><button type="button" class="btn" id="theme-toggle" aria-pressed="false">Dark theme</button></div></div></header>
 <main id="main">
 <div class="kpis" role="list" aria-label="Portfolio figures">${[
     ['Runs', String(k.runs)], ['Distinct tests', String(k.tests)], ['Average pass rate', fmtPct(k.avgPassRate)], ['Latest pass rate', runs.length ? fmtPct(runs[runs.length - 1].passRate) : '-'],
-    ['Flaky tests', String(t.flakiest.length)], ['Latest readiness', ready.length ? ready[ready.length - 1].readiness!.replace(/_/g, ' ') : '-'],
+    ['Flaky tests', String(t.flakiest.length)], ...(o.readiness ? [['Latest readiness policy', ready.length ? ready[ready.length - 1].readiness!.replace(/_/g, ' ') : '-']] : []),
   ].map(([l, v]) => `<div class="kpi k-accent" role="listitem"><div class="kpi-label">${e(l)}</div><div class="kpi-value">${e(v)}</div></div>`).join('')}</div>
 <section class="block" aria-labelledby="t1"><div class="grid g-2"><div class="card"><h2 id="t1" style="font-size:15px;margin-bottom:8px">Pass rate trend</h2>${pass}</div><div class="card"><h2 style="font-size:15px;margin-bottom:8px">Duration trend</h2>${dur}</div></div></section>
-<section class="block" aria-labelledby="t2"><div class="card"><h2 id="t2" style="font-size:15px;margin-bottom:8px">Readiness history</h2>${strip}${readiness}</div></section>
+${o.readiness ? `<section class="block" aria-labelledby="t2"><div class="card"><h2 id="t2" style="font-size:15px;margin-bottom:8px">Readiness policy history</h2>${strip}${readiness}</div></section>` : ''}
 <section class="block" aria-labelledby="t3"><div class="card"><h2 id="t3" style="font-size:15px;margin-bottom:8px">Failure heat map</h2><p class="card-sub">Share of executed tests that failed, per suite and day (darker is worse).</p><div style="overflow-x:auto">${heat}</div></div></section>
 <section class="block" aria-labelledby="t4"><div class="grid g-3"><div class="card"><h2 id="t4" style="font-size:15px;margin-bottom:8px">Flakiest tests</h2>${flaky}</div><div class="card"><h2 style="font-size:15px;margin-bottom:8px">Slowest tests</h2>${slow}</div><div class="card"><h2 style="font-size:15px;margin-bottom:8px">Most failing tests</h2>${failing}</div></div></section>
-</main><footer class="foot"><span>Generated by EZTest on ${e(t.generatedAt.replace('T', ' ').slice(0, 16))} UTC from .eztest/history.json</span></footer>
+</main><footer class="foot"><span>Generated${o.whiteLabel ? '' : ' by EZTest'} on ${e(t.generatedAt.replace('T', ' ').slice(0, 16))} UTC from .eztest/history.json</span></footer>
 <div class="tip" id="tip" role="tooltip" hidden></div><script>${MINI_SCRIPT}</script></body></html>`;
 }

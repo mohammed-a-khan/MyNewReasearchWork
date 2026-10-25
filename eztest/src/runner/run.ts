@@ -94,7 +94,8 @@ export async function runJourneys(journeys: Journey[], options: RunOptions): Pro
   if (!journeys.length) throw new Error('runJourneys: no journeys to run');
   // External Examples sources (data files, named queries) become inline rows; a source with no rows does not run.
   const sourced = await resolveExamplesSources(journeys, {
-    baseDir: options.baseDir ?? process.cwd(), variables: options.variables ?? {}, ...(options.dataSourceResolver ? { resolver: options.dataSourceResolver } : {}),
+    // ${env} and ${project} (built in, below every variable of the same name) work in data file paths too.
+    baseDir: options.baseDir ?? process.cwd(), variables: { ...(options.builtinVariables ?? {}), ...(options.variables ?? {}) }, ...(options.dataSourceResolver ? { resolver: options.dataSourceResolver } : {}),
   });
   journeys = expandExamples(sourced.journeys); // one journey per Examples row
   // Shared repository elements: bound up front (block conditions included); code journeys bind per step (step.ts).

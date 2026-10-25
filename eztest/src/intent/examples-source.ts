@@ -339,7 +339,7 @@ export function parseExamplesSource(line: string): ExamplesSource {
   }
   if (src.path && !src.from) throw new Error('Examples: "path" applies to data files only');
   if (where !== undefined) src.where = where;
-  if (deriveText !== undefined) src.derive = parseDerived(deriveText, requote);
+  if (deriveText !== undefined) src.derive = parseDerived(deriveText, requote, unq);
   if (resolveText !== undefined) src.resolve = parseResolve(resolveText, unq, requote);
   return src;
 }
@@ -362,12 +362,13 @@ function splitTopLevel(s: string): string[] {
 }
 
 /** `ref = unique("VIS-"), due = addDays(today(), 14)` */
-function parseDerived(text: string, requote: (s: string) => string): Array<{ name: string; expr: string }> {
+function parseDerived(text: string, requote: (s: string) => string, unqOf: (i: string) => string): Array<{ name: string; expr: string }> {
   const out: Array<{ name: string; expr: string }> = [];
   for (const part of splitTopLevel(text)) {
     const m = /^\s*([A-Za-z_][\w.-]*)\s*=\s*(.+?)\s*$/.exec(part);
     if (!m) throw new Error(`Examples: expected "name = expression" in "with", got "${requote(part)}"`);
-    const expr = requote(m[2]);
+    // Single quotes inside: the value lands in step text such as "<ref>", where a double quote would end the string.
+    const expr = m[2].replace(/⟦(\d+)⟧/g, (_x, i: string) => `'${unqOf(i).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).trim();
     const problem = checkExpression(expr);
     if (problem) throw new Error(`Examples: derived column ${m[1]}: ${problem}`);
     out.push({ name: m[1], expr });

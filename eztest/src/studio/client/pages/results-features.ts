@@ -86,6 +86,7 @@ export function registerFeaturesTab(): void {
     id: 'features',
     title: 'Features',
     order: 15,
+    // Step bindings and snippets for undefined steps: an authoring aid the report does not carry.
     when: (d) => d.run.journeys.some((j) => j.bdd),
     badge: (d) => featureGroups(d).length || undefined,
     mount(el, d) {

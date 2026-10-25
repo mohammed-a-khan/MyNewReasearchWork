@@ -68,7 +68,7 @@ export function registerReportCommands(program: Command, io: CliIO, load: Loader
       const t = buildTrends(store.runs, { runs: o.runs, branch: o.branch, ...(suites.size ? { suiteOf: (id: string) => suites.get(id) ?? suites.get(id.split('@')[0]) ?? id.split(/[-@]/)[0] } : {}) });
       const out = resolve(io.cwd, o.out);
       await mkdir(dirname(out), { recursive: true });
-      await writeFile(out, renderTrendsHtml(t, { brand: loaded?.config.report.name, title: loaded?.config.report.title ? `${loaded.config.report.title}: trends` : undefined }));
+      await writeFile(out, renderTrendsHtml(t, { brand: loaded?.config.report.brand?.company ?? loaded?.config.report.name, title: loaded?.config.report.title ? `${loaded.config.report.title}: trends` : undefined, readiness: loaded?.config.report.readiness === true, whiteLabel: loaded?.config.report.brand?.whiteLabel === true }));
       if (o.json) await writeFile(resolve(io.cwd, o.json), JSON.stringify(t, null, 2));
       io.out(`${t.totals.runs} runs, ${t.totals.tests} tests, average pass rate ${(t.totals.avgPassRate * 100).toFixed(1)}%: ${out}`);
     });

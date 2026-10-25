@@ -51,7 +51,7 @@ stages:
           - task: PublishPipelineArtifact@1
             condition: always()
             inputs: { targetPath: '$(EZTEST_RUN_DIR)', artifact: eztest-smoke }
-          # PR status "EZTest: GO / NO_GO" and the summary thread (the run itself already failed on NO_GO).
+          # PR status (the counts, or the readiness decision when a policy is given) and the summary thread.
           - script: npx eztest pr report "$(EZTEST_RUN_DIR)"
             condition: always()
             env: { SYSTEM_ACCESSTOKEN: $(System.AccessToken) }
@@ -93,7 +93,7 @@ stages:
           - script: npm ci
           - task: DownloadPipelineArtifact@2
             inputs: { patterns: 'shard-*/**', path: shards }
-          - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit
+          - script: npx eztest merge shards -o eztest-results/merged --reporter html,json,junit --policy readiness-policy.yaml
           - script: npx eztest evidence verify eztest-results/merged
           - script: npx eztest publish eztest-results/merged --server "$(EZTEST_SERVER_URL)"
             condition: and(succeededOrFailed(), ne(variables['EZTEST_SERVER_URL'], ''))
@@ -132,7 +132,7 @@ stages:
                 - script: npx eztest install-browsers chromium
                 # deploy-sit: --env sit, the SIT test plan, a deployment record, build tags and summary.
                 # Values saved "for the pipeline" become output variables of this step (eztest.<name>).
-                - script: npx eztest run --reporter html,json,junit --pipeline deploy-sit
+                - script: npx eztest run --reporter html,json,junit --pipeline deploy-sit --policy readiness-policy.yaml
                   name: eztest
                   env:
                     EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)
@@ -166,7 +166,7 @@ stages:
                   inputs: { versionSpec: '22.x' }
                 - script: npm ci
                 - script: npx eztest install-browsers chromium
-                - script: npx eztest run --reporter html,json,junit --pipeline deploy-uat
+                - script: npx eztest run --reporter html,json,junit --pipeline deploy-uat --policy readiness-policy.yaml
                   name: eztest
                   env:
                     EZTEST_MASTER_KEY: $(EZTEST_MASTER_KEY)

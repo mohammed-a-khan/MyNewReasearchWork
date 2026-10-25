@@ -197,14 +197,20 @@ vcs:                                     # docs/git.md
   pullRequests: { onHealAccept: false, onBaselineApprove: false, onQuarantine: false }
   owners: { "@alice": alice@contoso.com }
 
-readiness:
+readiness:                               # opt-in (below): evaluate the policy after every run
   policyPath: readiness-policy.yaml
 
 report:                                  # docs/reports.md
-  name: Contoso Shop                     # header; title: and logo: (svg/png, embedded) too
+  name: Contoso Shop                     # the project name in the header; title: too
   trendRuns: 20
   baseline: previous                     # previous | none | <run directory>
   studioUrl: http://localhost:4400
+  readiness: false                       # true: a secondary "Policy" tab with the policy's decision
+  brand:                                 # white-label branding of every output (docs/reports.md#branding)
+    company: Contoso QA
+    logo: branding/logo.svg
+    colors: { primary: "#0b5cad" }
+  # brandFile: branding.yaml             # overrides report.brand (also --brand-file, EZTEST_BRAND_FILE)
 
 security:
   allowPageScripts: false          # "Run script" / "Run JavaScript" steps (they run in the page, never in Node)
@@ -583,6 +589,8 @@ importers:
 Importer plugins add source formats to `eztest import --from <name>` and to Studio's import page. Importers for private or in-house frameworks belong in such plugins, kept in your own repository or private registry.
 
 ## Readiness policy
+
+The readiness policy is an opt-in release gate: nothing evaluates it unless a pipeline step passes it (`eztest analyze <runDir> --policy readiness-policy.yaml`, which exits with 1 on NO_GO; `eztest run --policy`, `eztest merge --policy`) or `readiness.policyPath` is set. The report shows no decision unless `report.readiness: true` (a secondary Policy tab); the decision is always in `report.json` (`insights.readiness`) for `eztest gate` and the pipelines.
 
 ```yaml
 version: 1

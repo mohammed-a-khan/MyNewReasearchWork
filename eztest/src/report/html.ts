@@ -1,36 +1,48 @@
 /**
  * The HTML run report: one self-contained file (no CDN, no external assets;
- * evidence is linked relative to the run directory), that works offline and
- * from file://, prints as an executive summary and scales to tens of
- * thousands of tests.
+ * evidence is linked relative to the run directory) that works offline and
+ * from file://, and scales to tens of thousands of tests.
  *
- * - The executive summary, failure analysis, comparison, integrations and run
- *   context are static HTML and SVG (they read without script, in print and
- *   in mail clients).
- * - The test explorer (tree, filters, search, facets, sort, permalinks,
- *   keyboard navigation) and each test's detail are built by the inline
- *   script from the embedded model (JSON in a non-executable script element,
- *   `<` escaped); it uses DOM APIs and textContent only, never innerHTML of
- *   data. The list is virtualised: only the rows in view are in the DOM.
+ * Information architecture (each fact in exactly one place):
+ *
+ * - Header (sticky): brand, report title, run meta (project / environment,
+ *   date and time, duration, browsers) and the result counts as a status bar.
+ * - Tabs (WAI-ARIA tablist, one panel visible, deep links `#overview`,
+ *   `#tests`, `#tests/<id>`, `#failures`, `#failures/<group>`, `#trends`,
+ *   `#quality`, `#environment`, `#policy`):
+ *   Overview (outcome, results by feature / tag / browser, slowest tests, top
+ *   failure reasons), Tests (the virtualised list and the test detail),
+ *   Failures (grouped by cause, with the next step), Trends (history and the
+ *   changes since the baseline run), Quality (lenses, coverage, API
+ *   contracts), Environment (run, source, machine, browsers, filters,
+ *   configuration, publishing, evidence) and, only when report.readiness is
+ *   on, a secondary Policy tab with the readiness decision.
+ *
+ * Static parts are HTML and SVG (they read without script and print); the
+ * explorer and the test detail are built by the inline script from the
+ * embedded model (JSON in a non-executable script element, `<` escaped) with
+ * DOM APIs and textContent only.
  */
 import type { RunResult } from '../core/index.js';
 import { EzTestError } from '../core/index.js';
 import { apiCoverageHtml } from '../contracts/coverage.js';
 import { escapeHtml as e } from './escape.js';
-import { buildReportModel, STATE_LABEL, TEST_STATES, type Kpis, type ReportModel, type ReportModelInput, type TestState } from './data.js';
-import { columnChart, donutChart, durationBins, fmtMs, fmtPct, ganttChart, hbarChart, lineChart, meter } from './charts.js';
+import { buildReportModel, STATE_LABEL, TEST_STATES, type ReportModel, type ReportModelInput, type TestModel, type TestState } from './data.js';
+import { columnChart, fmtMs, fmtPct, lineChart, meter } from './charts.js';
 import { icon, STATE_ICON } from './icons.js';
 import { REPORT_CSS } from './styles.js';
 import { REPORT_SCRIPT } from './client.js';
 import type { ReportInsights } from './model.js';
 import { bddHierarchy, type BddScenarioEntry } from './bdd.js';
-import { attentionBlock, categoriesCard, configCard, qualityBlock, topFlakyCard } from './html-insights.js';
-import { CATEGORY_LABEL } from './categorise.js';
+import { qualityCards } from './html-insights.js';
+import { CATEGORY_LABEL, FAILURE_CATEGORIES, type FailureCategory } from './categorise.js';
+import { causeGroups, type CauseGroup } from './causes.js';
+import { brandPalette, fontStack, isHidden, labelsOf, paletteCss, productName, type BrandLabels } from './brand.js';
 import type { RunResult as Run } from '../core/index.js';
 
 const STATUS_STATE: Record<string, TestState> = { passed: 'passed', 'passed-healed': 'healed', failed: 'failed', error: 'error', skipped: 'skipped', blocked: 'error' };
 const sbadge = (s: string) => badge(STATUS_STATE[s] ?? 'skipped');
-const MATCH_LABEL: Record<string, string> = { definition: 'step definition', ez: 'EZTest phrasing', undefined: 'undefined', ambiguous: 'ambiguous' };
+const MATCH_LABEL: Record<string, string> = { definition: 'step definition', ez: 'built-in phrasing', undefined: 'undefined', ambiguous: 'ambiguous' };
 
 function bddScenario(sc: BddScenarioEntry): string {
   const steps = sc.steps.map((st) => `<li class="g-step">${sbadge(st.status)} <span class="g-kw">${e(st.keyword)}</span> ${e(st.text)}${st.match ? ` <small class="muted" title="${e(st.location ?? '')}">${e(MATCH_LABEL[st.match] ?? st.match)}${st.location ? ` &middot; ${e(st.location)}` : ''}</small>` : ''}${st.error ? `<div class="g-err">${e(st.error)}</div>` : ''}</li>`).join('');
@@ -38,19 +50,19 @@ function bddScenario(sc: BddScenarioEntry): string {
   return `<li class="g-scenario"><details${sc.status === 'failed' || sc.status === 'error' ? ' open' : ''}><summary>${sbadge(sc.status)} <span class="g-kw">${e(sc.keyword)}:</span> <a href="${testHref(sc.journeyId)}">${e(sc.name)}</a> <small class="muted">line ${e(sc.line)}${sc.examples ? ` &middot; ${e(sc.examples.name || 'Examples')} row ${e((sc.examples.row?.index ?? 0) + 1)}` : ''} &middot; ${e(fmtMs(sc.durationMs))}</small></summary><ol class="g-steps">${steps}${hooks}</ol></details></li>`;
 }
 
-/** Feature / rule / scenario hierarchy of the run's Gherkin scenarios (docs/bdd.md). */
+/**
+ * Feature / rule / scenario hierarchy of the run's Gherkin scenarios (docs/bdd.md), as static HTML.
+ * The report itself groups the Tests list by feature; this block is kept for callers that embed it.
+ */
 export function featuresBlock(run: Run): string {
   const h = bddHierarchy(run);
   if (!h) return '';
-  const t = h.totals;
   const features = h.features.map((f) => {
-    const c = f.counts;
     const rules = f.rules.map((r) => `<li class="g-rule"><details open><summary>${sbadge(r.status)} <span class="g-kw">Rule:</span> ${e(r.name)} <small class="muted">line ${e(r.line)}</small></summary><ul class="g-scenarios">${r.scenarios.map(bddScenario).join('')}</ul></details></li>`).join('');
-    return `<li class="g-feature"><details${f.status === 'failed' || f.status === 'error' ? ' open' : ''}><summary>${sbadge(f.status)} <strong>${e(f.name || f.file)}</strong> <small class="muted">${e(f.file)} &middot; ${e(c.passed + c.passedHealed)} passed, ${e(c.failed + c.errors)} failed, ${e(c.skipped)} skipped</small></summary>
+    return `<li class="g-feature"><details${f.status === 'failed' || f.status === 'error' ? ' open' : ''}><summary>${sbadge(f.status)} <strong>${e(f.name || f.file)}</strong> <small class="muted">${e(f.file)}</small></summary>
 <ul class="g-scenarios">${f.scenarios.map(bddScenario).join('')}${rules}</ul></details></li>`;
   }).join('');
-  return `<section class="block" id="features" aria-labelledby="features-h"><div class="block-head"><h2 id="features-h">Features</h2><p>${e(t.features)} feature(s), ${e(t.rules)} rule(s), ${e(t.scenarios)} scenario(s), ${e(t.steps)} step(s): ${e(t.passed + t.passedHealed)} passed, ${e(t.failed + t.errors)} failed, ${e(t.skipped)} skipped</p></div>
-<div class="card"><ul class="g-features">${features}</ul></div></section>`;
+  return `<section class="block" id="features" aria-label="Features"><div class="card"><ul class="g-features">${features}</ul></div></section>`;
 }
 
 export interface HtmlReportOptions extends ReportInsights, Omit<ReportModelInput, keyof ReportInsights> {
@@ -64,170 +76,291 @@ export function scriptJson(v: unknown): string {
   return JSON.stringify(v).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
-const testHref = (id: string) => `#test/${encodeURIComponent(id)}`;
-const badge = (s: TestState) => `<span class="badge b-${s}">${icon(STATE_ICON[s])}${e(STATE_LABEL[s])}</span>`;
+const testHref = (id: string) => `#tests/${encodeURIComponent(id)}`;
+const badge = (s: TestState, label?: string) => `<span class="badge b-${s}">${icon(STATE_ICON[s])}${e(label ?? STATE_LABEL[s])}</span>`;
+const catChip = (c: FailureCategory) => `<span class="cat c-${c}">${e(CATEGORY_LABEL[c])}</span>`;
 const ext = (url: string | undefined, label: string, cls = '') => (url ? `<a class="${cls}" href="${e(url)}" target="_blank" rel="noopener noreferrer">${e(label)}<span class="sr-only"> (opens in a new tab)</span></a>` : `<span class="${cls}">${e(label)}</span>`);
-const fmtDate = (iso: string | undefined) => {
+const info = (about: string, text: string) => `<button type="button" class="info" data-tip="${e(text)}">${icon('info')}<span class="sr-only">About ${e(about)}: ${e(text)}</span></button>`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "25 Oct 2026, 18:49 UTC". */
+export function fmtWhen(iso: string | undefined, seconds = false): string {
   if (!iso) return '-';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
-};
-const shortDate = (iso: string, time = false) => {
-  const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const day = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  return time ? `${day} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}` : day;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}${seconds ? `:${p(d.getUTCSeconds())}` : ''} UTC`;
+}
+const shortDay = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+};
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const isFail = (t: { state: TestState }) => t.state === 'failed' || t.state === 'error';
+const ADO_TAG = /^@?(TestCaseId|TestPlanId|TestSuiteId)\b/i;
+
+/** State counts of a list of tests. */
+function countsOf(tests: TestModel[]): Record<TestState, number> {
+  const c: Record<TestState, number> = { passed: 0, healed: 0, flaky: 0, failed: 0, error: 0, skipped: 0 };
+  for (const t of tests) c[t.state]++;
+  return c;
+}
+/** A proportional bar of state counts (decorative; the numbers are next to it). */
+function stateBar(c: Record<TestState, number>, cls = 'hbar'): string {
+  const total = TEST_STATES.reduce((n, s) => n + c[s], 0) || 1;
+  return `<span class="${cls}" aria-hidden="true">${TEST_STATES.filter((s) => c[s]).map((s) => `<span class="st-${s}" style="width:${((c[s] / total) * 100).toFixed(2)}%"></span>`).join('')}</span>`;
+}
+const passRateOf = (c: Record<TestState, number>) => {
+  const executed = c.passed + c.healed + c.flaky + c.failed + c.error;
+  return executed ? (c.passed + c.healed + c.flaky) / executed : 0;
 };
 
-function delta(cur: number, prev: number | undefined, o: { goodWhen: 'up' | 'down' | 'none'; fmt?: (n: number) => string; pp?: boolean }): string {
-  if (prev === undefined) return '<span class="kpi-delta">no previous run</span>';
-  const d = cur - prev;
-  if (Math.abs(d) < 1e-9) return '<span class="kpi-delta">no change vs previous</span>';
-  const txt = o.pp ? `${d > 0 ? '+' : ''}${(d * 100).toFixed(1)} pp` : `${d > 0 ? '+' : '\u2212'}${o.fmt ? o.fmt(Math.abs(d)) : Math.abs(d)}`;
-  const cls = o.goodWhen === 'none' ? '' : (d > 0) === (o.goodWhen === 'up') ? 'good' : 'bad';
-  return `<span class="kpi-delta ${cls}">${e(txt)} vs previous</span>`;
-}
+// ------------------------------------------------------------------ header
 
-function kpiTiles(m: ReportModel): string {
+function header(m: ReportModel, L: BrandLabels, o: { exports?: Array<{ label: string; href: string }> }): string {
+  const b = m.brand;
   const k = m.kpis;
-  const p: Kpis | undefined = m.previous?.kpis;
-  const tile = (cls: string, label: string, value: string, d: string, href?: string, ico?: string) => {
-    const inner = `<div class="kpi-label">${ico ? icon(ico) : ''}${e(label)}</div><div class="kpi-value">${e(value)}</div>${d}`;
-    return `<div class="kpi ${cls}">${href ? `<a href="${href}" data-filter-link="${e(href.slice(8))}">${inner}</a>` : inner}</div>`;
+  const p = m.previous?.kpis;
+  const logo = b.logo
+    ? `<img class="brand-logo light${b.logoDark ? ' has-dark' : ''}" src="${e(b.logo)}" alt="${e(b.company ?? b.name)}">${b.logoDark ? `<img class="brand-logo dark" src="${e(b.logoDark)}" alt="${e(b.company ?? b.name)}">` : ''}`
+    : `<span class="brand-mark" aria-hidden="true">${b.mark ? `<img src="${e(b.mark)}" alt="">` : icon('logo')}</span>`;
+  const env = m.context?.environment;
+  const browsers = m.context?.browsers ?? [];
+  const meta = [
+    `<li>${icon('folder')}<span class="sr-only">Project: </span><b>${e(b.name)}</b>${env ? ` <span aria-hidden="true">/</span><span class="sr-only">, environment</span> <b>${e(env)}</b>` : ''}</li>`,
+    `<li>${icon('calendar')}<span class="sr-only">Started: </span><time datetime="${e(m.startedAt)}">${e(fmtWhen(m.startedAt))}</time></li>`,
+    `<li>${icon('clock')}<span class="sr-only">Duration: </span>${e(fmtMs(m.durationMs))}</li>`,
+    browsers.length ? `<li>${icon('globe')}<span class="sr-only">Browsers: </span>${e(browsers.map((x) => `${x.name[0].toUpperCase()}${x.name.slice(1)}${x.version ? ` ${x.version.split('.')[0]}` : ''}`).join(', '))}</li>` : '',
+  ].join('');
+  const delta = (cur: number, prev: number | undefined, goodWhen: 'up' | 'down' | 'none') => {
+    if (prev === undefined || cur === prev) return '';
+    const d = cur - prev;
+    const cls = goodWhen === 'none' ? '' : (d > 0) === (goodWhen === 'up') ? 'good' : 'bad';
+    return `<span class="d ${cls}" title="Change since the previous run">${d > 0 ? '+' : '\u2212'}${Math.abs(d)}</span>`;
   };
-  return `<div class="kpis" role="list" aria-label="Key figures">${[
-    tile('k-accent', 'Total tests', String(k.total), delta(k.total, p?.total, { goodWhen: 'none' }), '#filter/all'),
-    tile('k-passed', 'Passed', String(k.passed), delta(k.passed, p?.passed, { goodWhen: 'up' }), '#filter/passed', 'check'),
-    tile('k-failed', 'Failed', String(k.failed + k.errors), delta(k.failed + k.errors, p ? p.failed + p.errors : undefined, { goodWhen: 'down' }), '#filter/failed', 'x'),
-    tile('k-flaky', 'Flaky', String(k.flaky), delta(k.flaky, p?.flaky, { goodWhen: 'down' }), '#filter/flaky', 'retry'),
-    tile('k-healed', 'Healed', String(k.healed), delta(k.healed, p?.healed, { goodWhen: 'down' }), '#filter/healed', 'heal'),
-    tile('k-skipped', 'Skipped', String(k.skipped), delta(k.skipped, p?.skipped, { goodWhen: 'none' }), '#filter/skipped', 'minus'),
-    tile('k-accent', 'Pass rate', fmtPct(k.passRate), delta(k.passRate, p?.passRate, { goodWhen: 'up', pp: true })),
-    tile('k-accent', 'Duration', fmtMs(k.durationMs), delta(k.durationMs, p?.durationMs, { goodWhen: 'down', fmt: fmtMs })),
-  ].map((t) => t.replace('<div class="kpi ', '<div role="listitem" class="kpi ')).join('')}</div>`;
+  const tile = (state: TestState | 'all', n: number, label: string, d: string) =>
+    `<li class="sb-tile"><a href="${state === 'all' ? '#tests' : `#tests?state=${state}`}" data-count="${state}">${state === 'all' ? '' : `<span class="dot st-${state}" aria-hidden="true"></span>`}<span class="v">${e(n)}</span> <span class="l">${e(label)}</span>${d}</a></li>`;
+  const tiles = [
+    tile('all', k.total, k.total === 1 ? L.test : L.tests, delta(k.total, p?.total, 'none')),
+    tile('passed', k.passed, 'passed', delta(k.passed, p?.passed, 'up')),
+    tile('failed', k.failed, 'failed', delta(k.failed, p?.failed, 'down')),
+    ...(k.errors ? [tile('error', k.errors, k.errors === 1 ? 'error' : 'errors', delta(k.errors, p?.errors, 'down'))] : []),
+    tile('flaky', k.flaky, 'flaky', delta(k.flaky, p?.flaky, 'down')),
+    ...(k.healed ? [tile('healed', k.healed, 'healed', delta(k.healed, p?.healed, 'down'))] : []),
+    tile('skipped', k.skipped, 'skipped', delta(k.skipped, p?.skipped, 'none')),
+  ].join('');
+  const counts: Record<TestState, number> = { passed: k.passed, healed: k.healed, flaky: k.flaky, failed: k.failed, error: k.errors, skipped: k.skipped };
+  const exportsMenu = o.exports?.length
+    ? `<div class="menu"><button type="button" class="btn" id="exports-btn" aria-haspopup="true" aria-expanded="false" aria-controls="exports-list">${icon('download')}<span>Export</span></button><ul class="menu-list" id="exports-list" hidden>${o.exports.map((x) => `<li><a href="${e(x.href)}" download>${icon('download')}${e(x.label)}</a></li>`).join('')}</ul></div>`
+    : '';
+  return `<header class="topbar" id="top"><div class="head-in">
+<div class="head-top"><div class="brand">${logo}<div class="brand-text">${b.company ? `<div class="brand-eyebrow">${e(b.company)}</div>` : ''}<h1 class="brand-title">${e(m.title)}${b.subtitle ? ` <span class="brand-sub">&mdash; ${e(b.subtitle)}</span>` : ''}</h1></div></div>
+<div class="top-actions">${exportsMenu}<button type="button" class="btn" id="print-btn">${icon('print')}<span>Print</span></button><button type="button" class="btn" id="theme-toggle" aria-pressed="false">${icon('moon')}<span>Dark theme</span></button></div></div>
+<ul class="run-meta" aria-label="Run">${meta}</ul>
+<div class="statusbar" role="group" aria-label="Results">${stateBar(counts, 'sb-bar')}<ul class="sb-tiles">${tiles}</ul></div>
+<div class="tabs" role="tablist" aria-label="Report sections" id="tablist">__TABS__</div>
+</div></header>`;
 }
 
-function verdictCard(m: ReportModel): string {
-  const v = m.verdict;
-  const ico = v.decision === 'GO' ? 'check' : v.decision === 'NO_GO' ? 'x' : 'alert';
-  const label = v.decision.replace(/_/g, ' ');
-  const rank: Record<string, number> = { violation: 0, risk: 1, waived: 2, 'missing-input': 3, pass: 4, info: 5 };
-  const reasons = [...v.reasons]
-    .sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9))
-    .map((r) => {
-      const cites = [
-        ...r.tests.slice(0, 5).map((t) => `<a href="${testHref(t)}">${e(t)}</a>`),
-        ...(r.tests.length > 5 ? [`<span class="muted">+${r.tests.length - 5} more</span>`] : []),
-        ...r.requirements.slice(0, 6).map((q) => `<code>${e(q)}</code>`),
-        ...r.evidence.slice(0, 4).map((x) => evLink(m, x)),
-        ...(r.evidence.length > 4 ? [`<span class="muted">+${r.evidence.length - 4} evidence</span>`] : []),
-      ];
-      return `<li><span class="rk ${e(r.kind)}">${e(r.kind)}</span><span>${e(r.text)}${cites.length ? ` <span class="cites">${cites.join(', ')}</span>` : ''}</span></li>`;
-    })
-    .join('');
-  const gates = v.gates.length ? `<div class="gates"><span class="sr-only">Readiness gates: </span>${v.gates.map((g) => `<span class="gate g-${e(g.status)}" title="${e(g.summary)}">${e(g.gate)}: ${e(g.status)}</span>`).join('')}</div>` : '';
-  const exc = v.exceptions.length ? `<p class="small">Exceptions applied: ${v.exceptions.map((x) => `${e(x.gate)} approved by <strong>${e(x.approver)}</strong> (${e(x.reason)})`).join('; ')}</p>` : '';
-  const perBrowser = v.browsers ? `<p class="small">Per browser: ${Object.entries(v.browsers).map(([b, r]) => `${e(b)} <strong>${e(r.decision.replace(/_/g, ' '))}</strong> (${e(r.score)})`).join(' &middot; ')}</p>` : '';
-  return `<section class="card verdict v-${e(v.decision)}" aria-labelledby="verdict-h">
-<div class="v-badge"><div class="v-icon">${icon(ico)}</div><div><div class="v-label" id="verdict-h">Release readiness</div><div class="v-decision">${e(label)}</div>${v.score !== undefined ? `<div class="v-score">score ${e(v.score)} / 100</div>` : `<div class="v-score">built-in rule</div>`}</div></div>
-<div><ul class="reasons">${reasons}</ul>${gates}${exc}${perBrowser}</div></section>`;
+interface TabDef {
+  id: string;
+  label: string;
+  ico: string;
+  body: string;
+  secondary?: boolean;
+  alert?: boolean;
 }
 
-function evLink(m: ReportModel, id: string): string {
-  const r = m.evidence[id];
-  if (!r) return `<span class="mono muted" title="not in the evidence manifest">${e(id)}</span>`;
-  const kind = m.evidenceKinds[r[0]] ?? '';
-  return r[1] ? `<a class="mono" href="${e(r[1])}" title="${e(`${kind}${r[2] ? `: ${r[2]}` : ''}`)}">${e(id)}</a>` : `<span class="mono">${e(id)}</span>`;
+function tabsHtml(tabs: TabDef[]): string {
+  return tabs.map((t, i) => `<button type="button" role="tab" class="tab${t.secondary ? ' secondary' : ''}" id="tab-${t.id}" aria-controls="p-${t.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${t.id}">${icon(t.ico)}${e(t.label)}${t.alert ? '<span class="alert" aria-hidden="true"></span>' : ''}</button>`).join('');
 }
 
-function summaryCharts(m: ReportModel): string {
+// ------------------------------------------------------------------ overview
+
+function emptyState(title: string, text: string, ok = true): string {
+  return `<div class="empty-state"><span class="halo${ok ? '' : ' n'}">${icon(ok ? 'check' : 'minus')}</span><strong>${e(title)}</strong><span>${e(text)}</span></div>`;
+}
+
+/** The outcome donut: pass rate in the centre, the share of each result in the legend (the counts are in the header). */
+export function outcomeDonut(m: ReportModel): string {
   const k = m.kpis;
-  const segs = TEST_STATES.map((s) => ({ key: s, label: STATE_LABEL[s], value: s === 'failed' ? k.failed : s === 'error' ? k.errors : s === 'passed' ? k.passed : s === 'healed' ? k.healed : s === 'flaky' ? k.flaky : k.skipped }));
-  const donut = donutChart(segs, { title: 'Outcome of every test', centre: fmtPct(k.passRate, 1), centreLabel: 'pass rate' });
-  const trend = m.trend;
-  const trendPass = trend.length >= 2
-    ? lineChart(trend.map((t) => ({ label: shortDate(t.startedAt), value: t.passRate, detail: `${shortDate(t.startedAt, true)} UTC, ${t.total} tests, ${t.failed} failed${t.readiness ? `, ${t.readiness.replace(/_/g, ' ')}` : ''}`, current: t.current })), { title: `Pass rate, last ${trend.length} runs`, yMax: 1, yFormat: (v) => fmtPct(v, 0), series: 'series-1', area: true })
-    : '<p class="muted">The trend appears after the second recorded run (history: .eztest/history.json).</p>';
-  const trendDur = trend.length >= 2
-    ? columnChart(trend.map((t) => ({ label: shortDate(t.startedAt), value: t.durationMs, tip: `${shortDate(t.startedAt, true)} UTC: ${fmtMs(t.durationMs)}${t.current ? ' (this run)' : ''}`, cls: t.current ? 'series-1' : 'muted' })), { title: `Run duration, last ${trend.length} runs`, yLabel: 'run', yFormat: fmtMs })
-    : '<p class="muted">No earlier runs yet.</p>';
-  const executed = m.tests.filter((t) => t.state !== 'skipped');
-  const dist = executed.length ? columnChart(durationBins(executed.map((t) => t.durationMs)), { title: 'Test duration distribution', yLabel: 'test duration', yFormat: (v) => String(Math.round(v)), width: 720, height: 230 }) : '<p class="muted">Nothing executed.</p>';
-  const slow = m.slowest.length
-    ? hbarChart(m.slowest.map((s) => ({ label: s.name, value: s.durationMs, valueLabel: fmtMs(s.durationMs), cls: `st-${s.state}`, href: testHref(s.id), tip: `${s.name}: ${fmtMs(s.durationMs)} (${STATE_LABEL[s.state]})` })), { title: 'Slowest tests', unit: 'Duration', width: 720, labelWidth: 260 })
-    : '<p class="muted">Nothing executed.</p>';
-  const clusters = m.clusters.length
-    ? hbarChart(m.clusters.slice(0, 6).map((c) => ({ label: c.message, value: c.size, valueLabel: `${c.size} test${c.size === 1 ? '' : 's'}`, cls: 'st-failed', href: `#failure/${encodeURIComponent(c.id)}`, tip: `${c.message} - ${c.size} test(s)${c.category ? `, ${c.category}` : ''}` })), { title: 'Top failure clusters', unit: 'Tests', labelWidth: 300, width: 720 })
-    : `<p class="muted">${k.failed + k.errors ? 'No clusters.' : 'No failures in this run.'}</p>`;
+  const counts: Record<TestState, number> = { passed: k.passed, healed: k.healed, flaky: k.flaky, failed: k.failed, error: k.errors, skipped: k.skipped };
+  const total = k.total || 1;
+  const size = 168;
+  const r = 74;
+  const inner = 54;
+  const c = size / 2;
+  let a0 = -Math.PI / 2;
+  const shown = TEST_STATES.filter((s) => counts[s]);
+  const gap = shown.length > 1 ? 0.025 : 0;
+  const pt = (rad: number, ang: number) => `${(c + rad * Math.cos(ang)).toFixed(2)},${(c + rad * Math.sin(ang)).toFixed(2)}`;
+  const arcs = shown.map((s) => {
+    const frac = counts[s] / total;
+    const a1 = a0 + frac * Math.PI * 2;
+    const st = a0 + gap / 2;
+    const en = Math.max(st + 0.0001, a1 - gap / 2);
+    a0 = a1;
+    if (frac >= 0.9999) return `<path class="mark st-${s}" fill-rule="evenodd" d="M${c - r},${c}A${r},${r} 0 1 1 ${c + r},${c}A${r},${r} 0 1 1 ${c - r},${c}ZM${c - inner},${c}A${inner},${inner} 0 1 0 ${c + inner},${c}A${inner},${inner} 0 1 0 ${c - inner},${c}Z"/>`;
+    const large = en - st > Math.PI ? 1 : 0;
+    return `<path class="mark st-${s}" d="M${pt(r, st)}A${r},${r} 0 ${large} 1 ${pt(r, en)}L${pt(inner, en)}A${inner},${inner} 0 ${large} 0 ${pt(inner, st)}Z"/>`;
+  }).join('');
+  const desc = shown.map((s) => `${STATE_LABEL[s]} ${fmtPct(counts[s] / total)}`).join(', ');
+  const legend = `<ul class="legend">${shown.map((s) => `<li><span class="key st-${s}" aria-hidden="true"></span><span class="lk">${e(STATE_LABEL[s])}</span><span class="lp">${e(fmtPct(counts[s] / total))}</span></li>`).join('')}</ul>`;
+  return `<div class="outcome"><svg class="viz" viewBox="0 0 ${size} ${size}" role="img" aria-labelledby="donut-t"><title id="donut-t">Pass rate ${e(fmtPct(k.passRate))}. Share of tests: ${e(desc)}.</title><circle cx="${c}" cy="${c}" r="${(r + inner) / 2}" fill="none" class="track" stroke-width="${r - inner}"/>${arcs}<text x="${c}" y="${c + 2}" text-anchor="middle" class="viz-hero">${e(fmtPct(k.passRate, k.passRate === 1 || k.passRate === 0 ? 0 : 1))}</text><text x="${c}" y="${c + 22}" text-anchor="middle" class="viz-muted">pass rate</text></svg>${legend}</div>`;
+}
+
+/** The first column's heading from the section's label: "Results by module" -> "Module" (a brand's own words). */
+function colOf(section: string, fallback: string): string {
+  const m = /^results\s+by\s+(.+)$/i.exec(section.trim());
+  return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : fallback;
+}
+
+function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: string }>, caption: string, first: string, more: number, noun = 'Tests', tab = 'Tests'): string {
+  if (!rows.length) return '';
+  const body = rows.map((r) => {
+    const c = countsOf(r.tests);
+    const failing = c.failed + c.error;
+    return `<tr><th scope="row">${r.href ? `<a href="${e(r.href)}">${e(r.label)}</a>` : e(r.label)}</th><td class="num">${e(r.tests.length)}</td><td class="num${failing ? ' ink-failed' : ''}">${e(failing)}</td><td class="bar-cell bar-col">${stateBar(c)}</td><td class="num rate">${e(fmtPct(passRateOf(c), 0))}</td></tr>`;
+  }).join('');
+  return `<div class="tbl-wrap"><table><caption class="sr-only">${e(caption)}</caption><thead><tr><th scope="col">${e(first)}</th><th scope="col" class="num">${e(noun)}</th><th scope="col" class="num">Failing</th><th scope="col" class="bar-col"><span class="sr-only">Outcome</span></th><th scope="col" class="num">Pass rate</th></tr></thead><tbody>${body}</tbody></table></div>${more > 0 ? `<p class="small muted" style="margin:8px 0 0">${e(more)} more in the ${e(tab)} tab.</p>` : ''}`;
+}
+
+function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): string {
+  const health = m.health
+    ? `<div class="banner" role="note">${icon('alert')}<div>${m.health.preflight && !m.health.preflight.ok ? `<strong>Environment unavailable:</strong> ${e(m.health.preflight.failed.join('; '))} (nothing ran). ` : ''}${m.health.circuit ? `<strong>Circuit breaker opened</strong> after ${e(m.health.circuit.afterJourney)}: ${e(m.health.circuit.notRun)} test(s) not run (${e(m.health.circuit.reason)}).` : ''}</div></div>`
+    : '';
+  const bySuite = new Map<string, TestModel[]>();
+  for (const t of m.tests) {
+    const key = t.suite[0] ?? 'Ungrouped';
+    bySuite.set(key, [...(bySuite.get(key) ?? []), t]);
+  }
+  const suites = [...bySuite.entries()].sort((a, b) => countsOf(b[1]).failed + countsOf(b[1]).error - (countsOf(a[1]).failed + countsOf(a[1]).error) || b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const byTag = new Map<string, TestModel[]>();
+  for (const t of m.tests) for (const g of t.tags) if (!ADO_TAG.test(g)) byTag.set(g, [...(byTag.get(g) ?? []), t]);
+  const tags = [...byTag.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const fail = groups.filter((g) => g.kind === 'failure');
+  const reasons = groups.slice(0, 6).map((g) => `<div class="reason"><span class="cnt" title="${e(plural(g.tests.length, L.test, L.tests))}">${e(g.tests.length)}</span><a href="#failures/${e(g.id)}"><div class="msg" title="${e(g.message)}">${e(g.message)}</div></a>${catChip(g.cat)}</div>`).join('');
+  const slow = m.slowest.slice(0, 6);
+  const maxSlow = Math.max(1, ...slow.map((s) => s.durationMs));
+  const slowList = slow.length
+    ? `<ul class="list">${slow.map((s) => `<li><span class="sicon si-${s.state}" title="${e(STATE_LABEL[s.state])}">${icon(STATE_ICON[s.state])}</span><a class="grow" href="${testHref(s.id)}" title="${e(s.name)}">${e(s.name)}</a><span class="hbar" style="width:90px" aria-hidden="true"><span class="st-skipped" style="width:${((s.durationMs / maxSlow) * 100).toFixed(1)}%;background:var(--series-1)"></span></span><span class="n">${e(fmtMs(s.durationMs))}</span></li>`).join('')}</ul>`
+    : emptyState('Nothing executed', 'Every test was skipped.', false);
+  const b = m.browsers;
+  const browserCard = b
+    ? `<section class="card span-6" aria-labelledby="ov-browser"><div class="card-h"><h3 id="ov-browser">${e(L.sections.byBrowser)}</h3></div>${breakdownTable(b.names.map((n) => ({ label: `${n}${b.perBrowser[n].version ? ` ${b.perBrowser[n].version!.split('.')[0]}` : ''}`, tests: m.tests.filter((t) => t.browser === n) })), L.sections.byBrowser, colOf(L.sections.byBrowser, 'Browser'), 0, cap(L.tests), L.tabs.tests)}</section>`
+    : '';
+  return `${health}<div class="grid">
+<section class="card span-4" aria-labelledby="ov-outcome"><div class="card-h"><h3 id="ov-outcome">${e(L.sections.outcome)}</h3>${info('the pass rate', 'Passed tests (healed and flaky included) out of the tests that ran; skipped tests are not counted.')}</div>${outcomeDonut(m)}</section>
+<section class="card span-8" aria-labelledby="ov-reasons"><div class="card-h"><h3 id="ov-reasons" class="grow">${e(L.sections.topFailures)}</h3>${groups.length && !isHidden(m.brand, 'failures') ? `<a class="btn quiet" href="#failures">All causes</a>` : ''}</div>${fail.length || groups.length ? `<div>${reasons}</div>` : emptyState('No failures', `Every ${L.test} that ran passed.`)}</section>
+<section class="card span-6" aria-labelledby="ov-feature"><div class="card-h"><h3 id="ov-feature">${e(L.sections.byFeature)}</h3>${info('features', 'The first level of the suite: the feature of a Gherkin scenario, else the folder or file of the journey.')}</div>${breakdownTable(suites.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byFeature, colOf(L.sections.byFeature, 'Feature'), suites.length - 10, cap(L.tests), L.tabs.tests)}</section>
+<section class="card span-6" aria-labelledby="ov-tag"><div class="card-h"><h3 id="ov-tag">${e(L.sections.byTag)}</h3></div>${tags.length ? breakdownTable(tags.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byTag, colOf(L.sections.byTag, 'Tag'), tags.length - 10, cap(L.tests), L.tabs.tests) : emptyState('No tags', 'Tag journeys (Tags: @smoke) to see results per tag.', false)}</section>
+<section class="card span-6" aria-labelledby="ov-slow"><div class="card-h"><h3 id="ov-slow">${e(L.sections.slowest)}</h3></div>${slowList}</section>
+${browserCard}
+</div>`;
+}
+
+// ------------------------------------------------------------------ tests
+
+function testsPanel(m: ReportModel, L: BrandLabels): string {
+  const present = TEST_STATES.filter((s) => m.tests.some((t) => t.state === s));
+  return `<div class="explorer" id="explorer">
+<div class="ex-side"><div class="ex-tools" role="search" aria-label="Find ${e(L.tests)}">
+<div class="search">${icon('search')}<label for="q" class="sr-only">Search ${e(L.tests)}</label><input type="search" id="q" placeholder="Search name, tag, error, step" autocomplete="off"></div>
+<div class="filters" role="group" aria-label="Filter by result"><button type="button" class="fchip" data-state="all" aria-pressed="true">All</button>${present.map((s) => `<button type="button" class="fchip" data-state="${s}" aria-pressed="false"><span class="dot st-${s}" aria-hidden="true"></span>${e(STATE_LABEL[s])}</button>`).join('')}</div>
+<div class="ex-row2"><label>Group<select id="group"><option value="suite">Feature</option><option value="file">File</option><option value="tag">Tag</option><option value="browser">Browser</option><option value="owner">Owner</option><option value="category">Failure category</option><option value="none">No grouping</option></select></label>
+<label>Sort<select id="sort"><option value="default">Run order</option><option value="severity">Failures first</option><option value="duration">Slowest first</option><option value="name">Name</option></select></label>
+<label>Tag<select id="f-tag"><option value="">Any</option></select></label></div>
+<details class="more" id="more-filters"><summary>More filters</summary><div class="ex-row2" style="margin-top:6px"><label>Owner<select id="f-owner"><option value="">Any</option></select></label><label>Browser<select id="f-browser"><option value="">Any</option></select></label><label>Category<select id="f-cat"><option value="">Any</option></select></label></div></details>
+</div>
+<div class="ex-count" id="count" aria-live="polite"></div>
+<div class="vlist" id="vlist" role="tree" aria-label="${e(L.tests[0].toUpperCase() + L.tests.slice(1))}" tabindex="0"><div class="vlist-inner" id="vinner"></div></div></div>
+<div class="ex-detail" id="detail" role="region" tabindex="-1" aria-label="${e(L.test[0].toUpperCase() + L.test.slice(1))} details"><div class="d-empty"><div>${icon('list')}<p>Select a ${e(L.test)} to see its steps, logs and evidence.</p><p class="small">Shortcuts: <span class="kbd">/</span> search &middot; <span class="kbd">&uarr;</span> <span class="kbd">&darr;</span> move &middot; <span class="kbd">Enter</span> open &middot; <span class="kbd">Esc</span> close</p></div></div></div>
+</div>
+<noscript><p>The interactive list needs JavaScript; the Failures tab lists every failing ${e(L.test)}.</p></noscript>
+<div class="print-only" id="print-tests"></div>`;
+}
+
+// ------------------------------------------------------------------ failures
+
+function failuresPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): string {
+  const byCat = new Map<FailureCategory, CauseGroup[]>();
+  for (const g of groups) byCat.set(g.cat, [...(byCat.get(g.cat) ?? []), g]);
+  const order: FailureCategory[] = [...FAILURE_CATEGORIES.filter((c) => c !== 'flaky'), 'flaky'];
+  const sections = order.filter((c) => byCat.has(c)).map((c) => {
+    const list = byCat.get(c)!;
+    const n = list.reduce((x, g) => x + g.tests.length, 0);
+    // One next step for the whole category when every cause in it has the same one.
+    const shared = list.length > 1 && list.every((g) => g.fix && g.fix === list[0].fix) ? list[0].fix : undefined;
+    const cards = list.map((g) => {
+      const first = g.tests[0];
+      const tests = g.tests.slice(0, 50).map((t) => `<li><span class="sicon si-${t.state}" title="${e(STATE_LABEL[t.state])}">${icon(STATE_ICON[t.state])}</span><a href="${testHref(t.id)}" title="${e(t.name)}">${e(t.name)}</a>${t.failedStep ? `<span class="where" title="${e(t.failedStep)}">${e(t.failedStep)}</span>` : ''}</li>`).join('');
+      return `<article class="cause-card${g.kind === 'flaky' ? ' flaky' : ''}" id="failures/${e(g.id)}" tabindex="-1" aria-labelledby="g-${e(g.id)}">
+<div class="group-h"><div class="grow"><p class="group-msg" id="g-${e(g.id)}">${e(g.message)}</p><div class="group-meta">${g.kind === 'failure' ? (g.known ? `<span>Seen before${g.firstSeenAt ? ` &middot; first on ${e(shortDay(g.firstSeenAt))}` : ''}</span>` : '<span class="cat c-new">new</span>') : ''}${first.signature ? `<span class="mono" title="Error signature">${e(first.signature.slice(0, 10))}</span>` : ''}<button type="button" class="btn quiet no-print" data-copy-bug="${e(first.id)}" style="min-height:26px;padding:2px 8px">${icon('copy')}Copy for bug</button></div></div><div class="group-n">${e(g.tests.length)}<small>${e(g.tests.length === 1 ? L.test : L.tests)}</small></div></div>
+${g.fix && !shared ? `<div class="next">${icon('bulb')}<div><strong>Next step:</strong> ${e(g.fix)}</div></div>` : ''}
+<ul class="group-tests">${tests}${g.tests.length > 50 ? `<li class="muted">${e(g.tests.length - 50)} more: filter the Tests tab by this category.</li>` : ''}</ul></article>`;
+    }).join('');
+    return `<section class="cat-sec" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${catChip(c)} <span class="muted small" style="font-weight:500">${e(plural(n, L.test, L.tests))} &middot; ${e(plural(list.length, 'cause', 'causes'))}</span></h3>${shared ? `<div class="next cat-next">${icon('bulb')}<div><strong>Next step:</strong> ${e(shared)}</div></div>` : ''}${cards}</section>`;
+  }).join('');
+  return `<div class="panel-head"><p>Failing and flaky ${e(L.tests)} grouped by cause: similar errors form one group, each with the suggested next step. ${info('the categories', 'Product defect, test issue, environment, test data, flaky or needs review: decided by the triage when it is confident, otherwise by rules on the error text.')}</p></div>${sections}`;
+}
+
+// ------------------------------------------------------------------ trends
+
+function trendsPanel(m: ReportModel, L: BrandLabels): string {
+  const t = m.trend;
+  const parts: string[] = [];
+  // Runs of one day are labelled by their time.
+  const oneDay = new Set(t.map((x) => x.startedAt.slice(0, 10))).size === 1;
+  const lbl = (iso: string) => (oneDay ? iso.slice(11, 16) : shortDay(iso));
+  if (t.length >= 2) {
+    const pts = t.map((x) => ({ label: lbl(x.startedAt), value: x.passRate, detail: `${fmtWhen(x.startedAt)}, ${x.total} ${L.tests}, ${x.failed} failing`, current: x.current }));
+    parts.push(`<section class="card span-12" aria-labelledby="tr-pass"><div class="card-h"><h3 id="tr-pass">Pass rate</h3><span class="muted small">last ${e(t.length)} runs</span></div>${lineChart(pts, { title: `Pass rate, last ${t.length} runs`, yMax: 1, yFormat: (v) => fmtPct(v, 0), series: 'series-1', area: true, width: 1000, height: 220 })}</section>`);
+    parts.push(`<section class="card span-6" aria-labelledby="tr-dur"><div class="card-h"><h3 id="tr-dur">Duration</h3></div>${columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.durationMs, tip: `${fmtWhen(x.startedAt)}: ${fmtMs(x.durationMs)}${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-1' : 'muted' })), { title: `Run duration, last ${t.length} runs`, yLabel: 'run', yFormat: fmtMs, width: 560, height: 220 })}</section>`);
+    parts.push(`<section class="card span-6" aria-labelledby="tr-flaky"><div class="card-h"><h3 id="tr-flaky">Flaky ${e(L.tests)}</h3>${info('flaky', 'Tests that failed first and passed on a retry, per run.')}</div>${columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.flaky ?? 0, tip: `${fmtWhen(x.startedAt)}: ${x.flaky ?? 0} flaky${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-2' : 'muted' })), { title: `Flaky tests, last ${t.length} runs`, yLabel: 'run', yFormat: (v) => String(Math.round(v)), width: 560, height: 220 })}</section>`);
+  }
+  const c = m.comparison;
+  if (c) {
+    const list = (title: string, items: Array<{ id: string; name: string }>, extra: (x: never) => string = () => '') =>
+      items.length ? `<div><h4 style="margin:0 0 6px">${e(title)} <span class="cnt">${e(items.length)}</span></h4><ul class="list">${items.slice(0, 50).map((x) => `<li><a class="grow" href="${testHref(x.id)}">${e(x.name)}</a>${extra(x as never)}</li>`).join('')}</ul></div>` : '';
+    const blocks = [
+      list('Newly failing', c.newlyFailing, (x: { before: string }) => `<span class="muted small">was ${e(x.before)}</span>`),
+      list('Fixed', c.fixed),
+      list('Slower', c.slower, (x: { beforeMs: number; afterMs: number }) => `<span class="muted small">${e(fmtMs(x.beforeMs))} &rarr; ${e(fmtMs(x.afterMs))}</span>`),
+      list(`New ${L.tests}`, c.added),
+      c.removed.length ? `<div><h4 style="margin:0 0 6px">Removed <span class="cnt">${e(c.removed.length)}</span></h4><ul class="list">${c.removed.slice(0, 50).map((x) => `<li><span class="grow">${e(x.name)}</span></li>`).join('')}</ul></div>` : '',
+    ].filter(Boolean);
+    parts.push(`<section class="card span-12" aria-labelledby="tr-cmp"><div class="card-h"><h3 id="tr-cmp">Changes since ${e(fmtWhen(c.baselineStartedAt))}</h3>${info('the baseline', `Compared with run ${c.baselineRunId} (report.baseline).`)}</div>${blocks.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${blocks.join('')}</div>` : emptyState('No changes', `Every ${L.test} has the same outcome as in the baseline run.`, false)}</section>`);
+  }
+  return `<div class="grid">${parts.join('')}</div>`;
+}
+
+// ------------------------------------------------------------------ quality
+
+function qualityPanel(m: ReportModel): string {
   const cov = m.coverage;
   const meters = [
+    cov.requirements ? meter(cov.requirements.ratio, { label: 'Requirements passing', detail: `${cov.requirements.passing} of ${cov.requirements.total}; ${cov.requirements.failing} failing, ${cov.requirements.notRun} not run, ${cov.requirements.uncovered} without tests` }) : '',
     cov.risk ? meter(cov.risk.ratio, { label: 'Risk-weighted coverage', detail: `${cov.risk.covered} of ${cov.risk.total} risk points passed` }) : '',
-    cov.requirements ? meter(cov.requirements.ratio, { label: 'Requirements passing', detail: `${cov.requirements.passing} of ${cov.requirements.total} requirements; ${cov.requirements.failing} failing, ${cov.requirements.notRun} not run, ${cov.requirements.uncovered} without tests` }) : '',
     ...(cov.api ?? []).map((a) => meter(a.ratio, { label: `API coverage: ${a.title}`, detail: `${a.covered} of ${a.operations} operations; status codes ${fmtPct(a.statusRatio, 0)}; ${a.violations} contract violation(s)` })),
     cov.ui ? meter(cov.ui.percent, { label: 'UI coverage', detail: `${cov.ui.tested} of ${cov.ui.elements} elements on ${cov.ui.pages} page(s)` }) : '',
   ].filter(Boolean).join('');
-  const spans = executed.map((t) => ({ id: t.id, label: t.name, start: t.startMs, end: t.startMs + Math.max(1, t.durationMs), cls: `st-${t.state}`, href: testHref(t.id) }));
-  const gantt = spans.length ? ganttChart(spans, { title: 'Execution timeline (parallel lanes)', totalMs: m.durationMs }) : '';
-  return `<div class="grid g-3">
-<div class="card"><h3>Outcome</h3>${donut}</div>
-<div class="card"><h3>Pass rate trend</h3><p class="card-sub">Executed tests that passed, per run, from history.</p>${trendPass}</div>
-<div class="card"><h3>Duration trend</h3><p class="card-sub">Wall-clock duration of each run.</p>${trendDur}</div></div>
-<div class="grid g-2" style="margin-top:16px">
-<div class="card"><h3>Duration distribution</h3><p class="card-sub">How long tests take: number of tests per duration band.</p>${dist}</div>
-<div class="card"><h3>Slowest tests</h3>${slow}</div></div>
-<div class="grid g-2" style="margin-top:16px">
-<div class="card"><h3>Top failure clusters</h3><p class="card-sub">Failures with similar messages and stack frames, likely one root cause each.</p>${clusters}</div>
-<div class="card"><h3>Coverage</h3>${meters || '<p class="muted">No coverage data in this run (requirements, risk, API spec or UI map).</p>'}</div></div>
-<div class="grid g-2" style="margin-top:16px">${categoriesCard(m)}${topFlakyCard(m)}</div>
-${gantt ? `<details class="card" style="margin-top:16px"><summary><h3 style="display:inline">Execution timeline</h3> <span class="muted small">tests on parallel lanes, by start time</span></summary><div style="margin-top:10px;overflow-x:auto">${gantt}</div></details>` : ''}`;
+  const req = cov.requirements?.items.length
+    ? `<div class="tbl-wrap" style="margin-top:8px"><table><caption class="sr-only">Requirements</caption><thead><tr><th scope="col">Requirement</th><th scope="col">State</th><th scope="col">Tests</th></tr></thead><tbody>${cov.requirements.items.slice(0, 300).map((r) => `<tr><th scope="row">${ext(r.url, r.id)}${r.title ? `<div class="small muted">${e(r.title)}</div>` : ''}</th><td>${badge(r.state === 'passing' ? 'passed' : r.state === 'failing' ? 'failed' : 'skipped', r.state)}</td><td>${r.tests.slice(0, 6).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`
+    : '';
+  const parts = [
+    meters ? `<section class="card span-12" aria-labelledby="q-cov"><div class="card-h"><h3 id="q-cov">Coverage</h3></div>${meters}${req}</section>` : '',
+    qualityCards(m),
+    ...(m.extraHtml ?? []).map((h) => `<section class="card span-12">${h}</section>`),
+  ].filter(Boolean);
+  return `<div class="grid">${parts.join('')}</div>`;
 }
 
-function browsersBlock(m: ReportModel): string {
-  const b = m.browsers;
-  if (!b) return '';
-  const rows = b.names.map((n) => {
-    const x = b.perBrowser[n];
-    return `<tr><th scope="row">${e(n)}</th><td>${e(x.version ?? '')}</td><td class="num">${e(x.total)}</td><td class="num">${e(x.passed)}</td><td class="num">${e(x.failed)}</td><td class="num">${e(x.skipped)}</td><td>${x.decision ? `${e(x.decision.replace(/_/g, ' '))} (${e(x.score)})` : '-'}</td></tr>`;
-  }).join('');
-  const grid = b.grid.map((g) => `<tr><th scope="row">${e(g.unit)}</th>${g.cells.map((c) => `<td>${c.id && c.state ? `<a href="${testHref(c.id)}">${badge(c.state)}</a>` : '<span class="muted">-</span>'}</td>`).join('')}<td>${g.only.length ? `<strong class="ink-failed">fails on ${e(g.only.join(', '))} only</strong>` : ''}</td></tr>`).join('');
-  return `<section class="block" aria-labelledby="browsers-h"><div class="block-head"><h2 id="browsers-h">Browsers</h2><p>Each journey ran on every browser; the summary above is all browsers combined.</p></div>
-<div class="grid g-3-2"><div class="card"><div class="tbl-wrap"><table><caption class="sr-only">Per browser</caption><thead><tr><th scope="col">Browser</th><th scope="col">Version</th><th scope="col">Units</th><th scope="col">Passed</th><th scope="col">Failed</th><th scope="col">Skipped</th><th scope="col">Readiness</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-<div class="card"><div class="tbl-wrap"><table><caption class="sr-only">Journey x browser</caption><thead><tr><th scope="col">Journey</th>${b.names.map((n) => `<th scope="col">${e(n)}</th>`).join('')}<th scope="col">Browser-specific</th></tr></thead><tbody>${grid}</tbody></table></div></div></div></section>`;
+export function hasQuality(m: ReportModel): boolean {
+  const c = m.coverage;
+  return !!(m.lenses || m.extraHtml?.length || c.requirements || c.risk || c.api?.length || c.ui);
 }
 
-function failuresBlock(m: ReportModel): string {
-  const failed = m.tests.filter((t) => t.state === 'failed' || t.state === 'error');
-  if (!failed.length && !m.tests.some((t) => t.state === 'flaky')) {
-    return `<section class="block" id="failures" aria-labelledby="failures-h"><div class="block-head"><h2 id="failures-h">Failure analysis</h2></div><div class="card"><p>${icon('check')} No failures in this run.</p></div></section>`;
-  }
-  const groups = m.failureGroups.map((g) => `<tr id="sig-${e(g.signature)}"><td><pre>${e(g.message)}</pre><div class="small muted mono">signature ${e(g.signature)}</div></td><td class="num">${e(g.tests.length)}</td><td>${g.known ? `<span class="badge b-neutral">known</span>` : `<span class="badge b-failed">new</span>`}</td><td>${g.firstSeenRun ? `${e(shortDate(g.firstSeenAt ?? '', true))}<div class="small muted mono">${e(g.firstSeenRun)}</div>` : '<span class="muted">this run</span>'}</td><td>${g.cat ? `<span class="cat c-${e(g.cat)}">${e(CATEGORY_LABEL[g.cat])}</span>${g.fix ? `<details class="small"><summary>Suggested fix</summary><p class="fixline">${e(g.fix)}</p></details>` : ''}` : g.category ? e(g.category) : '-'}</td><td><div class="chips">${g.tests.slice(0, 12).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}${g.tests.length > 12 ? `<span class="muted small">+${g.tests.length - 12} more</span>` : ''}</div></td><td><button type="button" class="btn no-print" data-copy-bug="${e(g.tests[0])}">${icon('copy')}Copy for bug</button></td></tr>`).join('');
-  const clusters = m.clusters.map((c) => `<li id="failure/${e(c.id)}"><div class="cl-head"><strong>${e(c.id)}</strong> &middot; ${e(c.size)} test(s)${c.cat ? ` &middot; <span class="cat c-${e(c.cat)}">${e(CATEGORY_LABEL[c.cat])}</span>` : c.category ? ` &middot; ${e(c.category)}` : ''} &middot; cohesion ${e(fmtPct(c.cohesion, 0))}</div><pre>${e(c.message)}</pre>${c.fix ? `<p class="fixline"><strong>Suggested fix:</strong> ${e(c.fix)}</p>` : ''}<div class="chips">${c.tests.slice(0, 20).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join('')}</div></li>`).join('');
-  const cap = 200;
-  const list = [...failed, ...m.tests.filter((t) => t.state === 'flaky')].slice(0, cap);
-  const rows = list.map((t) => `<tr><td>${badge(t.state)}</td><td><a href="${testHref(t.id)}">${e(t.name)}</a><div class="small muted mono">${e(t.id)}${t.browser ? ` &middot; ${e(t.browser)}` : ''}</div></td><td>${e(t.failedStep ?? '')}<pre class="small">${e((t.error?.message ?? t.flake?.reason ?? '').split('\n')[0].slice(0, 220))}</pre></td><td>${t.cat ? `<span class="cat c-${e(t.cat.c)}" title="${e(t.cat.why)}">${e(CATEGORY_LABEL[t.cat.c])}</span>` : '-'}${t.triage ? `<div class="small muted">triage ${e(t.triage.category)} (${e(Math.round(t.triage.confidence * 100))}%)</div>` : ''}</td><td>${e(t.owners.join(', ') || '-')}</td><td>${t.bugs.map((b) => ext(b.url, `${b.system === 'ado' ? 'Bug' : ''} ${b.id}`.trim())).join(', ') || '-'}</td></tr>`).join('');
-  return `<section class="block" id="failures" aria-labelledby="failures-h"><div class="block-head"><h2 id="failures-h">Failure analysis</h2><p>${e(failed.length)} failing test(s) in ${e(m.failureGroups.length)} distinct error signature(s); ${e(m.failureGroups.filter((g) => !g.known).length)} new, ${e(m.failureGroups.filter((g) => g.known).length)} seen in earlier runs.</p></div>
-${m.failureGroups.length ? `<div class="card"><h3>Errors by signature</h3><p class="card-sub">Same normalised message and stack frames. "Known" means an earlier run in history failed the same way.</p><div class="tbl-wrap"><table><thead><tr><th scope="col">Error</th><th scope="col">Tests</th><th scope="col">New or known</th><th scope="col">First seen</th><th scope="col">Category</th><th scope="col">Tests sharing it</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>${groups}</tbody></table></div></div>` : ''}
-${clusters ? `<div class="card" style="margin-top:16px"><h3>Shared root causes</h3><p class="card-sub">Clusters of similar failures (they may differ in detail but probably share a cause).</p><ul class="clusters">${clusters}</ul></div>` : ''}
-<div class="card" style="margin-top:16px"><h3>Failing and flaky tests</h3>${list.length < failed.length + m.tests.filter((t) => t.state === 'flaky').length ? `<p class="card-sub">First ${cap}; the test explorer has all of them.</p>` : ''}<div class="tbl-wrap"><table><thead><tr><th scope="col">State</th><th scope="col">Test</th><th scope="col">Where it failed</th><th scope="col">Category</th><th scope="col">Owners</th><th scope="col">Bugs</th></tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
-}
-
-function comparisonBlock(m: ReportModel): string {
-  const c = m.comparison;
-  if (!c) return `<section class="block" id="comparison" aria-labelledby="cmp-h"><div class="block-head"><h2 id="cmp-h">Comparison</h2></div><div class="card"><p class="muted">No baseline run to compare with. Compare any two runs with <code>eztest report compare &lt;baselineRunDir&gt; &lt;runDir&gt;</code>.</p></div></section>`;
-  const list = (items: Array<{ id: string; name: string }>, extra: (x: never) => string, empty: string) =>
-    items.length ? `<ul>${items.slice(0, 100).map((x) => `<li><a href="${testHref(x.id)}">${e(x.name)}</a> ${extra(x as never)}</li>`).join('')}${items.length > 100 ? `<li class="muted">+${items.length - 100} more</li>` : ''}</ul>` : `<p class="muted small">${e(empty)}</p>`;
-  const b = c.kpis.before;
-  const a = c.kpis.after;
-  return `<section class="block" id="comparison" aria-labelledby="cmp-h"><div class="block-head"><h2 id="cmp-h">Comparison</h2><p>This run against baseline <code>${e(c.baselineRunId)}</code> (${e(fmtDate(c.baselineStartedAt))}). Pass rate ${e(fmtPct(b.passRate))} &rarr; ${e(fmtPct(a.passRate))}; duration ${e(fmtMs(b.durationMs))} &rarr; ${e(fmtMs(a.durationMs))}.</p></div>
-<div class="cmp-cols">
-<div class="card"><h3>Newly failing <span class="cnt ink-failed">${e(c.newlyFailing.length)}</span></h3>${list(c.newlyFailing, (x: { before: string }) => `<span class="muted small">was ${e(x.before)}</span>`, 'None.')}</div>
-<div class="card"><h3>Fixed <span class="cnt">${e(c.fixed.length)}</span></h3>${list(c.fixed, (x: { before: string }) => `<span class="muted small">was ${e(x.before)}</span>`, 'None.')}</div>
-<div class="card"><h3>Slower <span class="cnt">${e(c.slower.length)}</span></h3>${list(c.slower, (x: { beforeMs: number; afterMs: number; ratio: number }) => `<span class="muted small">${e(fmtMs(x.beforeMs))} &rarr; ${e(fmtMs(x.afterMs))} (${e(x.ratio)}x)</span>`, 'No test got 1.5x slower.')}</div>
-<div class="card"><h3>New tests <span class="cnt">${e(c.added.length)}</span></h3>${list(c.added, (x: { state: TestState }) => badge(x.state), 'None.')}</div>
-<div class="card"><h3>Still failing <span class="cnt">${e(c.stillFailing.length)}</span></h3>${list(c.stillFailing, () => '', 'None.')}</div>
-<div class="card"><h3>Removed <span class="cnt">${e(c.removed.length)}</span></h3><ul>${c.removed.slice(0, 100).map((x) => `<li>${e(x.name)} <span class="muted small mono">${e(x.id)}</span></li>`).join('') || '<li class="muted small">None.</li>'}</ul></div>
-</div></section>`;
-}
+// ------------------------------------------------------------------ environment
 
 function statusBadge(s: string | undefined, ok?: boolean): string {
   if (!s) return '';
@@ -235,165 +368,194 @@ function statusBadge(s: string | undefined, ok?: boolean): string {
   return `<span class="badge status ${cls}">${e(s)}</span>`;
 }
 
-function integrationsBlock(m: ReportModel): string {
-  const i = m.integrations;
-  const cards: string[] = [];
-  const ado = i.ado;
-  if (ado) {
-    const p = ado.publish;
-    const tc = m.tests.flatMap((t) => (t.ado?.testCases ?? []).map((c) => ({ t, c })));
-    cards.push(`<div class="card int-card" id="int-ado"><h3>Azure DevOps ${p ? statusBadge(p.status) : '<span class="badge status b-neutral">not published</span>'}</h3>
-${ado.project ? `<p class="small muted">${ext(ado.collectionUrl, ado.collectionUrl ?? '')} &middot; project ${e(ado.project)}</p>` : '<p class="small muted">Not configured (ado.organizationUrl and ado.project).</p>'}
-${p ? `<dl class="kv"><dt>Test run</dt><dd>${p.runId ? ext(p.runUrl, `Run ${p.runId}${p.runName ? ` - ${p.runName}` : ''}`) : '-'}</dd><dt>Results</dt><dd>${e(p.results.length)} published${p.unmapped.length ? `, ${e(p.unmapped.length)} test(s) without @TestCaseId` : ''}${p.missingPoints.length ? `, ${e(p.missingPoints.length)} without a test point` : ''}</dd>${p.planId ? `<dt>Plan / suite</dt><dd>${e(p.planId)}${p.suiteId ? ` / ${e(p.suiteId)}` : ''}</dd>` : ''}<dt>Attachments</dt><dd>${e(p.attachments)}</dd><dt>When</dt><dd>${e(fmtDate(p.at))}</dd>${p.reason ? `<dt>Why</dt><dd>${e(p.reason)}</dd>` : ''}</dl>${p.warnings.length ? `<details><summary class="small">${e(p.warnings.length)} warning(s)</summary><ul class="small">${p.warnings.map((w) => `<li>${e(w)}</li>`).join('')}</ul></details>` : ''}` : '<p class="none">The run was not published to Azure Test Plans (ado.publishResults, or eztest ado publish).</p>'}
-<p class="small"><strong>Linked test cases:</strong> ${tc.length ? tc.slice(0, 40).map(({ c }) => ext(c.url, `#${c.id}`)).join(', ') + (tc.length > 40 ? ` +${tc.length - 40} more` : '') : '<span class="muted">none (tag journeys with @TestCaseId:&lt;id&gt;)</span>'}</p>
-<p class="small"><strong>Bugs:</strong> ${ado.bugs.length ? ado.bugs.map((b) => `${ext(b.url, `Bug ${b.id}`)} <span class="muted">(${e(b.action)}, ${e(b.journeyId)})</span>`).join(', ') : '<span class="muted">none filed</span>'}</p>
-${ado.build ? `<p class="small"><strong>Pipeline build:</strong> ${ext(ado.build.url, ado.build.number ?? ado.build.id ?? 'build')}</p>` : ''}
-${ado.release ? `<p class="small"><strong>Release:</strong> ${ext(ado.release.url, `${ado.release.name ?? 'release'}${ado.release.environment ? ` (${ado.release.environment})` : ''}`)}</p>` : ''}
-${ado.requirementsCommented.length ? `<p class="small"><strong>Requirements commented:</strong> ${ado.requirementsCommented.map((r) => ext(r.url, `#${r.requirement}`)).join(', ')}</p>` : ''}</div>`);
-  }
-  const pr = i.pullRequest;
-  cards.push(`<div class="card int-card" id="int-pr"><h3>Pull request ${pr?.comment ? statusBadge('posted', true) : ''}</h3>${pr ? `<dl class="kv"><dt>Pull request</dt><dd>${ext(pr.url, `#${pr.number}`)} <span class="muted">(${e(pr.provider)})</span></dd>${pr.comment ? `<dt>Comment</dt><dd>${e(pr.comment.action)}</dd>` : ''}${pr.status ? `<dt>Status</dt><dd>${e(pr.status.kind)}${pr.status.state ? ` ${e(pr.status.state)}` : ''}, ${e(pr.status.annotations)} annotation(s)</dd>` : ''}</dl>` : '<p class="none">No pull request for this run (eztest pr report posts the status and the summary comment).</p>'}</div>`);
-  const jira = i.jira;
-  cards.push(`<div class="card int-card" id="int-jira"><h3>Jira ${jira ? statusBadge(jira.status) : ''}</h3>${jira ? (jira.bugs.length ? `<ul>${jira.bugs.map((b) => `<li>${ext(b.url, b.key)} <span class="muted small">${e(b.action)} for ${e(b.journeyId)}</span></li>`).join('')}</ul>` : `<p class="none">No bugs filed${jira.reason ? `: ${e(jira.reason)}` : ''}.</p>`) : '<p class="none">The Jira publisher did not run for this run.</p>'}</div>`);
-  const notes = i.notifications;
-  cards.push(`<div class="card int-card" id="int-notify"><h3>Slack, Teams and e-mail</h3>${notes.length ? `<ul>${notes.map((n) => `<li><strong>${e(n.channel)}</strong> ${statusBadge(n.ok ? 'sent' : 'failed', n.ok)} <span class="small">${e(n.message)}</span> <span class="muted small">${e(fmtDate(n.at))}</span></li>`).join('')}</ul>` : '<p class="none">No message sent (publishers: slack, teams, email).</p>'}</div>`);
-  const git = i.git;
-  const owners = [...new Set(m.tests.filter((t) => t.state === 'failed' || t.state === 'error').flatMap((t) => t.owners))];
-  cards.push(`<div class="card int-card" id="int-git"><h3>Git and CODEOWNERS</h3>${git ? `<dl class="kv">${git.repository ? `<dt>Repository</dt><dd>${ext(git.repositoryUrl, git.repository)}</dd>` : ''}${git.branch ? `<dt>Branch</dt><dd><code>${e(git.branch)}</code></dd>` : ''}${git.commit ? `<dt>Commit</dt><dd>${ext(git.commitUrl, git.commit.slice(0, 12), 'mono')}</dd>` : ''}<dt>Owners of failing tests</dt><dd>${owners.length ? e(owners.join(', ')) : git.codeowners ? 'none failing' : '<span class="muted">no CODEOWNERS file</span>'}</dd></dl>` : '<p class="none">Not a git checkout.</p>'}</div>`);
-  const rs = i.resultsServer;
-  cards.push(`<div class="card int-card" id="int-server"><h3>Results server ${rs ? statusBadge(rs.verified === false ? 'not verified' : 'published', rs.verified !== false) : ''}</h3>${rs ? `<p>${ext(rs.url, 'Open this run on the EZTest results server')}</p><p class="small muted">${e(fmtDate(rs.at))}${rs.verified ? ' &middot; evidence verified by the server' : ''}</p>` : '<p class="none">Not published (server.url and --publish).</p>'}</div>`);
-  if (i.publishers.length) cards.push(`<div class="card int-card"><h3>Other publishers</h3><ul>${i.publishers.map((p) => `<li><strong>${e(p.name)}</strong> ${statusBadge(p.skipped ? 'skipped' : p.ok ? 'ok' : 'failed', p.skipped ? undefined : p.ok)} <span class="small">${e(p.message)}</span></li>`).join('')}</ul></div>`);
-  return `<section class="block" id="integrations" aria-labelledby="int-h"><div class="block-head"><h2 id="int-h">Integrations</h2><p>Where this run was published and who was told.</p></div><div class="int-grid">${cards.join('')}</div></section>`;
-}
+const FILTER_KEY = /^(tags|grep|grepInvert|only|onlyFailed|risk|changedSince|journeys|shard|project)$/;
 
-function contextBlock(m: ReportModel): string {
+function environmentPanel(m: ReportModel): string {
   const c = m.context;
-  const dl = (rows: Array<[string, string | undefined]>) => `<dl class="kv">${rows.filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `<dt>${e(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
-  const env = dl([
+  const dl = (rows: Array<[string, string | undefined]>) => {
+    const r = rows.filter(([, v]) => v !== undefined && v !== '');
+    return r.length ? `<dl class="kv">${r.map(([k, v]) => `<dt>${e(k)}</dt><dd>${v}</dd>`).join('')}</dl>` : '';
+  };
+  const sect = (id: string, title: string, body: string, o: { open?: boolean; hint?: string } = {}) =>
+    body ? `<details class="sect" id="env-${id}"${o.open === false ? '' : ' open'}><summary>${icon('chevron').replace('<svg ', '<svg class="chev" ')}<span>${e(title)}</span>${o.hint ? `<span class="hint">${e(o.hint)}</span>` : ''}</summary><div class="sect-b">${body}</div></details>` : '';
+  const run = dl([
+    ['Run id', `<code>${e(m.runId)}</code>`],
+    ['Started', e(fmtWhen(m.startedAt, true))],
+    ['Finished', e(fmtWhen(m.finishedAt, true))],
+    ['Time zone', c ? e(c.timeZone) : undefined],
+    ['Trigger', c?.trigger ? e(c.trigger) : undefined],
+    ['Run by', c?.user ? e(c.user) : undefined],
+    ['Shard', c?.shard ? `${e(c.shard.index)} of ${e(c.shard.total)}` : undefined],
+    ['Workers', c?.workers ? e(c.workers) : undefined],
+  ]);
+  const target = dl([
     ['Environment', c?.environment ? e(c.environment) : undefined],
     ['Base URL', c?.baseUrl ? `<code>${e(c.baseUrl)}</code>` : undefined],
-    ['Browsers', c?.browsers.length ? e(c.browsers.map((b) => `${b.name}${b.version ? ` ${b.version}` : ''}`).join(', ')) : 'none launched'],
     ['Devices', c?.devices.length ? e(c.devices.join(', ')) : undefined],
   ]);
-  const build = dl([
+  const browsers = c?.browsers.length ? `<div class="tbl-wrap"><table><caption class="sr-only">Browsers</caption><thead><tr><th scope="col">Browser</th><th scope="col">Version</th></tr></thead><tbody>${c.browsers.map((b) => `<tr><th scope="row">${e(b.name)}</th><td class="mono">${e(b.version ?? '-')}</td></tr>`).join('')}</tbody></table></div>` : '';
+  const git = m.integrations.git;
+  const owners = [...new Set(m.tests.filter(isFail).flatMap((t) => t.owners))];
+  const source = dl([
     ['CI', c?.build ? e(c.build.system) : 'local run'],
     ['Pipeline', c?.build?.pipeline ? e(c.build.pipeline) : undefined],
     ['Build', c?.build ? ext(c.build.url, c.build.number ?? c.build.id ?? 'build') : undefined],
     ['Release', c?.release ? ext(c.release.url, `${c.release.name ?? ''}${c.release.environment ? ` (${c.release.environment})` : ''}`) : undefined],
+    ['Repository', git?.repository ? ext(git.repositoryUrl, git.repository) : undefined],
     ['Branch', c?.branch ? `<code>${e(c.branch)}</code>${c.targetBranch ? ` &rarr; <code>${e(c.targetBranch)}</code>` : ''}` : undefined],
     ['Commit', c?.commit ? `${ext(c.commit.url, c.commit.sha.slice(0, 12), 'mono')}${c.commit.author ? ` by ${e(c.commit.author)}` : ''}` : undefined],
     ['Pull request', c?.pullRequest ? ext(c.pullRequest.url, `#${c.pullRequest.number}`) : undefined],
-    ['Trigger', c?.trigger ? e(c.trigger) : undefined],
-    ['Run by', c?.user ? e(c.user) : undefined],
+    ['Owners of failing tests', owners.length ? e(owners.join(', ')) : undefined],
   ]);
-  const how = dl([
-    ['EZTest', c ? e(c.eztestVersion) : undefined],
+  const machine = dl([
+    ['Machine', c ? e([c.machine.host, c.machine.os].filter(Boolean).join(' \u00b7 ')) : undefined],
+    ['CPUs', c?.machine.cpus ? e(c.machine.cpus) : undefined],
+    ['Memory', c?.machine.memoryGb ? `${e(c.machine.memoryGb)} GB` : undefined],
     ['Node.js', c ? e(c.node) : undefined],
-    ['Machine', c ? e([c.machine.host, c.machine.os, c.machine.cpus ? `${c.machine.cpus} CPUs` : '', c.machine.memoryGb ? `${c.machine.memoryGb} GB` : ''].filter(Boolean).join(' \u00b7 ')) : undefined],
-    ['Shard', c?.shard ? `${e(c.shard.index)} of ${e(c.shard.total)}` : undefined],
-    ['Started', e(fmtDate(m.startedAt))],
-    ['Finished', e(fmtDate(m.finishedAt))],
-    ['Duration', e(fmtMs(m.durationMs))],
-    ['Time zone', c ? e(c.timeZone) : undefined],
-    ['Run id', `<code>${e(m.runId)}</code>`],
-    ['Evidence head', m.evidenceHead ? `<code title="${e(m.evidenceHead)}">${e(m.evidenceHead.slice(0, 16))}</code> (hash-chained; eztest evidence verify)` : undefined],
+    [m.brand.whiteLabel ? 'Engine version' : 'EZTest version', c ? e(c.eztestVersion) : undefined],
   ]);
-  const extra = c && Object.keys(c.extra).length ? `<details class="small" style="margin-top:8px"><summary>Other recorded environment values</summary>${dl(Object.entries(c.extra).map(([k, v]) => [k, `<code>${e(v)}</code>`]))}</details>` : '';
-  return `<section class="block" id="context" aria-labelledby="ctx-h"><div class="block-head"><h2 id="ctx-h">Run context</h2></div><div class="ctx-grid">
-<div class="card"><h3>Where</h3>${env}</div><div class="card"><h3>Build and pipeline</h3>${build}</div><div class="card"><h3>How</h3>${how}${extra}</div></div>${configCard(m)}</section>`;
-}
-
-function evidenceBlock(m: ReportModel): string {
-  const counts = new Map<string, number>();
-  for (const v of Object.values(m.evidence)) counts.set(m.evidenceKinds[v[0]], (counts.get(m.evidenceKinds[v[0]]) ?? 0) + 1);
-  const heal = m.healProposals.length
-    ? `<div class="card" style="margin-top:16px"><h3>Heal proposals</h3><p class="card-sub">Locators EZTest healed during the run, for review (accept in Studio or eztest heal).</p><div class="tbl-wrap"><table><thead><tr><th scope="col">Test / step</th><th scope="col">From</th><th scope="col">To</th><th scope="col">Tier</th><th scope="col">Confidence</th><th scope="col">Verified</th><th scope="col">Recommendation</th><th scope="col">Evidence</th></tr></thead><tbody>${m.healProposals
-        .map((p) => `<tr><td><a href="${testHref(p.journeyId)}">${e(p.journeyName)}</a><div class="small muted mono">${e(p.stepId)}</div></td><td><code>${e(p.from.join(' | '))}</code></td><td><code>${e(p.to)}</code></td><td>${e(p.tier)}</td><td class="num">${e(Math.round(p.confidence * 100))}%</td><td>${p.verified ? '<span class="badge b-passed">yes</span>' : '<span class="badge b-failed">no</span>'}</td><td>${e(p.recommendation)}</td><td>${p.evidence.map((x) => evLink(m, x)).join(' ')}</td></tr>`)
-        .join('')}</tbody></table></div></div>`
+  const filters = (m.config ?? []).filter(([k]) => FILTER_KEY.test(k));
+  const filtersBody = filters.length ? dl(filters.map(([k, v]) => [k, `<code>${e(v)}</code>`])) : '<p class="muted small" style="margin:0">No filters: every journey in scope ran.</p>';
+  const cfg = m.config?.length
+    ? `<div class="cfg-filter no-print"><label class="sr-only" for="cfg-q">Filter settings</label><input type="search" id="cfg-q" placeholder="Filter settings (key or value)" autocomplete="off"><span id="cfg-count" class="small muted" aria-live="polite"></span></div><div class="tbl-wrap"><table class="cfg" id="cfg-table"><caption class="sr-only">Effective configuration, secrets masked</caption><thead><tr><th scope="col">Setting</th><th scope="col">Value</th></tr></thead><tbody>${m.config.map(([k, v]) => `<tr><td>${e(k)}</td><td>${e(v)}</td></tr>`).join('')}</tbody></table></div>`
     : '';
-  return `<section class="block" id="evidence" aria-labelledby="ev-h"><div class="block-head"><h2 id="ev-h">Evidence</h2><p>${e(Object.keys(m.evidence).length)} artefacts in the hash-chained evidence vault of this run.</p></div>
-<div class="card"><div class="chips">${[...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip">${e(k)} <strong>${e(n)}</strong></span>`).join('') || '<span class="muted">No evidence manifest.</span>'}</div>${Object.keys(m.evidence).length ? '<div id="ev-browser" style="margin-top:12px"><p class="small muted">The evidence browser needs JavaScript.</p></div>' : ''}</div>${heal}${(m.extraHtml ?? []).map((h) => `<div class="card" style="margin-top:16px">${h}</div>`).join('')}</section>`;
+  const i = m.integrations;
+  const pub: string[] = [];
+  const ado = i.ado;
+  const adoExtra = ado ? [
+    ['Pipeline build', ado.build ? ext(ado.build.url, ado.build.number ?? ado.build.id ?? 'build') : undefined],
+    ['Release', ado.release ? ext(ado.release.url, `${ado.release.name ?? 'release'}${ado.release.environment ? ` (${ado.release.environment})` : ''}`) : undefined],
+    ['Project', ado.project ? `${ext(ado.collectionUrl, ado.collectionUrl ?? '')} &middot; ${e(ado.project)}` : undefined],
+  ] as Array<[string, string | undefined]> : [];
+  if (ado?.publish) {
+    const p = ado.publish;
+    pub.push(`<div class="box"><div class="box-h">Azure DevOps ${statusBadge(p.status)}</div>${dl([
+      ['Test run', p.runId ? ext(p.runUrl, `Run ${p.runId}${p.runName ? ` - ${p.runName}` : ''}`) : undefined],
+      ['Results', `${e(p.results.length)} published${p.unmapped.length ? `, ${e(p.unmapped.length)} test(s) without @TestCaseId` : ''}${p.missingPoints.length ? `, ${e(p.missingPoints.length)} without a test point` : ''}`],
+      ['Plan / suite', p.planId ? `${e(p.planId)}${p.suiteId ? ` / ${e(p.suiteId)}` : ''}` : undefined],
+      ['Attachments', e(p.attachments)],
+      ['When', e(fmtWhen(p.at))],
+      ['Why', p.reason ? e(p.reason) : undefined],
+      ['Bugs', ado.bugs.length ? ado.bugs.map((b) => `${ext(b.url, `Bug ${b.id}`)} <span class="muted">(${e(b.action)})</span>`).join(', ') : undefined],
+      ['Requirements commented', ado.requirementsCommented.length ? ado.requirementsCommented.map((r) => ext(r.url, `#${r.requirement}`)).join(', ') : undefined],
+      ...adoExtra,
+    ])}${p.warnings.length ? `<details><summary>${e(p.warnings.length)} warning(s)</summary><ul class="small">${p.warnings.map((w) => `<li>${e(w)}</li>`).join('')}</ul></details>` : ''}</div>`);
+  } else if (ado && (ado.bugs.length || ado.build || ado.release)) pub.push(`<div class="box"><div class="box-h">Azure DevOps <span class="badge status b-neutral">not published</span></div>${dl([['Bugs', ado.bugs.length ? ado.bugs.map((b) => ext(b.url, `Bug ${b.id}`)).join(', ') : undefined], ...adoExtra])}</div>`);
+  const pr = i.pullRequest;
+  if (pr) pub.push(`<div class="box"><div class="box-h">Pull request ${pr.comment ? statusBadge('posted', true) : ''}</div>${dl([['Pull request', `${ext(pr.url, `#${pr.number}`)} <span class="muted">(${e(pr.provider)})</span>`], ['Comment', pr.comment ? e(pr.comment.action) : undefined], ['Status', pr.status ? `${e(pr.status.kind)}${pr.status.state ? ` ${e(pr.status.state)}` : ''}, ${e(pr.status.annotations)} annotation(s)` : undefined]])}</div>`);
+  if (i.jira) pub.push(`<div class="box"><div class="box-h">Jira ${statusBadge(i.jira.status)}</div>${i.jira.bugs.length ? `<ul class="list">${i.jira.bugs.map((b) => `<li>${ext(b.url, b.key)} <span class="muted small">${e(b.action)} for ${e(b.journeyId)}</span></li>`).join('')}</ul>` : `<p class="small muted" style="margin:0">No bugs filed${i.jira.reason ? `: ${e(i.jira.reason)}` : ''}.</p>`}</div>`);
+  if (i.notifications.length) pub.push(`<div class="box"><div class="box-h">Notifications</div><ul class="list">${i.notifications.map((n) => `<li><strong>${e(n.channel)}</strong> ${statusBadge(n.ok ? 'sent' : 'failed', n.ok)} <span class="small grow">${e(n.message)}</span></li>`).join('')}</ul></div>`);
+  const rs = i.resultsServer;
+  if (rs) pub.push(`<div class="box"><div class="box-h">Results server ${statusBadge(rs.verified === false ? 'not verified' : 'published', rs.verified !== false)}</div><p class="small" style="margin:0">${ext(rs.url, 'Open this run on the results server')} <span class="muted">${e(fmtWhen(rs.at))}</span></p></div>`);
+  if (i.publishers.length) pub.push(`<div class="box"><div class="box-h">Other publishers</div><ul class="list">${i.publishers.map((p) => `<li><strong>${e(p.name)}</strong> ${statusBadge(p.skipped ? 'skipped' : p.ok ? 'ok' : 'failed', p.skipped ? undefined : p.ok)} <span class="small grow">${e(p.message)}</span></li>`).join('')}</ul></div>`);
+  const evCount = Object.keys(m.evidence).length;
+  const evidence = evCount || m.evidenceHead
+    ? `${dl([['Files', e(evCount)], ['Chain head', m.evidenceHead ? `<code title="${e(m.evidenceHead)}">${e(m.evidenceHead.slice(0, 16))}</code>` : undefined]])}<p class="small muted">Every file is hash-chained in the run's evidence manifest (verify with <code>eztest evidence verify</code>). Each test's own files are in its detail.</p>${evCount ? '<div id="ev-browser" class="no-print"><button type="button" class="btn" id="ev-load">Browse all evidence</button></div>' : ''}`
+    : '';
+  const extra = c && Object.keys(c.extra).length ? dl(Object.entries(c.extra).map(([k, v]) => [k, `<code>${e(v)}</code>`])) : '';
+  return `<div class="env-grid">${sect('run', 'Run', run)}${sect('target', 'Target', target)}${sect('source', 'Source and pipeline', source)}${sect('machine', 'Machine', machine)}${sect('browsers', 'Browsers', browsers)}${sect('filters', 'Filters used', filtersBody)}</div>
+${sect('config', 'Configuration', cfg, { open: false, hint: `${m.config?.length ?? 0} settings, secrets masked` })}
+${sect('publishing', 'Publishing', pub.length ? `<div class="env-grid">${pub.join('')}</div>` : '', { open: false })}
+${sect('evidence', 'Evidence', evidence, { open: false })}
+${sect('extra', 'Other recorded values', extra, { open: false })}`;
 }
 
-/** The brand colour on the header mark and accents, with readable text on it. */
+// ------------------------------------------------------------------ policy (opt-in)
+
+function policyPanel(m: ReportModel): string {
+  const v = m.verdict!;
+  const rank: Record<string, number> = { violation: 0, risk: 1, waived: 2, 'missing-input': 3, pass: 4, info: 5 };
+  const reasons = [...v.reasons].sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9)).map((r) => `<li><span class="rk">${e(r.kind)}</span><span>${e(r.text)}${r.tests.length ? ` <span class="muted">(${r.tests.slice(0, 5).map((t) => `<a href="${testHref(t)}">${e(t)}</a>`).join(', ')}${r.tests.length > 5 ? `, +${r.tests.length - 5}` : ''})</span>` : ''}</span></li>`).join('');
+  const gates = v.gates.length ? `<div style="margin-top:10px">${v.gates.map((g) => `<span class="gate" title="${e(g.summary)}">${e(g.gate)}: ${e(g.status)}</span>`).join('')}</div>` : '';
+  const exc = v.exceptions.length ? `<p class="small" style="margin-top:8px">Exceptions applied: ${v.exceptions.map((x) => `${e(x.gate)} approved by <strong>${e(x.approver)}</strong> (${e(x.reason)})`).join('; ')}</p>` : '';
+  return `<div class="panel-head"><p>The readiness policy's decision for this run (report.readiness). The results in the other tabs stand on their own; this is the policy's reading of them.</p></div>
+<section class="card policy d-${v.decision === 'GO' ? 'pass' : v.decision === 'NO_GO' ? 'stop' : 'risk'}" aria-labelledby="policy-h"><div class="card-h"><h3 id="policy-h" class="grow">Readiness policy</h3>${v.score !== undefined ? `<span class="muted small">score ${e(v.score)} / 100</span>` : ''}</div><div class="decision">${e(v.decision.replace(/_/g, ' '))}</div><ul class="reasons" style="margin-top:10px">${reasons}</ul>${gates}${exc}</section>`;
+}
+
+// ------------------------------------------------------------------ page
+
+/** The brand colour on the header and accents (legacy helper; brand.ts derives the full palette). */
 export function brandCss(color: string | undefined): string {
   if (!color || !/^#[0-9a-f]{6}$/i.test(color)) return '';
-  const n = parseInt(color.slice(1), 16);
-  const lin = (c: number) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-  const lum = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-  const ink = lum > 0.179 ? '#141413' : '#ffffff';
-  return `.brand-mark{background:${color};color:${ink}}:root{--brand:${color}}.topbar{border-top:3px solid ${color}}.sections a[aria-current=true]{border-bottom-color:${color}}`;
+  return paletteCss(brandPalette({ primary: color }));
 }
+
+/** The tabs a model shows, in order. */
+export function reportTabs(m: ReportModel): Array<{ id: string; label: string }> {
+  const L = labelsOf(m.brand);
+  const failing = m.tests.some((t) => isFail(t) || t.state === 'flaky');
+  return [
+    { id: 'overview', label: L.tabs.overview },
+    { id: 'tests', label: L.tabs.tests },
+    ...(failing && !isHidden(m.brand, 'failures') ? [{ id: 'failures', label: L.tabs.failures }] : []),
+    ...((m.trend.length >= 2 || m.comparison) && !isHidden(m.brand, 'trends') ? [{ id: 'trends', label: L.tabs.trends }] : []),
+    ...(hasQuality(m) && !isHidden(m.brand, 'quality') ? [{ id: 'quality', label: L.tabs.quality }] : []),
+    ...(!isHidden(m.brand, 'environment') ? [{ id: 'environment', label: L.tabs.environment }] : []),
+    ...(m.verdict && !isHidden(m.brand, 'policy') ? [{ id: 'policy', label: L.tabs.policy }] : []),
+  ];
+}
+
+const TAB_ICON: Record<string, string> = { overview: 'grid', tests: 'list', failures: 'bug', trends: 'trend', quality: 'gauge', environment: 'server', policy: 'scale' };
 
 /** Render the HTML report of a model. */
 export function renderReportModelHtml(m: ReportModel, o: { exports?: Array<{ label: string; href: string }>; featuresHtml?: string } = {}): string {
-  const k = m.kpis;
-  const failing = k.failed + k.errors;
-  const logo = m.brand.logo ? `<img src="${e(m.brand.logo)}" alt="${e(m.brand.name)} logo">` : `<span class="brand-mark" aria-hidden="true">${e(m.brand.name.slice(0, 2).toUpperCase())}</span>`;
-  const exportsMenu = o.exports?.length
-    ? `<div class="menu"><button type="button" class="btn" id="exports-btn" aria-haspopup="true" aria-expanded="false" aria-controls="exports-list">${icon('download')}Export</button><ul class="menu-list" id="exports-list" hidden>${o.exports.map((x) => `<li><a href="${e(x.href)}" download>${e(x.label)}</a></li>`).join('')}</ul></div>`
-    : '';
-  const health = m.health
-    ? `<div class="banner" role="note">${m.health.preflight && !m.health.preflight.ok ? `<strong>Environment unavailable:</strong> ${e(m.health.preflight.failed.join('; '))} (nothing ran). ` : ''}${m.health.circuit ? `<strong>Circuit breaker opened</strong> after ${e(m.health.circuit.afterJourney)}: ${e(m.health.circuit.notRun)} test(s) not run (${e(m.health.circuit.reason)}).` : ''}</div>`
-    : '';
+  const L = labelsOf(m.brand);
+  const groups = causeGroups(m);
+  const bodies: Record<string, () => string> = {
+    overview: () => overviewPanel(m, L, groups),
+    tests: () => testsPanel(m, L),
+    failures: () => failuresPanel(m, L, groups),
+    trends: () => trendsPanel(m, L),
+    quality: () => qualityPanel(m),
+    environment: () => environmentPanel(m),
+    policy: () => policyPanel(m),
+  };
+  const tabs: TabDef[] = reportTabs(m).map((t) => ({ ...t, ico: TAB_ICON[t.id], body: bodies[t.id](), secondary: t.id === 'policy', alert: t.id === 'failures' }));
+  const panels = tabs.map((t, i) => `<section class="tabpanel${i === 0 ? ' is-active' : ''}" id="p-${t.id}" data-tab="${t.id}" role="tabpanel" aria-labelledby="tab-${t.id}" tabindex="0"${t.id === 'tests' ? ' data-print="tests"' : ''}><h2 class="sr-only print-title">${e(t.label)}</h2>${t.body}</section>`).join('\n');
+  const b = m.brand;
+  const product = productName(b);
   const clientData = {
     runId: m.runId,
     title: m.title,
     startedAt: m.startedAt,
-    brand: m.brand.name,
+    brand: b.company ?? b.name,
+    whiteLabel: !!b.whiteLabel,
+    theme: b.theme ?? 'system',
+    labels: { test: L.test, tests: L.tests },
+    tabs: tabs.map((t) => t.id),
     branch: m.context?.branch,
     commit: m.context?.commit?.sha,
     baseUrl: m.context?.baseUrl,
     environment: m.context?.environment,
-    browsers: m.context?.browsers.map((b) => b.name),
+    browsers: m.context?.browsers.map((x) => x.name),
     evidenceKinds: m.evidenceKinds,
     evidence: m.evidence,
     clusters: Object.fromEntries(m.clusters.map((c) => [c.id, c.message])),
     tests: m.tests,
     ...(m.snapshots ? { snapshots: m.snapshots } : {}),
   };
+  const fontCss = b.font ? `${b.font.src ? `@font-face{font-family:"${b.font.family}";src:url(${b.font.src}) format("woff2");font-display:swap}` : ''}:root{--sans:${fontStack(b.font.family)}}` : '';
+  const foot = [
+    b.footer ? `<span class="legal">${e(b.footer)}</span>` : '',
+    b.preparedBy ? `<span>Prepared by ${e(b.preparedBy)}</span>` : '',
+    `<span>${product ? `Generated by ${e(product)} ${e(m.context?.eztestVersion ?? '')} on ` : 'Generated on '}${e(fmtWhen(m.generatedAt))}</span>`,
+    `<span><span class="kbd">?</span> keyboard shortcuts</span>`,
+  ].join('');
+  const themeBoot = `document.documentElement.classList.add('js');try{var t=localStorage.getItem('ez-report-theme');var d=${JSON.stringify(b.theme ?? 'system')};var q=/[?&]theme=(light|dark)/.exec(location.search);t=q?q[1]:t;if(t!=='light'&&t!=='dark')t=d!=='system'?d:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t)}catch(e){}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file: data:; media-src 'self' file: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<meta name="generator" content="EZTest ${e(m.context?.eztestVersion ?? '')}">
-<title>${e(m.title)} - ${e(m.runId)}</title><style>${REPORT_CSS}${brandCss(m.brand.color)}</style></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file: data:; media-src 'self' file: blob:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-src 'self' about:">
+${product ? `<meta name="generator" content="${e(product)} ${e(m.context?.eztestVersion ?? '')}">` : ''}
+${b.favicon ? `<link rel="icon" href="${e(b.favicon)}">` : ''}
+<title>${e(m.title)}${b.subtitle ? ` - ${e(b.subtitle)}` : ''} - ${e(fmtWhen(m.startedAt))}</title><style>${REPORT_CSS}${paletteCss(b.palette)}${fontCss}</style><script>${themeBoot}</script></head>
 <body><a class="skip" href="#main">Skip to the report</a>
-<header class="topbar"><div class="topbar-in">
-<div class="brand">${logo}<div class="brand-text"><div class="brand-name">${e(m.brand.name)}</div><h1>${e(m.title)}</h1></div></div>
-<span class="badge ${m.verdict.decision === 'GO' ? 'b-passed' : m.verdict.decision === 'NO_GO' ? 'b-failed' : 'b-flaky'}" title="Release readiness">${icon(m.verdict.decision === 'GO' ? 'check' : m.verdict.decision === 'NO_GO' ? 'x' : 'alert')}${e(m.verdict.decision.replace(/_/g, ' '))}</span>
-<span class="small muted">${e(fmtDate(m.startedAt))} &middot; ${e(fmtMs(m.durationMs))}${m.context?.branch ? ` &middot; <code>${e(m.context.branch)}</code>` : ''}</span>
-<div class="top-actions">${exportsMenu}<button type="button" class="btn" id="print-btn">${icon('print')}Print or PDF</button><button type="button" class="btn" id="theme-toggle" aria-pressed="false">${icon('moon')}<span>Dark theme</span></button></div></div>
-<nav class="sections" aria-label="Report sections"><a href="#summary">Summary</a><a href="#tests">Tests<span class="count">${e(k.total)}</span></a><a href="#failures">Failures<span class="count">${e(failing)}</span></a>${m.lenses ? '<a href="#quality">Quality</a>' : ''}<a href="#comparison">Comparison</a><a href="#integrations">Integrations</a><a href="#context">Context</a><a href="#evidence">Evidence</a></nav></header>
+${header(m, L, o).replace('__TABS__', tabsHtml(tabs))}
 <main id="main" tabindex="-1">
-${health}
-<section class="block" id="summary" aria-labelledby="summary-h"><div class="block-head"><h2 id="summary-h">Executive summary</h2><p>Run <code>${e(m.runId)}</code>${m.previous ? `, compared with the previous run <code>${e(m.previous.runId)}</code>` : ''}.</p></div>
-${verdictCard(m)}${kpiTiles(m)}${attentionBlock(m)}${summaryCharts(m)}</section>
-${browsersBlock(m)}
-${o.featuresHtml ?? m.featuresHtml ?? ''}
-<section class="block" id="tests" aria-labelledby="tests-h"><div class="block-head"><h2 id="tests-h">Tests</h2><p>Filter, search and open any test. Shortcuts: <span class="kbd">/</span> search, <span class="kbd">&uarr;</span><span class="kbd">&darr;</span> move, <span class="kbd">Enter</span> open, <span class="kbd">Esc</span> close.</p></div>
-<div class="explorer" id="explorer">
-<div class="ex-side"><div class="ex-tools" role="search">
-<div class="ex-search"><label for="q" class="sr-only">Search tests</label><input type="search" id="q" placeholder="Search name, id, tag, error, step, owner" autocomplete="off"></div>
-<div class="filters" role="group" aria-label="Filter by state"><button type="button" class="fchip" data-state="all" aria-pressed="true">All <span class="num">${e(k.total)}</span></button>${TEST_STATES.map((s) => `<button type="button" class="fchip" data-state="${s}" aria-pressed="false"><span class="dot st-${s}" aria-hidden="true"></span>${e(STATE_LABEL[s])} <span class="num">${e(s === 'failed' ? k.failed : s === 'error' ? k.errors : s === 'passed' ? k.passed : s === 'healed' ? k.healed : s === 'flaky' ? k.flaky : k.skipped)}</span></button>`).join('')}</div>
-<div class="ex-row2"><label>Group <select id="group"><option value="suite">Suite</option><option value="tag">Tag</option><option value="owner">Owner</option><option value="browser">Browser</option><option value="category">Failure category</option><option value="cluster">Failure cluster</option><option value="none">No grouping</option></select></label>
-<label>Sort <select id="sort"><option value="default">Run order</option><option value="severity">Failures first</option><option value="duration">Slowest first</option><option value="name">Name</option><option value="risk">Risk</option></select></label>
-<label>Tag <select id="f-tag"><option value="">Any</option></select></label><label>Owner <select id="f-owner"><option value="">Any</option></select></label><label>Browser <select id="f-browser"><option value="">Any</option></select></label><label>Category <select id="f-cat"><option value="">Any</option></select></label></div>
-</div>
-<div class="ex-count" id="count" aria-live="polite"></div>
-<div class="vlist" id="vlist" role="tree" aria-label="Tests" tabindex="0"><div class="vlist-inner" id="vinner"></div></div></div>
-<div class="ex-detail" id="detail" tabindex="-1" aria-live="polite"><div class="empty"><div><p>Select a test to see its steps, evidence and failure details.</p><p class="small">Every test has a permalink: <code>#test/&lt;id&gt;</code></p></div></div></div>
-</div>
-<noscript><p>The interactive test list needs JavaScript. Failing tests are listed under Failure analysis.</p></noscript></section>
-${failuresBlock(m)}
-${qualityBlock(m)}
-${comparisonBlock(m)}
-${integrationsBlock(m)}
-${contextBlock(m)}
-${evidenceBlock(m)}
+${panels}
 </main>
-<footer class="foot"><span>${e(m.brand.name)} &middot; generated by EZTest ${e(m.context?.eztestVersion ?? '')} on ${e(fmtDate(m.generatedAt))}</span><span>Report model v${e(m.version)} &middot; <span class="kbd">?</span> keyboard shortcuts</span></footer>
+<footer class="foot">${foot}</footer>
 <div class="tip" id="tip" role="tooltip" hidden></div>
-<dialog class="lightbox" id="lightbox" aria-label="Screenshot viewer"><div class="lb-in"><div class="lb-bar"><span class="lb-cap" id="lb-cap"></span><button type="button" class="btn" id="lb-prev">Previous</button><button type="button" class="btn" id="lb-next">Next</button><button type="button" class="btn" id="lb-zoom" aria-pressed="false">Actual size</button><a class="btn" id="lb-open" href="#" target="_blank" rel="noopener">${icon('external')}Open</a><button type="button" class="btn" id="lb-close">${icon('close')}Close</button></div><img id="lb-img" alt=""></div></dialog>
+<dialog class="lightbox" id="lightbox" aria-label="Screenshot viewer"><div class="lb-in"><div class="lb-bar"><span class="lb-cap" id="lb-cap"></span><button type="button" class="btn" id="lb-prev">${icon('back')}Previous</button><button type="button" class="btn" id="lb-next">Next${icon('chevron')}</button><button type="button" class="btn" id="lb-zoom" aria-pressed="false">Actual size</button><a class="btn" id="lb-open" href="#" target="_blank" rel="noopener">${icon('external')}Open</a><button type="button" class="btn" id="lb-close">${icon('close')}Close</button></div><img id="lb-img" alt=""></div></dialog>
 <script type="application/json" id="ez-data">${scriptJson(clientData)}</script>
 <script>${REPORT_SCRIPT}</script></body></html>`;
 }
@@ -404,7 +566,5 @@ export function renderHtmlReport(run: RunResult, opts: HtmlReportOptions = {}): 
   if (run.journeys.length === 0) throw new EzTestError('renderHtmlReport: run has no journeys', 'INVALID_INPUT');
   const extraHtml = [...(opts.extraHtml ?? []), ...(opts.apiCoverage ?? []).map(apiCoverageHtml)];
   const model = buildReportModel(run, { ...opts, extraHtml });
-  const f = featuresBlock(run);
-  if (f) model.featuresHtml = f;
   return renderReportModelHtml(model, { exports: opts.exports });
 }

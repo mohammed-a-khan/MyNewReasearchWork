@@ -5,7 +5,6 @@
 @media (max-width: 1100px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .span-2 { grid-column: auto; } }
 .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.readiness-big .badge { height: 26px; font-size: var(--fs); padding: 0 12px; }
 .rank-list { list-style: none; display: flex; flex-direction: column; }
 .rank-list > li { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
 .rank-list > li:last-child { border-bottom: 0; }
@@ -151,40 +150,7 @@
 .bdd-kw { font-weight: 600; }
 .bdd-snippet { margin: 4px 0 0; white-space: pre; overflow-x: auto; }
 
-/* Results: the run report's analysis and the embedded HTML report */
-.rr { display: grid; gap: 12px; }
-.rr-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 12px 14px; border: 1px solid var(--border); border-left: 5px solid var(--skip); border-radius: var(--radius-lg); background: var(--surface); }
-.rr-verdict.tone-ok { border-left-color: var(--ok); }
-.rr-verdict.tone-bad { border-left-color: var(--danger); }
-.rr-verdict.tone-warn { border-left-color: var(--warn); }
-.rr-v-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; color: var(--text-muted); }
-.rr-v-decision { font-size: 20px; }
-.rr-verdict.tone-ok .rr-v-decision { color: var(--ok); }
-.rr-verdict.tone-bad .rr-v-decision { color: var(--danger); }
-.rr-verdict.tone-warn .rr-v-decision { color: var(--warn); }
-.rr-trend-wrap { margin-left: auto; display: inline-flex; align-items: flex-end; gap: 8px; }
-.rr-trend { display: inline-flex; align-items: flex-end; gap: 3px; height: 50px; }
-.rr-col { display: block; width: 8px; border-radius: 2px 2px 0 0; background: var(--accent-soft); border: 1px solid var(--accent); }
-.rr-col.rr-current { background: var(--accent); }
-.rr-attn { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.rr-attn-head { display: flex; align-items: baseline; gap: 6px; }
-.rr-attn-n { font-size: 18px; }
-.rr-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); }
-.rr-list li { padding: 2px 0; overflow-wrap: anywhere; }
-.rr-bar-row { display: grid; grid-template-columns: 130px 1fr 70px; align-items: center; gap: 10px; margin: 4px 0; }
-.rr-bar { display: block; height: 10px; background: var(--surface-3); border-radius: 5px; overflow: hidden; }
-.rr-fill { display: block; height: 100%; background: var(--skip); }
-.rr-fill.rr-product { background: var(--danger); }
-.rr-fill.rr-test { background: var(--heal); }
-.rr-fill.rr-environment, .rr-fill.rr-data, .rr-fill.rr-flaky { background: var(--warn); }
-.rr-bar-n { font-size: var(--fs-sm); color: var(--text-muted); }
-.rr-cat { display: inline-block; font-size: var(--fs-xs); font-weight: 700; padding: 0 7px; line-height: 18px; border-radius: 9px; border: 1px solid currentColor; white-space: nowrap; }
-.rr-cat.rr-product, .rr-cat.rr-new { color: var(--danger); background: var(--danger-soft); }
-.rr-cat.rr-test { color: var(--heal); background: var(--heal-soft); }
-.rr-cat.rr-environment, .rr-cat.rr-data, .rr-cat.rr-flaky { color: var(--warn); background: var(--warn-soft); }
-.rr-cat.rr-unknown { color: var(--skip); background: var(--skip-soft); }
-.rr-failures { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
-.rr-failure { border-top: 1px solid var(--border-subtle); padding-top: 8px; }
-.rr-err { margin: 4px 0; padding: 6px 8px; background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm); white-space: pre-wrap; font-size: var(--fs-xs); }
+/* Results: the embedded HTML report */
 .rr-exports { gap: 6px; }
-.rr-frame { display: block; width: 100%; height: calc(100vh - 220px); min-height: 520px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.rr-exports { margin-bottom: 8px; }
+.rr-frame { display: block; width: 100%; height: calc(100vh - 190px); min-height: 560px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }

@@ -12,7 +12,7 @@ import { BROWSER_ENGINES, EventBus, verifyEvidence, type EzEvent, type RunResult
 import { loadConfig, listProjects, encryptValue, createMaskedLogger, type LoadedConfig } from '../config/index.js';
 import { effectiveSummary } from './effective.js';
 import { journeyToEzScript, loadJourneyFile } from '../intent/index.js';
-import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, HEAL_APPLIED_FILES } from '../engine/index.js';
+import { createEngine, analyzeRun, lensesFromConfig, enableAddons, a11yLensOptions, HEAL_APPLIED_FILES, builtInRunVariables } from '../engine/index.js';
 import { reportOptionsFromConfig } from '../engine/analyze.js';
 import { terminalManualProvider } from '../manual/terminal.js';
 import { registerCoverageCommands } from './coverage.js';
@@ -181,7 +181,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .option('--update-baselines', 'write visual baselines instead of comparing')
     .option('--update-snapshots', 'write aria snapshot baselines instead of comparing')
     .option('--reporter <formats>', 'report formats: html,json,junit,csv,summary,email,xlsx,pdf (html also writes tests.csv, summary.html, email.html, report.xlsx and report.pdf)', list)
-    .option('--policy <file>', 'readiness policy (default readiness.policyPath from config)')
+    .option('--policy <file>', 'readiness policy (default readiness.policyPath from config); the report shows its decision only with report.readiness: true')
+    .option('--brand-file <file>', 'brand file (YAML or JSON with the report.brand keys) for the reports; overrides report.brand (also EZTEST_BRAND_FILE)')
     .option('--no-analyze', 'skip history/flaky/triage/readiness analysis')
     .option('--fast', 'fast mode: screenshots on failure only, no lenses, fingerprints only when missing, logs kept only for failures')
     .option('--reuse-context', 'reuse one browser context per worker, reset between journeys')
@@ -410,6 +411,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
           ...(cfg.vcs.branchScope.history && run.environment?.gitBranch ? { historyBranch: run.environment.gitBranch } : {}),
           journeys: all, uiCoverage: cfg.coverage.ui, a11yScopes: cfg.accessibility.scopes,
           ...reportOptionsFromConfig(cfg, io.cwd, io.env),
+          ...(o.brandFile ? { brandFile: resolve(io.cwd, String(o.brandFile)) } : {}),
         });
         if (a.uiCoverage) out(`UI coverage: ${a.uiCoverage.totals.tested}/${a.uiCoverage.totals.elements} elements (${(a.uiCoverage.totals.percent * 100).toFixed(1)}%) on ${a.uiCoverage.totals.pages} page(s); eztest coverage ui ${runDir}`);
         for (const t of a.failureTags.filter((x) => x.tags.length)) out(`tags: ${t.journeyId}: ${t.tags.join(', ')}`);
@@ -490,7 +492,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const addons = loaded ? await enableAddons(loaded, { cwd: io.cwd }) : { off: () => {} };
       const placeholder = o.placeholder ? new RegExp(o.placeholder) : DEFAULT_PLACEHOLDER;
       // Config variables, for ${VAR} in Examples file names (data/${DATA_ENV}/orders.csv), as in a run.
-      const variables: Record<string, unknown> = { ...(loaded?.config.vars ?? {}) };
+      // ${env} and ${project} as a run has them (under the config's own vars), for data file paths in Examples.
+      const variables: Record<string, unknown> = { ...(loaded ? builtInRunVariables(loaded) : {}), ...(loaded?.config.vars ?? {}) };
       const files = await findJourneyFiles(paths.length ? paths : loaded ? defaultJourneyPaths(loaded.config, io.cwd) : ['journeys'], io.cwd, { code: true });
       let bad = 0;
       const parsed: Array<{ file: string; journey: Awaited<ReturnType<typeof loadJourneyFile>> }> = [];
@@ -569,10 +572,11 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .command('analyze')
     .description('re-run history, flaky scoring, triage, readiness and reports for a run directory')
     .argument('<runDir>')
-    .option('--policy <file>', 'readiness policy YAML')
+    .option('--policy <file>', 'readiness policy YAML: the gate for a pipeline (exit code 1 on NO_GO); the report shows the decision only with report.readiness: true')
+    .option('--brand-file <file>', 'brand file (YAML or JSON with the report.brand keys) for the reports; overrides report.brand (also EZTEST_BRAND_FILE)')
     .option('--no-history', 'do not record this run into history')
     .option('--no-config', 'analyze without the project configuration (report branding, links)')
-    .action(async (runDir: string, o: { policy?: string; history: boolean; config: boolean }) => {
+    .action(async (runDir: string, o: { policy?: string; brandFile?: string; history: boolean; config: boolean }) => {
       const configFile = ['eztest.config.yaml', 'eztest.config.yml', 'eztest.config.json'].find((f) => existsSync(join(io.cwd, f)));
       let loaded: LoadedConfig | undefined;
       if (configFile && o.config !== false) {
@@ -592,8 +596,13 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         recordHistory: o.history,
         readinessPolicyPath: o.policy ? resolve(io.cwd, o.policy) : undefined,
         ...(loaded ? reportOptionsFromConfig(loaded.config, io.cwd, io.env) : { cwd: io.cwd }),
+        ...(o.brandFile ? { brandFile: resolve(io.cwd, o.brandFile) } : io.env.EZTEST_BRAND_FILE && !loaded ? { brandFile: resolve(io.cwd, io.env.EZTEST_BRAND_FILE) } : {}),
       });
+      // Brand assets that were rejected, colours replaced by an accessible shade, a missing policy file...
+      for (const w of a.warnings) io.err(`warning: ${w}`);
       io.out(JSON.stringify({ triage: a.triage.counts, needsHuman: a.triage.needsHuman, readiness: a.readiness?.decision, reports: a.reports }, null, 2));
+      // The readiness gate for a pipeline: an explicit --policy whose decision is NO_GO fails the step.
+      if (o.policy && a.readiness?.decision === 'NO_GO') process.exitCode = 1;
     });
 
   const evidence = program.command('evidence').description('evidence vault tools');

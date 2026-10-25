@@ -1,6 +1,6 @@
 /**
  * What EZTest tells a pull request: the status ("EZTest: GO / GO_WITH_RISKS /
- * NO_GO"), one Markdown comment (failures, heals awaiting review, impacted
+ * NO_GO" when a readiness policy ran, else the counts), one Markdown comment (failures, heals awaiting review, impacted
  * journeys, readiness gates) and line annotations on the failing journey
  * steps. Built from a run directory's report.json, so any CI can post it.
  */
@@ -111,9 +111,11 @@ export function buildPrSummary(i: PrSummaryInput): PrSummary {
   const failed = tests.filter((j) => j.status === 'failed' || j.status === 'error');
   const heals = i.healProposals ?? tests.flatMap((j) => allSteps(j.steps).filter((st) => st.heal).map((st) => ({ journeyId: j.journeyId, journeyName: j.name, stepId: st.stepId, intent: st.intent, tier: st.heal!.tier, confidence: st.heal!.confidence, verified: st.heal!.verified, from: st.heal!.original.map((o) => `${o.strategy}=${o.value}`), to: `${st.heal!.healed.strategy}=${st.heal!.healed.value}`, reason: st.heal!.reason, evidence: st.heal!.evidence, recommendation: st.heal!.verified ? ('accept' as const) : ('review' as const) })));
   const commit = run.environment?.gitCommit ? ` at \`${run.environment.gitCommit.slice(0, 10)}\`` : '';
-  const desc = `EZTest: ${decision}${i.readiness ? ` (score ${i.readiness.score})` : ''} - ${s.passed + s.healed}/${s.total} passed${s.healed ? `, ${s.healed} healed` : ''}${s.failed ? `, ${s.failed} failed` : ''}`;
+  // No verdict unless the team runs a readiness policy: the counts speak for themselves (the check's state still fails on failures).
+  const counts = `${s.passed + s.healed}/${s.total} passed${s.healed ? `, ${s.healed} healed` : ''}${s.failed ? `, ${s.failed} failed` : ''}`;
+  const desc = i.readiness ? `EZTest: ${decision} (score ${i.readiness.score}) - ${counts}` : `EZTest: ${counts}`;
   const out: string[] = [];
-  out.push(`### EZTest: ${decision}`);
+  out.push(i.readiness ? `### EZTest: ${decision}` : '### EZTest results');
   out.push('');
   out.push(`Run \`${run.runId}\`${commit}: **${s.total}** journeys, ${s.passed} passed, ${s.healed} passed with heals, ${s.failed} failed${s.skipped ? `, ${s.skipped} skipped` : ''}.${i.reportUrl ? ` [Full report](${i.reportUrl})` : ''}${i.buildUrl ? ` · [Pipeline run](${i.buildUrl})` : ''}`);
   if (i.readiness) {

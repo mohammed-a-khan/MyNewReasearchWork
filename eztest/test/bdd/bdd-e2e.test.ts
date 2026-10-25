@@ -125,7 +125,7 @@ describe('native BDD through eztest run (real browser, demo app)', () => {
     expect(report.bdd?.features.map((f) => f.name)).toEqual(['Ordering in the EZ Shop', 'Price quotes']);
     expect(report.bdd?.features[1].rules.map((x) => x.name)).toEqual(['Quotes are priced per unit', 'Quotes for many products']);
     const html = await readFile(join(dir, 'report.html'), 'utf8');
-    expect(html).toContain('Features');
+    expect(html).toContain('Ordering in the EZ Shop'); // grouped by feature in the Tests tab (no separate Features block)
     expect(html).toContain('Quotes are priced per unit');
     expect((await verifyEvidence(dir)).ok).toBe(true);
     void flat;

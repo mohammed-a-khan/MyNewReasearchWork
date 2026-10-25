@@ -1,8 +1,8 @@
 /**
- * Studio's Results page shows the run report's analysis: readiness against
- * the previous run, what needs attention, failure categories with the
- * suggested next step and the report files (PDF, Excel, e-mail summary), and
- * a Report tab with the run's full HTML report in place - checked in a real
+ * Studio's Results page opens a run on its report: the Report tab (first and
+ * selected) shows the run's HTML report in place with its files (PDF, Excel,
+ * e-mail summary), and Studio does not repeat the report's overview in tabs
+ * of its own; there is no verdict anywhere by default - checked in a real
  * Chromium against a real run of the shop project with a failing journey,
  * light and dark, with EZTest's accessibility engine.
  */
@@ -59,7 +59,7 @@ describe('Studio Results: the run report', () => {
   it('serves the report analysis, the export files, and the report for framing by Studio only', async () => {
     const d = (await c.get(`/api/runs/${runId}`)).json();
     expect(d.exports.map((x: { format: string }) => x.format)).toEqual(expect.arrayContaining(['pdf', 'xlsx', 'email', 'summary', 'json']));
-    expect(d.reportSummary.verdict.decision).toBe('NO_GO');
+    expect(d.reportSummary.verdict).toBeUndefined();
     expect(d.reportSummary.categories).toEqual({ test: 1 });
     expect(d.reportSummary.failures[0]).toMatchObject({ id: 'manager-exports-the-customer-list', category: 'test', fix: expect.stringMatching(/locator/) });
     const rep = await raw(studio.port, `/runs/${runId}/report.html`, { headers: { cookie: `eztest_studio=${studio.token}` } });
@@ -73,16 +73,16 @@ describe('Studio Results: the run report', () => {
     expect(pdf.body.startsWith('%PDF-1.7')).toBe(true);
   });
 
-  it('shows readiness, what needs attention, categories with next steps and the report files on the Overview', async () => {
+  it('opens the run on its report, with the report files, no duplicated overview and no verdict', async () => {
     await page.goto(`${studio.url}`);
     await page.goto(`${studio.origin}/#/runs/${runId}`);
-    const s = page.locator('#run-report-summary');
-    await expect.poll(() => s.isVisible(), { timeout: 30_000 }).toBe(true);
-    expect(await s.locator('.rr-v-decision').textContent()).toBe('NO GO');
-    expect(await page.locator('#rr-attention').textContent()).toMatch(/New failures/);
-    const cats = page.locator('#rr-categories');
-    expect(await cats.textContent()).toMatch(/Test issue[\s\S]*1 test[\s\S]*Manager exports the customer list[\s\S]*Suggested next step: /);
-    expect(await cats.getByRole('link', { name: 'Manager exports the customer list' }).getAttribute('href')).toBe(`#/runs/${runId}/manager-exports-the-customer-list`);
+    const reportTab = page.getByRole('tab', { name: 'Report' });
+    await expect.poll(() => reportTab.getAttribute('aria-selected'), { timeout: 30_000 }).toBe('true');
+    const tabs = await page.locator('#run-detail [role=tab]').allTextContents();
+    expect(tabs[0]).toMatch(/^Report/);
+    expect(tabs.join(' ')).not.toMatch(/Overview|Screenshots|Triage/);
+    expect(await page.locator('#run-detail').textContent()).not.toMatch(/readiness|NO GO/i);
+    expect(await page.locator('#run-detail').textContent()).toMatch(/Evidence verified/);
     const files = page.getByRole('group', { name: 'Report files' }).first();
     expect(await files.getByRole('link', { name: 'PDF report' }).getAttribute('href')).toBe(`/runs/${runId}/report.pdf`);
     expect(await files.getByRole('link', { name: 'Excel workbook' }).getAttribute('href')).toBe(`/runs/${runId}/report.xlsx`);
@@ -93,14 +93,18 @@ describe('Studio Results: the run report', () => {
     await page.emulateMedia({ colorScheme: 'light' });
   });
 
-  it('opens the full HTML report in the Report tab, with its tests, failure and categories', async () => {
-    await page.getByRole('tab', { name: 'Report' }).click();
+  it('shows the full report in place: its tabs, the failures by cause and the test detail', async () => {
     const frame = page.frameLocator('#run-report-frame');
-    await expect.poll(() => frame.locator('#summary-h').textContent(), { timeout: 30_000 }).toBe('Executive summary');
-    expect(await frame.locator('#categories').textContent()).toMatch(/Test issue/);
+    await expect.poll(() => frame.locator('#tab-overview').getAttribute('aria-selected'), { timeout: 30_000 }).toBe('true');
+    await frame.locator('#tab-failures').click();
+    expect(await frame.locator('#p-failures').textContent()).toMatch(/Test issue[\s\S]*Manager exports the customer list/);
+    await frame.locator('#tab-tests').click();
     await expect.poll(() => frame.locator('#vinner .row[data-id]').count()).toBeGreaterThan(0);
     await frame.locator('#vinner .row[data-id="manager-exports-the-customer-list"]').click();
-    await expect.poll(() => frame.locator('#detail .catbox').textContent()).toMatch(/Test issue[\s\S]*Suggested next step/);
+    await expect.poll(() => frame.locator('#detail .cause').textContent()).toMatch(/Test issue[\s\S]*Next step/);
+    // A journey deep link in Studio opens the report on that test.
+    await page.goto(`${studio.origin}/#/runs/${runId}/manager-exports-the-customer-list/x/report`);
+    await expect.poll(() => page.frameLocator('#run-report-frame').locator('#d-title').textContent(), { timeout: 30_000 }).toBe('Manager exports the customer list');
     expect(pageErrors).toEqual([]);
   });
 });

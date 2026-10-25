@@ -149,7 +149,7 @@ describe('eztest run with ado.publishResults', () => {
     expect(card.version).toBe('1.5');
     expect(card.actions.map((a) => a.title)).toEqual(expect.arrayContaining(['Azure DevOps test run', 'Build']));
     expect(JSON.stringify(card.body)).toContain('Find the basket');
-    expect(JSON.stringify(card.body)).toContain('NO GO');
+    expect(JSON.stringify(card.body)).not.toContain('NO GO');
   }, 180_000);
 
   it('records a failed publish (and why) in the report', async () => {

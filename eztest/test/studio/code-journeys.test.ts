@@ -133,7 +133,8 @@ describe('Studio: code journeys', { timeout: 180_000 }, () => {
     const t = (await api('GET', '/api/quality/traceability')).json;
     expect(JSON.stringify(t)).toContain('REQ-SDK-1');
     await page.goto(`${studio.origin}/#/runs/${r.json.id}`);
-    await expect.poll(() => page.locator('body').textContent(), { timeout: 20_000 }).toContain('Interop: code calls .ez');
+    // A run opens on its report, embedded in the page.
+    await expect.poll(async () => `${await page.locator('body').textContent()} ${await page.frameLocator('iframe').locator('body').textContent({ timeout: 2000 }).catch(() => '')}`, { timeout: 20_000 }).toContain('Interop: code calls .ez');
     expect(pageErrors).toEqual([]);
   });
 });
