@@ -111,5 +111,21 @@ journey('Stock message shows', { tags: ['@smoke'] }, async ({ ui }) => {
     const gate = await eztest(['gate', runDir, '--on-risks', 'fail', '--on-missing', 'fail']);
     expect(gate.code, gate.out).toBe(0);
     expect(gate.out).toContain('PASS');
+
+    // The enterprise template from the installed package: its TypeScript samples (step definitions, a code
+    // journey importing @eztech/eztest/sdk and /core, helpers, a screen model) load, and it validates and lints clean.
+    const ent = join(base, 'enterprise');
+    await mkdir(ent);
+    await symlink(join(project, 'node_modules'), join(ent, 'node_modules'), 'dir');
+    const inEnt = (args: string[]) => sh(process.execPath, [bin, ...args], ent, { EZTEST_ADO_ORG_URL: undefined, EZTEST_ADO_PROJECT: undefined, CI: undefined });
+    const scaffold = await inEnt(['init', '--template', 'enterprise', '--app', 'shop']);
+    expect(scaffold.code, scaffold.out).toBe(0);
+    expect(scaffold.out).toContain('created  apps/shop/code/orders/order-from-api.journey.ts');
+    const validated = await inEnt(['validate', '--project', 'shop', '-e', 'dev']);
+    expect(validated.code, validated.out).toBe(0);
+    expect(validated.out).toContain('1 code journey: shop-orders-order-from-api');
+    const linted = await inEnt(['lint']);
+    expect(linted.code, linted.out).toBe(0);
+    expect(linted.out).toContain('0 error(s), 0 warning(s), 0 info');
   }, 300_000);
 });
