@@ -27,6 +27,7 @@ export { PageRegistry, urlMatches, frameSelectorCandidates, resolveFrameSelector
 export { DialogManager, type DialogRecord, type DialogPlan, type DialogPolicy, type DialogKind } from './dialogs.js';
 export { executeStep, flowConditionHolds, readDataRows, type FlowEnv, type FlowScope } from './flow.js';
 export { expandExamples, hookStep } from './journey-hooks.js';
+export { journeyBaseUrl } from './journey.js';
 export { JourneyQueue, type QueueItem } from './queue.js';
 export {
   resolveExamplesSources, loadExamplesRows, loadSourceRows, filterRows, rowToStrings, dataSourcePath, validateExamplesSource, DEFAULT_PLACEHOLDER,

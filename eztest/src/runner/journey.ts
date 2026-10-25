@@ -9,6 +9,7 @@ import {
   interpolate,
   journeyStatusFrom,
   resolveVariableRefs,
+  unresolvedNames,
   nowIso,
   type Journey,
   type JourneyResult,
@@ -171,6 +172,24 @@ export function noRowsJourney(journey: Journey, reason: string, browserName: str
  * `seed` pre-fills the ledger (values handed over by `Depends on:` prerequisites).
  */
 /**
+ * A journey's `Base URL:` header with its `${NAME}` references resolved against the journey's variables (config
+ * `vars`, EZTEST_VAR_<name>, run variables, Setup: values). `problem` names what nothing sets.
+ */
+export function journeyBaseUrl(raw: string, vars: Record<string, unknown>): { url?: string; problem?: string } {
+  const missing = unresolvedNames(raw, vars);
+  if (missing.length) {
+    return { problem: `Base URL: ${raw}: ${missing.map((n) => `\${${n}}`).join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set (a config "vars" entry, EZTEST_VAR_<name>, a run variable or a Setup: value)` };
+  }
+  const url = interpolate(raw, vars).trim();
+  try {
+    new URL(url);
+  } catch {
+    return { problem: `Base URL: ${raw}${url !== raw ? ` (${url})` : ''} is not an absolute URL` };
+  }
+  return { url };
+}
+
+/**
  * A journey's `Lenses:` header turns lenses on for that journey: the run's lenses, plus one instance
  * (from RunOptions.lensFactory) of each named lens the run does not have. "security:warn" records only.
  */
@@ -196,13 +215,16 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   };
   const ledger = new Ledger();
   for (const [k, v] of Object.entries(seed ?? {})) ledger.set(k, v);
-  const baseUrl = opts.baseUrlOverride ?? journey.baseUrl ?? opts.baseUrl;
   let clockContext: BrowserContext | undefined;
   // today() / now() follow the journey's browser clock once one is installed.
   // Journey variables may refer to run and config variables, to each other (`last=Okafor${tag}`) and to the values
   // the run's Setup: journeys returned or Depends on: handed over (`last=Okafor${runTag}`).
   const startVars = resolveVariableRefs({ ...journey.variables, ...(opts.variables ?? {}) }, seed ?? {});
   const vars = (): Record<string, unknown> => ({ ...startVars, ...ledger.view(), ...clockVars(clockContext) });
+  // `Base URL: ${PARTNER_URL}` reads the same variables as the steps; a name nothing sets stops the journey with
+  // that name (inside the try below), not with "Invalid URL" at the first Open.
+  const journeyBase = journey.baseUrl !== undefined ? journeyBaseUrl(journey.baseUrl, vars()) : undefined;
+  const baseUrl = opts.baseUrlOverride ?? journeyBase?.url ?? opts.baseUrl;
   const videoMode = opts.video ?? 'off';
   const videoDir = join(env.runDir, 'videos', `${safeName(jid)}-attempt${attempt}`);
   // mTLS from the browser: one certificate per origin (the context option clientCertificates).
@@ -390,6 +412,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   const scope: FlowScope = { journey, ledger, prefix, depth: 0 };
 
   try {
+    if (journeyBase?.problem && !opts.baseUrlOverride) throw new Error(journeyBase.problem);
     const missingLenses = journey.lenses.filter((n) => !(opts.lenses ?? []).some((l) => l.name === n.split(':')[0]));
     if (missingLenses.length) throw new Error(`Journey requires lens(es) not provided to the runner: ${missingLenses.join(', ')}`);
     // Data-state preconditions and data needs: a miss is a data problem, not a product failure.

@@ -33,6 +33,7 @@ Expect the URL to contain "/checkout"          # post-condition of the Click
 
 | Header | Meaning |
 |---|---|
+| `Base URL: ${PARTNER_URL}` | The host this journey's paths go to (`Open /hovers`), when it is not the project's `baseUrl`. `${NAME}` reads the journey's variables: config `vars` (and the environment's value of the same name), `EZTEST_VAR_<NAME>`, run variables and `Setup:` values; `${NAME:-https://...}` gives a default. A name nothing sets stops the journey with that name. `eztest run --base-url` still wins |
 | `Params: role, product` | Parameters a caller passes with `Run journey ... with role=manager` (required unless a default is in `Variables:`) |
 | `Returns: orderId, total` | Captured values handed back to the caller |
 | `Device: iPhone 13` | Emulate a device from EZTest's device list (viewport, user agent, touch, mobile) |
