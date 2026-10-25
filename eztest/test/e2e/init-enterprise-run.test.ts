@@ -5,7 +5,7 @@
  * script) passes every sample: the .ez journey (one per data row of data/dev/orders.csv), the
  * Gherkin scenario with its step definitions and the shared step, and the code journey with its
  * screen model and API helper; each checks the database through the query catalogue, and the
- * readiness decision is GO. A second application added with --app validates too.
+ * report holds no verdict (readiness is opt-in). A second application added with --app validates too.
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -57,7 +57,7 @@ afterAll(async () => {
 });
 
 describe('eztest init --template enterprise runs green', () => {
-  it.skipIf(!SQLITE)('validate, lint, then npm test (run --project web -e dev): every sample passes, GO', async () => {
+  it.skipIf(!SQLITE)('validate, lint, then npm test (run --project web -e dev): every sample passes, no verdict by default', async () => {
     const init = await cli(project, ['init', '--template', 'enterprise']);
     expect(init.code, init.out).toBe(0);
 
@@ -90,9 +90,9 @@ describe('eztest init --template enterprise runs green', () => {
     expect(app!.orders().map((o) => `${o.customer} x${o.quantity} = ${o.total}`).sort()).toEqual([
       'Contoso Ltd x2 = 25.00', 'Contoso Ltd x2 = 25.00', 'Contoso Ltd x2 = 25.00', 'Northwind Traders x40 = 500.00',
     ]);
-    const report = JSON.parse(await readFile(join(runDir, 'report.json'), 'utf8')) as { insights: { readiness: { decision: string; gates: Array<{ gate: string; status: string }> } } };
-    expect(report.insights.readiness.gates.filter((g) => g.status !== 'pass'), JSON.stringify(report.insights.readiness.gates)).toEqual([]);
-    expect(report.insights.readiness.decision).toBe('GO');
+    // No verdict by default: the report holds the results; a readiness policy is opt-in (eztest analyze --policy).
+    const report = JSON.parse(await readFile(join(runDir, 'report.json'), 'utf8')) as { insights: { readiness?: unknown } };
+    expect(report.insights.readiness).toBeUndefined();
 
     // A second application: its own folder, project and scripts; both validate and the project still lints clean.
     const add = await cli(project, ['init', '--app', 'billing']);

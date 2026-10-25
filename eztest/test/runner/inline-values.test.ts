@@ -49,7 +49,7 @@ describe('Examples clauses', () => {
     const src = parseExamplesSource('Examples: from data "data/visits.csv" where state != closed with ref = unique("VIS-"), due = addDays(today(), 14) resolve with query "FIND_PET_FOR_STATE" on clinic with state=<requiredState> as pet when dataMode = live or keep row values');
     expect(src).toEqual({
       from: 'data/visits.csv', where: 'state != closed',
-      derive: [{ name: 'ref', expr: 'unique("VIS-")' }, { name: 'due', expr: 'addDays(today(), 14)' }],
+      derive: [{ name: 'ref', expr: "unique('VIS-')" }, { name: 'due', expr: 'addDays(today(), 14)' }],
       resolve: { query: 'FIND_PET_FOR_STATE', connection: 'clinic', binds: { state: '<requiredState>' }, as: 'pet', when: 'dataMode = live', keepRowValues: true },
     });
     expect(parseExamplesSource(examplesSourceToText(src))).toEqual(src);
@@ -72,8 +72,8 @@ describe('Examples clauses', () => {
       { requiredState: 'discharged', mode: 'live' },
     ], { resolver: resolver as never });
     expect(calls).toEqual([{ state: 'in-treatment' }, { state: 'discharged' }]);
-    expect(rows[0]).toEqual({ requiredState: 'in-treatment', mode: 'live', 'pet.pet_id': '11', 'pet.name': 'Pepper', ref: '${unique("V-")}' });
-    expect(rows[1]).toEqual({ requiredState: 'healthy', mode: 'offline', ref: '${unique("V-")}' });
+    expect(rows[0]).toEqual({ requiredState: 'in-treatment', mode: 'live', 'pet.pet_id': '11', 'pet.name': 'Pepper', ref: "${unique('V-')}" });
+    expect(rows[1]).toEqual({ requiredState: 'healthy', mode: 'offline', ref: "${unique('V-')}" });
     expect(rows[2][DATA_PROBLEM_KEY]).toBe('no test data: query FIND_PET_FOR_STATE on clinic with state=discharged returned no row for pet');
   });
 
