@@ -4,7 +4,7 @@ import { h } from '../core/dom.js';
 import { badge, card, emptyState, stat } from '../ui/badge.js';
 import { dataTable, pageHeader, sevBadge, withStates, type SubPageDef } from './assurance-ui.js';
 
-interface Usage { journeyId: string; journeyName: string; stepId: string; intent: string; via: 'reference' | 'description'; role: string }
+interface Usage { journeyId: string; journeyName: string; stepId: string; intent: string; via: 'reference' | 'description' | 'code'; role: string }
 interface ElementRow {
   id: string; screen: string; key: string; description: string; aliases: string[]; file: string; line?: number; source: string;
   locators: string[]; hasFingerprint: boolean; usages: Usage[];

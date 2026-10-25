@@ -5,13 +5,24 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { parseEzScript } from '../../src/intent/index.js';
 import { protectQuotes, literal } from '../../src/intent/quotes.js';
 import { runJourneys } from '../../src/runner/index.js';
+
+/** Temporary folders this file made, removed at the end. */
+const made: string[] = [];
+async function tempDirOf(prefix: string): Promise<string> {
+  const d = await mkdtemp(prefix);
+  made.push(d);
+  return d;
+}
+afterAll(async () => {
+  for (const d of made) await rm(d, { recursive: true, force: true }).catch(() => undefined);
+});
 
 let server: Server;
 let base = '';
@@ -44,7 +55,7 @@ describe('escaped quotes in quoted text', () => {
   });
 
   it('the page text matches and contains the value with the quotes in it', async () => {
-    const out = await mkdtemp(join(tmpdir(), 'ez-escaped-quotes-'));
+    const out = await tempDirOf(join(tmpdir(), 'ez-escaped-quotes-'));
     const journey = parseEzScript([
       'Journey: Claims',
       '',

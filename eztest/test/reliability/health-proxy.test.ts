@@ -7,13 +7,24 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { parseEzScript } from '../../src/intent/index.js';
 import { runJourneys } from '../../src/runner/index.js';
 import { runHealthChecks } from '../../src/runner/reliability/health.js';
+
+/** Temporary folders this file made, removed at the end. */
+const made: string[] = [];
+async function tempDirOf(prefix: string): Promise<string> {
+  const d = await mkdtemp(prefix);
+  made.push(d);
+  return d;
+}
+afterAll(async () => {
+  for (const d of made) await rm(d, { recursive: true, force: true }).catch(() => undefined);
+});
 
 let proxy: Server;
 let direct: Server;
@@ -89,7 +100,7 @@ describe('health checks behind a proxy', () => {
 
   it('a run with a health check on a host only the proxy reaches runs its journeys', async () => {
     behindProxy();
-    const out = await mkdtemp(join(tmpdir(), 'ez-health-proxy-'));
+    const out = await tempDirOf(join(tmpdir(), 'ez-health-proxy-'));
     const run = await runJourneys([parseEzScript('Journey: Runs\n\nSet variable x to "1"\nExpect the expression "x == \'1\'" is true\n')], {
       outputDir: out, baseUrl: 'http://shop.eztest.invalid', healthChecks: [{ url: '/health' }], stepTimeoutMs: 5000,
     });

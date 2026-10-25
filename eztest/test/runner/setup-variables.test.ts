@@ -3,8 +3,8 @@
  * of the run can use it as ${tenantId}"), inline and in worker processes. It was resolved against run variables
  * only, so `Variables: last=Okafor${runTag}` typed and stored `Okafor${runTag}` literally.
  */
-import { describe, expect, it } from '../support/testkit.js';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { afterAll, describe, expect, it } from '../support/testkit.js';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify as toYaml } from 'yaml';
@@ -12,6 +12,17 @@ import type { RunResult } from '../../src/core/index.js';
 import { loadConfig } from '../../src/config/index.js';
 import { createEngine } from '../../src/engine/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
+
+/** Temporary folders this file made, removed at the end. */
+const made: string[] = [];
+async function tempDirOf(prefix: string): Promise<string> {
+  const d = await mkdtemp(prefix);
+  made.push(d);
+  return d;
+}
+afterAll(async () => {
+  for (const d of made) await rm(d, { recursive: true, force: true }).catch(() => undefined);
+});
 
 const SCRIPTS = [
   'Setup: Run tag\nId: run-tag\nReturns: runTag\n\nSet variable runTag to "Ez" + upper(randomString(6))\n',
@@ -28,7 +39,7 @@ const SCRIPTS = [
 ];
 
 async function run(workers: 'inline' | 'process'): Promise<RunResult> {
-  const dir = await mkdtemp(join(tmpdir(), `ez-setup-vars-${workers}-`));
+  const dir = await tempDirOf(join(tmpdir(), `ez-setup-vars-${workers}-`));
   await writeFile(join(dir, 'eztest.config.yaml'), toYaml({ outputDir: 'results', healing: { enabled: false }, concurrency: 2, workers }));
   const engine = await createEngine(await loadConfig({ cwd: dir, environment: {} }), { cwd: dir, runOptions: { stepTimeoutMs: 10_000, screenshots: 'off' } });
   try {

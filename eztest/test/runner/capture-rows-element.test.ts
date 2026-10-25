@@ -6,13 +6,24 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
 import { createServer, type Server } from 'node:http';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { ElementRepository } from '../../src/elements/index.js';
 import { parseEzScript } from '../../src/intent/index.js';
 import { runJourneys } from '../../src/runner/index.js';
+
+/** Temporary folders this file made, removed at the end. */
+const made: string[] = [];
+async function tempDirOf(prefix: string): Promise<string> {
+  const d = await mkdtemp(prefix);
+  made.push(d);
+  return d;
+}
+afterAll(async () => {
+  for (const d of made) await rm(d, { recursive: true, force: true }).catch(() => undefined);
+});
 
 const PAGE = `<!doctype html><html><head><title>System Users</title></head><body>
 <h1>System Users</h1>
@@ -36,7 +47,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  dir = await mkdtemp(join(tmpdir(), 'ez-rows-element-'));
+  dir = await tempDirOf(join(tmpdir(), 'ez-rows-element-'));
   await mkdir(join(dir, 'elements'));
   await writeFile(join(dir, 'elements', 'users.yaml'), ['screen: Users', 'elements:', '  table: css=.users-card', '  summary: css=.summary', ''].join('\n'));
   elements = await ElementRepository.load(dir);

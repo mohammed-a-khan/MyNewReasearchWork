@@ -4,7 +4,7 @@
  * @Pim.nationality dropdown` does; it was read as the text "@Widgets.due date" and matched nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from '../support/testkit.js';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ElementRepository } from '../../src/elements/index.js';
@@ -12,12 +12,23 @@ import { parseEzScript } from '../../src/intent/index.js';
 import { componentEvidence, expectPasses, runEz, startApp } from './components-helpers.js';
 import type { EnterpriseApp } from '../../examples/enterprise-app/server.js';
 
+/** Temporary folders this file made, removed at the end. */
+const made: string[] = [];
+async function tempDirOf(prefix: string): Promise<string> {
+  const d = await mkdtemp(prefix);
+  made.push(d);
+  return d;
+}
+afterAll(async () => {
+  for (const d of made) await rm(d, { recursive: true, force: true }).catch(() => undefined);
+});
+
 let app: EnterpriseApp;
 let elements: ElementRepository;
 
 beforeAll(async () => {
   app = await startApp();
-  const dir = await mkdtemp(join(tmpdir(), 'eztest-comp-elements-'));
+  const dir = await tempDirOf(join(tmpdir(), 'eztest-comp-elements-'));
   await mkdir(join(dir, 'elements'));
   await writeFile(join(dir, 'elements', 'widgets.yaml'), [
     'screen: Widgets',
