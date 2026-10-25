@@ -76,11 +76,13 @@ describe('eztest lint on journeys (fixtures)', () => {
   });
 
   it('rule severities can be changed or turned off; max-warnings fails CI', () => {
-    const j = parseEzScript('Journey: W\nOpen /\nWait 2 seconds\nClick the "Next" button\n');
-    expect(lintJourney(j, 'w.ez', '', {}).map((f) => `${f.rule}:${f.severity}`)).toEqual(['hard-wait:warning']);
-    expect(lintJourney(j, 'w.ez', '', { rules: { 'hard-wait': 'error' } })[0].severity).toBe('error');
-    expect(lintJourney(j, 'w.ez', '', { rules: { 'hard-wait': 'off' } })).toEqual([]);
-    const report = { files: 1, findings: lintJourney(j, 'w.ez', ''), counts: { error: 0, warning: 1, info: 0 } };
+    // Id, tags and an expectation: the journey follows the project guide except for its hard wait.
+    const text = 'Journey: W\nId: w\nTags: @smoke\nOpen /\nWait 2 seconds\nClick the "Next" button\n  Expect the page contains "Step 2"\n';
+    const j = parseEzScript(text);
+    expect(lintJourney(j, 'w.ez', text, {}).map((f) => `${f.rule}:${f.severity}`)).toEqual(['hard-wait:warning']);
+    expect(lintJourney(j, 'w.ez', text, { rules: { 'hard-wait': 'error' } })[0].severity).toBe('error');
+    expect(lintJourney(j, 'w.ez', text, { rules: { 'hard-wait': 'off' } })).toEqual([]);
+    const report = { files: 1, findings: lintJourney(j, 'w.ez', text), counts: { error: 0, warning: 1, info: 0 } };
     expect(lintExitCode(report)).toBe(0);
     expect(lintExitCode(report, 0)).toBe(1);
   });
@@ -118,7 +120,7 @@ describe('eztest lint on imported code (fixtures)', () => {
 describe('eztest lint (CLI)', () => {
   it('runs in CI: exit code 1 on errors, JSON output, rule overrides', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'eztest-lint-'));
-    await writeFile(join(dir, 'a.ez'), 'Journey: A\nOpen /\nWait 1 second\nClick the "Go" button\n  Expect the page contains "Gone"\n');
+    await writeFile(join(dir, 'a.ez'), 'Journey: A\nId: a\nTags: @smoke\nOpen /\nWait 1 second\nClick the "Go" button\n  Expect the page contains "Gone"\n');
     const out: string[] = [];
     const io = { out: (s: string) => out.push(s), err: (s: string) => out.push(s), cwd: dir, env: {} };
     process.exitCode = 0;

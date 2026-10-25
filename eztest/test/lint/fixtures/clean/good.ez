@@ -1,5 +1,6 @@
 Journey: Clean journey
 Id: clean
+Tags: @regression @orders
 Role: manager
 Variables: password=${PASSWORD}
 
