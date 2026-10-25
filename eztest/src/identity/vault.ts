@@ -121,6 +121,13 @@ const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\
 
 const SELECTOR_RE = /^(css=|xpath=|text=|role=|id=|data-testid=|internal:|\/\/|#|\.|\[)|^[a-z][a-z0-9-]*[#.[:]/i;
 
+/** In the page: does the element take typed text (an input that is not a button or a box, a textarea, an editable element)? */
+const TAKES_TEXT = (e: Element): boolean => {
+  if (e instanceof HTMLTextAreaElement) return !e.disabled;
+  if (e instanceof HTMLInputElement) return !e.disabled && !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color'].includes(e.type);
+  return (e as HTMLElement).isContentEditable === true;
+};
+
 /**
  * `/regex/flags` is a pattern; anything else is a substring of the URL. Only valid RegExp flags
  * make a pattern, so a plain path like "/app/home" or "/portal/dashboard" stays a path.
@@ -598,7 +605,7 @@ export class IdentityVault {
       }
       if (await this.findField(page, this.passwordCandidates(page, r.def.fields?.password), 1500).then(Boolean)) await this.enterCredentials(page, role, r);
       else if (await this.findField(page, this.usernameCandidates(page, r.def.fields?.username), 1500).then(Boolean)) await this.enterCredentials(page, role, r);
-      const approve = await this.findField(page, [page.getByRole('button', { name: /approve|allow|authori[sz]e|confirm|continue|yes/i })], 3000);
+      const approve = await this.findField(page, [page.getByRole('button', { name: /approve|allow|authori[sz]e|confirm|continue|yes/i })], 3000, false);
       if (approve) await approve.click();
       await this.failIfError(page, role);
       this.logger.info(`Role ${role}: approved device code ${info.userCode} in the browser`);
@@ -780,8 +787,9 @@ export class IdentityVault {
   }
 
   private async failIfError(page: Page, role: string): Promise<void> {
-    // Generic alerts, and the error text of identity providers' forms (Keycloak: #input-error, PatternFly pf-m-error).
-    const alerts = page.locator('[role=alert], .error, .alert-danger, [aria-invalid=true] ~ .error-message, [id^="input-error"], .pf-m-error, .kc-feedback-text');
+    // Generic alerts, the error text of identity providers' forms (Keycloak: #input-error, PatternFly pf-m-error) and
+    // error messages marked by a test id (saucedemo: <h3 data-test="error">).
+    const alerts = page.locator('[role=alert], .error, .alert-danger, [aria-invalid=true] ~ .error-message, [id^="input-error"], .pf-m-error, .kc-feedback-text, [data-test=error], [data-testid=error]');
     const n = Math.min(await alerts.count().catch(() => 0), 10);
     for (let i = 0; i < n; i++) {
       const alert = alerts.nth(i);
@@ -851,13 +859,22 @@ export class IdentityVault {
     }
   }
 
-  private async findField(page: Page, candidates: Locator[], timeoutMs: number): Promise<Locator | undefined> {
+  /**
+   * The first visible match of the first candidate that has one. A field to type into (`fillable`, the default) is
+   * a text input, a textarea or an editable element: a label candidate also names other elements (saucedemo's
+   * `<form aria-label="Login">` matches "login" before its Username field does), which are skipped.
+   */
+  private async findField(page: Page, candidates: Locator[], timeoutMs: number, fillable = true): Promise<Locator | undefined> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       for (const c of candidates) {
-        const first = c.first();
         try {
-          if ((await first.count()) > 0 && (await first.isVisible())) return first;
+          const n = Math.min(await c.count(), fillable ? 10 : 1);
+          for (let i = 0; i < n; i++) {
+            const el = c.nth(i);
+            if (!(await el.isVisible())) continue;
+            if (!fillable || (await el.evaluate(TAKES_TEXT).catch(() => false))) return el;
+          }
         } catch {
           /* navigation in progress; poll again */
         }

@@ -6,6 +6,7 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Found by a consumer project on 0.1.0-beta.2, fixed in 0.1.0-beta.3
 
+- A role's sign-in on saucedemo needed explicit `fields:` (`locator.fill: the element takes no typed text`): its `<form aria-label="Login">` matched the username label pattern (`login`) before the Username input did. Sign-in fields are now the first visible match that takes typed text (an input that is not a button or a box, a textarea, an editable element). Error messages marked `data-test="error"` / `data-testid="error"` are recognised as a refused sign-in. Proven on https://www.saucedemo.com without `fields:`.
 - `eztest init --template enterprise` and `--app`:
   - the "Next" lines had no space before the comment for a long application name (`npm run validate:practice-sites# every journey ...`);
   - npm's placeholder `test` script (`echo "Error: no test specified" && exit 1`, from `npm init`) was kept; it is replaced now;

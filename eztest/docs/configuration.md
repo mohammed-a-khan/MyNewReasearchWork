@@ -496,7 +496,8 @@ identity:
   identity provider, landing on the login page or seeing a password field means the session ended (sign-out,
   a gateway time-out). One worker then follows the redirect: when the identity provider still knows the user
   (single sign-on), the renewed gateway session is cached for the others; otherwise the role signs in again.
-- **The form.** The username, password and one-time code fields are found as on any login page; the submit
+- **The form.** The username, password and one-time code fields are found as on any login page (only elements
+  that take typed text count: a `<form aria-label="Login">` is not the username field); the submit
   button pressed is the one of the form that holds the field just filled, never a "Restart login", "Forgot
   password?" or "Try another way" button next to it. A one-time code already typed in the current 30-second
   window (by any EZTest process on the machine) is never typed again: the step waits for the next window,
