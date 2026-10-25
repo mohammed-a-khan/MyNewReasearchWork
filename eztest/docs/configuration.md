@@ -325,6 +325,8 @@ projects:
 7. `EZTEST_*` variables
 8. command-line flags
 
+The [EZTest Project Guide](project-guide.md#the-project-layout) builds a multi-application project this way: one project per application (`apps/<app>/` with its own `journeysDir`, `elements.dir`, `bdd.steps`, `db.queries.dir`, roles and `identity.sessionDir`), `config/<env>.yaml` for what every application shares in an environment and `config/<app>/<env>.yaml` for the application's host, database and accounts. `eztest init --template enterprise` writes it, and `eztest init --app <name>` adds an application.
+
 Every command that reads configuration takes `--project`: run, validate, monitor, ado, import --verify, d365, salesforce, doctor and studio. EZTest never interpolates the overlays of other projects, so a project may reference variables that only its own runs set. In the Studio, the **Environments** page has a project switcher next to the environment switcher. It shows each effective value with the layer that set it.
 
 ## Browser, evidence and waits

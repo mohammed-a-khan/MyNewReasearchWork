@@ -5,6 +5,7 @@
 ```bash
 npm install @eztech/eztest   # one package, everything included
 npx eztest init                       # config, example journey, readiness policy
+                                      # (or --template enterprise: the EZTest Project Guide layout)
 npx eztest run                        # run, heal, triage, report, decide
 ```
 
@@ -66,18 +67,27 @@ Compare document invoice to the order using invoice-vs-order
 
 `Expect …` lines attach to the step before them as **post-conditions**, the outcome the step must produce. Post-conditions are what make healing verifiable. See [docs/ez-language.md](docs/ez-language.md) for all 374 action phrasings and 74 expectation phrasings (plus 73 packaged-app phrasings for SAP Fiori, ServiceNow, Workday, Oracle and Power Apps, which are active when their config block is present), including multi-actor journeys, relative and scoped targets ("the Edit button in the row containing Acme"), browser clock control, accessible-name and aria snapshot assertions, native mobile gestures and device operations, tabs and popups, frames, dialogs, keyboard and mouse gestures, network mocking, browser state, API/GraphQL/SOAP/WebSocket, databases, email/SMS, variables and flow control (If, loops, Retry, Try, sub-journeys, Examples tables).
 
+## A project the EZTest way
+
+The [EZTest Project Guide](docs/project-guide.md) is the standard for building a test project: one folder per application under test (journeys, features and steps, code journeys, the element repository, screen models, helpers, data per environment, named queries), config layers per environment, naming conventions, when to write `.ez`, Gherkin or TypeScript, and the rules a suite follows, each with its reason. `eztest init --template enterprise` writes the layout with a working sample of each style, and `eztest lint` enforces the rules in the pull request.
+
+```bash
+npx eztest init --template enterprise --app web   # apps/web/, config/<env>.yaml, .env.example, pipelines/, npm scripts
+npm run validate && npm run lint && npm run test:sit
+```
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `eztest studio` | **EZTest Studio**: a local, offline IDE-style web UI. It has a journey editor with autocomplete, inline diagnostics and quick fixes, a visual step view, a command palette, and live runs with cancellation. It also covers results with a screenshot gallery, a dashboard, a Problems panel, recording, importing and flaky trends. See [docs/studio.md](docs/studio.md) |
 | `eztest lsp --stdio` | The `.ez` **language server** for VS Code and other editors. It provides diagnostics with the closest phrasing, quick fixes and completion. It also gives hover docs, go to definition for `Run journey`, named queries, roles and variables, an outline, formatting and rename. The **VS Code extension** in `editors/vscode` adds highlighting, a Test Explorer with run and debug, and opening Studio. See [docs/vscode.md](docs/vscode.md) |
-| `eztest init` | Scaffold `eztest.config.yaml`, an example journey and a readiness policy |
+| `eztest init [--template basic\|enterprise] [--app <name>]` | Scaffold a project: `basic` (default) writes `eztest.config.yaml`, an example journey and a readiness policy; `enterprise` writes the layout of the [EZTest Project Guide](docs/project-guide.md) with a working sample of each style, config layers per environment, `.env.example`, an Azure DevOps pipeline and npm scripts; `--app` adds an application to an existing project. Existing files are never overwritten |
 | `eztest run [paths] [-t tags] [--lens a11y] [--headed] [-w 4]` | Run journeys, heal, analyze, write reports (one offline HTML report, PDF, Excel workbook, e-mail summary, JSON, JUnit, CSV; [docs/reports.md](docs/reports.md)); exit code 0 only if nothing failed |
 | `eztest record <url> [-o journeys/x.ez] [--verify]` | Record a journey by using the app (Alt+Click to assert text): clicks, typing, keys, hovers, drag and drop, frames, tabs and popups, dialogs and downloads; writes plain-English `.ez` and can replay it to prove it works ([docs/recording.md](docs/recording.md)) |
 | `eztest import <files> [-o journeys/imported] [--verify]` | Migrate tests from Cucumber, Playwright, Selenium (Java/C#/Python), Excel/CSV manual test cases, D365 RSAT Task Recorder, OpenAPI 3.x/Swagger 2 specs (`--kind openapi --role <role>`) Postman v2 collections (`--postman-env env.json`) and WSDL 1.1/2.0 SOAP services (`eztest import wsdl <file>`: one step per operation, request skeletons, the `soap.services` config; [docs/soap.md](docs/soap.md)); importer plugins add more formats (`--from <name>`, e.g. for a private framework; see [docs/plugins.md](docs/plugins.md#importer-plugins)); `--verify` replays them; nothing is dropped silently (TODO lines, coverage report and source-suite diagnostics) |
-| `eztest validate [paths]` | Parse journeys and report errors with line numbers and suggestions |
-| `eztest lint [paths]` | Find hard waits, absolute or positional XPath, text-only locators, unchecked state changes and plain-text secrets in journeys and code ([docs/reliability.md](docs/reliability.md)) |
+| `eztest validate [paths]` | Parse journeys and features and report errors with line numbers and suggestions; bind every Gherkin step; check Examples sources and named queries (default: `journeysDir` and the feature folders) |
+| `eztest lint [paths] [--format text\|json\|sarif\|junit]` | Enforce the [EZTest Project Guide](docs/project-guide.md#lint-rules) in journeys, features, code, test data, config layers and `.env.example`: hard waits, CSS/XPath-only and repeated selectors, unchecked actions, plain-text secrets, missing ids and tags, duplicate ids, undefined or ambiguous Gherkin steps, undeclared dependencies, hard-coded hosts, files outside the layout; rules configurable under `lint:` ([docs/reliability.md](docs/reliability.md)) |
 | `eztest queries list\|check` | The named-query catalogue (`db.queries`): list queries with their connection and parameters; prepare every query against the live database without executing writes ([docs/databases.md](docs/databases.md)) |
 | `eztest elements list\|unused\|duplicates\|import-screens` | The shared element repository: elements with their locators and usages, unused and duplicate elements, elements from TypeScript screens ([docs/elements.md](docs/elements.md)) |
 | `eztest coverage summary\|ui\|a11y` | One view of UI, requirement, API, risk, change and manual coverage with the gaps; the UI coverage map; accessibility trends across runs ([docs/coverage.md](docs/coverage.md)) |
@@ -299,4 +309,4 @@ The tests run on EZTest's own test runner, the testkit in `tools/testkit` (a dev
 
 EZTest is original code. The open-source packages it builds on, and their licenses, are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). None of them is a testing tool, and neither is any development dependency: EZTest's own tests run on its own runner (`tools/testkit`).
 
-More: [Configuration](docs/configuration.md) · [Documents](docs/documents.md) · [SOAP](docs/soap.md) · [Databases](docs/databases.md) · [The .ez language](docs/ez-language.md) · [Accessibility](docs/accessibility.md) · [Architecture](docs/architecture.md) · [Studio](docs/studio.md) · [Code journeys (SDK)](docs/sdk.md) · [Multi-actor journeys](docs/multi-actor.md) · [Browser driver, cross-browser runs and remote browsers](docs/browser-driver.md) · [Mobile](docs/mobile.md) · [VS Code and the language server](docs/vscode.md) · [Components](docs/components.md) · [Desktop and legacy apps](docs/desktop-and-legacy.md) · [Packaged apps: SAP Fiori](docs/apps/sap.md), [ServiceNow](docs/apps/servicenow.md), [Workday](docs/apps/workday.md), [Oracle](docs/apps/oracle.md), [Power Apps](docs/apps/powerapps.md) · [Azure DevOps](docs/azure-devops.md) · [Git](docs/git.md) · [Journeys from sessions](docs/sessions.md) · [API security scans](docs/api-security.md)
+More: [Project Guide](docs/project-guide.md) · [Configuration](docs/configuration.md) · [Documents](docs/documents.md) · [SOAP](docs/soap.md) · [Databases](docs/databases.md) · [The .ez language](docs/ez-language.md) · [Accessibility](docs/accessibility.md) · [Architecture](docs/architecture.md) · [Studio](docs/studio.md) · [Code journeys (SDK)](docs/sdk.md) · [Multi-actor journeys](docs/multi-actor.md) · [Browser driver, cross-browser runs and remote browsers](docs/browser-driver.md) · [Mobile](docs/mobile.md) · [VS Code and the language server](docs/vscode.md) · [Components](docs/components.md) · [Desktop and legacy apps](docs/desktop-and-legacy.md) · [Packaged apps: SAP Fiori](docs/apps/sap.md), [ServiceNow](docs/apps/servicenow.md), [Workday](docs/apps/workday.md), [Oracle](docs/apps/oracle.md), [Power Apps](docs/apps/powerapps.md) · [Azure DevOps](docs/azure-devops.md) · [Git](docs/git.md) · [Journeys from sessions](docs/sessions.md) · [API security scans](docs/api-security.md)

@@ -121,14 +121,20 @@ page shows it under the state badge (`cause: overlay (67% of 3)`).
 ## 2. Lint: `eztest lint`
 
 ```
-eztest lint [paths...] [--format text|json|sarif] [-o file] [--max-warnings N] [--translated] [--rule name=severity]
+eztest lint [paths...] [--format text|json|sarif|junit] [-o file] [--max-warnings N] [--translated] [--rule name=severity] [--project app]
 ```
 
-Lints journeys (`.ez`, `.yaml`, `.json`) and imported code (`.ts`, `.js`,
-`.java`, `.py`, `.cs`, `.kt`). Every finding has a file, line, rule, message and
-a fix suggestion. Exit code 1 on errors (or more warnings than `--max-warnings`),
-so it runs in CI; `--format sarif -o lint.sarif` feeds GitHub / Azure DevOps code
-scanning.
+Lints journeys (`.ez`, `.yaml`, `.json`), Gherkin features, code (`.ts`, `.js`,
+`.java`, `.py`, `.cs`, `.kt`), test data (CSV, TSV, XLSX, JSON), the config
+layers and `.env.example`. Every finding has a file, line, rule, message, a fix
+suggestion and the section of the [EZTest Project Guide](project-guide.md#lint-rules)
+that explains the rule. Exit code 1 on errors (or more warnings than
+`--max-warnings` / `lint.maxWarnings`), so it runs in CI; `--format sarif -o
+lint.sarif` feeds GitHub / Azure DevOps code scanning and `--format junit` gives
+the CI's test view one test case per file. Without paths it lints the journeys
+folder, the feature folders, and `shared/`, `config/`, `eztest.config.*` and
+`.env.example` when they exist. Step definitions and code are read as text,
+never executed.
 
 | Rule | Default | Finds |
 |---|---|---|
@@ -136,10 +142,19 @@ scanning.
 | `absolute-xpath` | warning | `/html/body/div[2]/...` |
 | `positional-xpath` | warning | `[3]`, `position()`, `last()` |
 | `text-only-locator` | warning | targets found only by visible text, when the UI is translated (`--translated`, `lint.translatedUi`, or a journey with `Locale:`) |
-| `missing-postcondition` | warning | Save/Submit/Delete/Pay... clicks, non-GET API calls and INSERT/UPDATE/DELETE with nothing checked after them |
-| `plaintext-secret` | error | secret-named variables and fields with literal values, typed passwords, JWTs, AWS/GitHub/Slack tokens, private keys, credentials in URLs (values are redacted in the report) |
+| `raw-selector` | warning | targets found only by CSS or XPath, with no name, label or test id |
+| `repeated-selector` | warning | one raw selector (`css=`, `xpath=`, `testid=`) written in several steps instead of one element entry |
+| `missing-postcondition` | warning | Save/Submit/Delete/Pay/Sign in/Search... clicks, link clicks, Enter in a field, non-GET API calls and INSERT/UPDATE/DELETE with nothing checked after them |
+| `no-assertion` | warning | a journey that checks nothing |
+| `plaintext-secret` | error | secret-named variables, fields, data columns and config keys with literal values, typed passwords, JWTs, AWS/GitHub/Slack tokens, private keys, credentials in URLs, values in `.env.example` (values are redacted in the report) |
 | `weak-locator` | info | targets whose best candidate scores below 40 |
 | `unsafe-xpath-quotes` | error | `\'` "escaping" (not valid XPath 1.0) and values pasted inside XPath quotes in code |
+| `missing-tags`, `missing-id` | warning | journeys, scenarios and code journeys without tags or an explicit id |
+| `duplicate-id` | error | two journeys with one id, across folders and styles |
+| `undefined-step`, `ambiguous-step` | error | Gherkin steps that no definition (and no EZTest phrasing) matches, or that several match; each project's features against that project's `bdd.steps` |
+| `undeclared-dependency` | warning | a journey using `${value}` that only another journey captures, without `Depends on:` |
+| `hardcoded-host` | warning | absolute URLs in steps, `Base URL:` headers, feature steps and `ui.open()` / `api.*()` calls |
+| `outside-layout` | warning | test files outside the [project layout](project-guide.md#the-project-layout), in projects with an `apps/` folder |
 
 Config:
 
@@ -147,7 +162,7 @@ Config:
 lint:
   translatedUi: true
   maxWarnings: 0
-  rules: { hard-wait: error, weak-locator: off }
+  rules: { hard-wait: error, weak-locator: off, outside-layout: off }
 ```
 
 The Studio editor shows the same findings as warnings while you type

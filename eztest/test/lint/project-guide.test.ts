@@ -5,6 +5,7 @@
  * --rule, and --format junit gives CI a test case per file.
  */
 import { afterAll, describe, expect, it } from '../support/testkit.js';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -200,6 +201,45 @@ describe('project guide lint rules: across files', () => {
     const flat = await project({ 'journeys/old.ez': GOOD().replace('web-orders-save', 'old') });
     expect(by(await lintPaths(['journeys'], { cwd: flat }), 'outside-layout')).toEqual([]);
     expect(by(await lintPaths(['journeys'], { cwd: flat, layout: true }), 'outside-layout')).toEqual(['journeys/old.ez']);
+  });
+});
+
+describe('the guide matches the code', () => {
+  const ROOT = join(import.meta.dirname, '..', '..');
+  const guide = readFileSync(join(ROOT, 'docs', 'project-guide.md'), 'utf8');
+  const slug = (h: string) => h.trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
+  const anchors = new Set(guide.split('\n').filter((l) => /^#{1,6} /.test(l)).map((l) => slug(l.replace(/^#+ /, ''))));
+
+  it('every rule\'s section exists, the lint table lists every rule with its default severity, and the guide\'s links resolve', () => {
+    for (const [id, r] of Object.entries(LINT_RULES)) {
+      expect(anchors.has(r.doc.split('#')[1]), `${id} -> ${r.doc}`).toBe(true);
+      expect(guide, id).toMatch(new RegExp(`^\\| \`${id}\` \\| ${r.severity} \\|`, 'm'));
+    }
+    for (const m of guide.matchAll(/\]\(([^)#\s]*)(?:#([^)\s]+))?\)/g)) {
+      const [, file, anchor] = m;
+      if (/^https?:/.test(file)) continue;
+      if (file) expect(existsSync(join(ROOT, 'docs', file)), file).toBe(true);
+      else expect(anchors.has(anchor!), `#${anchor}`).toBe(true);
+    }
+  });
+
+  it('the scenario shown in three styles is the one eztest init --template enterprise writes', async () => {
+    const dir = await project({});
+    const { initProject } = await import('../../src/cli/init.js');
+    await initProject(dir, { template: 'enterprise' });
+    const block = (after: string, lang: string) => {
+      const at = guide.indexOf(after);
+      const start = guide.indexOf('```' + lang + '\n', at) + lang.length + 4;
+      return guide.slice(start, guide.indexOf('```', start));
+    };
+    const body = (rel: string) => readFileSync(join(dir, rel), 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    expect(block('`apps/web/journeys/orders/place-order.ez`:', 'text')).toBe(body('apps/web/journeys/orders/place-order.ez'));
+    expect(block('`apps/web/features/orders/place-order.feature`', 'gherkin')).toBe(body('apps/web/features/orders/place-order.feature'));
+    const steps = readFileSync(join(dir, 'apps/web/steps/orders.steps.ts'), 'utf8');
+    for (const def of block('`apps/web/features/orders/place-order.feature`', 'ts').split('\n\n')) expect(steps).toContain(def.trim());
+    const code = readFileSync(join(dir, 'apps/web/code/orders/order-from-api.journey.ts'), 'utf8').replace(/\s+/g, ' ');
+    expect(code).toContain(block('`apps/web/code/orders/order-from-api.journey.ts`', 'ts').replace(/\s+/g, ' ').trim().slice(0, 60));
+    for (const line of block('`apps/web/code/orders/order-from-api.journey.ts`', 'ts').split('\n').slice(3)) expect(code).toContain(line.replace(/\s+/g, ' ').trim());
   });
 });
 
