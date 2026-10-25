@@ -265,7 +265,7 @@ describe('Studio UI (Chromium)', () => {
     await page.keyboard.press('Escape');
   });
 
-  it('runs a journey with a live step timeline and the readiness decision', async () => {
+  it('runs a journey with a live step timeline and its summary, without a verdict', async () => {
     await go('Run');
     await page.getByRole('checkbox', { name: /Sales rep signs in with MFA/ }).check();
     await page.getByRole('button', { name: 'Start run' }).click();
@@ -273,29 +273,29 @@ describe('Studio UI (Chromium)', () => {
     await expect.poll(() => page.locator('#run-status').getAttribute('data-state'), { timeout: 120_000 }).toBe('complete');
     const statuses = await page.locator('.jt-step').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-status')));
     expect(statuses).toEqual(['passed', 'passed']);
-    expect(await page.locator('#readiness').textContent()).toMatch(/GO/);
+    expect(await page.locator('#run-summary').textContent()).not.toMatch(/readiness|NO GO|GO WITH/i);
     expect(await page.getByRole('progressbar', { name: 'Run progress' }).getAttribute('aria-valuenow')).toBe('100');
     await checkA11y(page, 'run');
   });
 
-  it('shows the run in Results with a screenshot gallery, lightbox and step deep links', async () => {
+  it('shows the run in Results on its report, with screenshots in a lightbox and step deep links', async () => {
     await go('Results');
     await expect.poll(() => page.locator('#run-detail-title').isVisible()).toBe(true);
     expect(await page.locator('#run-detail').textContent()).toMatch(/Evidence verified/);
-    expect(await page.getByRole('link', { name: 'Open the full HTML report' }).getAttribute('href')).toMatch(/\/runs\/run-.+\/report\.html$/);
+    expect(await page.getByRole('link', { name: 'Open in a new tab' }).getAttribute('href')).toMatch(/\/runs\/run-.+\/report\.html$/);
     await checkA11y(page, 'results');
-    await page.getByRole('tab', { name: /Screenshots/ }).click();
-    const thumbs = page.locator('.gallery .thumb');
+    // The report in place: the test's steps carry their screenshots, which open in the report's lightbox.
+    const frame = page.frameLocator('#run-report-frame');
+    await frame.locator('#tab-tests').click();
+    await frame.locator('#vinner .row[data-id]').first().click();
+    const thumbs = frame.locator('#detail .step-thumb');
     await expect.poll(() => thumbs.count()).toBe(2);
-    await expect.poll(() => thumbs.first().locator('img').evaluate((i) => (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0)).toBe(true);
     await thumbs.first().click();
-    const dialog = page.getByRole('dialog', { name: 'Screenshot' });
-    await expect.poll(() => dialog.locator('.lightbox-img').evaluate((i) => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-    expect(await dialog.locator('.lightbox-caption').textContent()).toMatch(/Log in as sales-rep/);
-    await page.keyboard.press('ArrowRight');
-    await expect.poll(() => dialog.locator('.lightbox-caption').textContent()).toMatch(/Open "\/dashboard"/);
-    await checkA11y(page, 'lightbox');
-    await page.keyboard.press('Escape');
+    await expect.poll(() => frame.locator('#lb-img').evaluate((i) => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    expect(await frame.locator('#lb-cap').textContent()).toMatch(/Log in as sales-rep/);
+    await frame.locator('#lb-next').click();
+    await expect.poll(() => frame.locator('#lb-cap').textContent()).toMatch(/Open "\/dashboard"/);
+    await frame.locator('#lb-close').click();
 
     // Deep link to a step of the run.
     const runId = (await page.locator('#run-detail-title').textContent())!.replace('Run ', '');

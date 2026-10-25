@@ -1,5 +1,5 @@
 /**
- * Home dashboard: last run, pass/heal/fail trend, release readiness, journey
+ * Home dashboard: last run, pass/heal/fail trend, journey
  * health, flakiest journeys and recent heals, plus quick actions. Refreshes
  * when a run finishes or problems change.
  */
@@ -19,7 +19,6 @@ interface Dashboard {
   lastRun?: RunListItem;
   runs: number;
   trend: TrendPoint[];
-  readiness?: { runId: string; decision: string; score: number; rationale: string[] };
   flaky: Array<{ journeyId: string; state: string; failRate: number; flipRate: number; healedRate: number; samples: number; sequence: string }>;
   heals: Array<{ runId: string; startedAt?: string; journeyName?: string; intent?: string; tier?: string; confidence?: number; healed?: { strategy: string; value: string } }>;
   journeys: { total: number; broken: number; steps: number };
@@ -68,20 +67,6 @@ export function registerDashboardPage(): void {
                 )
               : emptyState('No runs yet', 'Run your journeys to see results here.', button('Run journeys', { kind: 'primary', icon: 'run', onclick: () => navigate(link('run')) })),
             { id: 'dash-last', actions: lr ? h('a', { class: 'link-btn', href: link('runs'), text: `All ${plural(d.runs, 'run')}` }) : undefined },
-          ),
-        );
-        grid.appendChild(
-          card(
-            'Release readiness',
-            d.readiness
-              ? h(
-                  'div',
-                  { class: 'stack' },
-                  h('p', { class: 'readiness-big' }, badge(d.readiness.decision), h('span', { class: 'muted', text: ` score ${d.readiness.score}` })),
-                  d.readiness.rationale.length ? h('ul', { class: 'bullets' }, d.readiness.rationale.slice(0, 4).map((r) => h('li', { text: r }))) : null,
-                )
-              : emptyState('No decision yet', 'Add a readiness policy (readiness.policyPath) to get GO / NO GO decisions after each run.'),
-            { id: 'dash-readiness' },
           ),
         );
         grid.appendChild(

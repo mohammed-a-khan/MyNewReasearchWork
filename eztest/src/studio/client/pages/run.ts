@@ -265,9 +265,7 @@ export function registerRunPage(): void {
       const renderSummary = (r: Record<string, unknown>) => {
         clear(summary);
         const s = (r.summary ?? {}) as Record<string, number>;
-        const readiness = r.readiness as { decision: string; score: number; rationale: string[] } | undefined;
         const perBrowser = r.browsers as Record<string, { total: number; passed: number; passedHealed: number; failed: number; errors: number; skipped: number; version?: string }> | undefined;
-        const readyByBrowser = r.readinessByBrowser as Record<string, { decision: string; score: number }> | undefined;
         const triage = (r.triage as Array<{ journeyName?: string; journeyId: string; category: string; confidence: number; status: string; reasons: string[] }>) ?? [];
         summary.appendChild(
           card(
@@ -276,11 +274,9 @@ export function registerRunPage(): void {
               'div',
               null,
               h('div', { class: 'stats' }, stat(s.total ?? '-', 'Journeys'), stat(s.passed ?? '-', 'Passed', 'ok'), stat(s.passedHealed ?? '-', 'Healed', 'heal'), stat(s.failed ?? '-', 'Failed', 'bad'), stat(s.skipped ?? '-', 'Skipped'), stat(s.errors ?? '-', 'Errors', 'bad')),
-              readiness
-                ? h('div', { class: 'readiness', id: 'readiness' }, h('span', { text: 'Release readiness: ' }), badge(readiness.decision), h('span', { class: 'muted', text: ` score ${readiness.score}` }), readiness.rationale?.length ? h('ul', { class: 'bullets' }, readiness.rationale.slice(0, 6).map((t) => h('li', { text: t }))) : null)
-                : h('p', { class: 'muted', text: r.cancelled ? 'The run was cancelled, so it was not analyzed.' : 'No readiness policy configured, so no release decision was made.' }),
+              r.cancelled ? h('p', { class: 'muted', text: 'The run was cancelled, so it was not analyzed.' }) : null,
               perBrowser
-                ? h('div', { id: 'run-browser-summary' }, h('h3', { class: 'h3', text: 'Per browser' }), h('ul', { class: 'bullets' }, Object.entries(perBrowser).map(([b, x]) => h('li', null, h('strong', { text: b }), `${x.version ? ` ${x.version}` : ''}: ${x.passed + x.passedHealed}/${x.total} passed, ${x.failed + x.errors} failed`, readyByBrowser?.[b] ? h('span', null, ' · readiness ', badge(readyByBrowser[b].decision)) : null))))
+                ? h('div', { id: 'run-browser-summary' }, h('h3', { class: 'h3', text: 'Per browser' }), h('ul', { class: 'bullets' }, Object.entries(perBrowser).map(([b, x]) => h('li', null, h('strong', { text: b }), `${x.version ? ` ${x.version}` : ''}: ${x.passed + x.passedHealed}/${x.total} passed, ${x.failed + x.errors} failed`))))
                 : null,
               triage.length ? h('div', null, h('h3', { class: 'h3', text: 'Triage' }), h('ul', { class: 'bullets' }, triage.map((v) => h('li', null, h('strong', { text: v.journeyName ?? v.journeyId }), `: ${v.category} (${pct(v.confidence)})${v.status === 'needs-human' ? ', needs human review' : ''}${v.reasons[0] ? ` – ${v.reasons[0]}` : ''}`)))) : null,
               ((r.warnings as string[]) ?? []).map((w) => h('p', { class: 'warn-text', text: `Warning: ${w}` })),

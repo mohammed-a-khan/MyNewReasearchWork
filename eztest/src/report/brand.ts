@@ -366,7 +366,7 @@ export async function loadBrand(settings: BrandSettings, o: { cwd: string; defau
   const fontSrc = await asset('font', parsed.font?.file);
   const colors = { ...(settings.brandColor && !parsed.colors?.primary ? { primary: settings.brandColor } : {}), ...(parsed.colors ?? {}) };
   const brand = normalizeBrand({
-    name: settings.name ?? parsed.company ?? o.defaultName,
+    name: settings.name ?? o.defaultName,
     ...(parsed.company ? { company: parsed.company } : {}),
     ...(parsed.subtitle ? { subtitle: parsed.subtitle } : {}),
     ...(parsed.preparedBy ? { preparedBy: parsed.preparedBy } : {}),

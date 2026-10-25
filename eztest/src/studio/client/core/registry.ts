@@ -175,7 +175,8 @@ export interface RunDetail {
 }
 
 export interface ReportSummary {
-  verdict: { decision: string; score?: number; source: string };
+  /** Only when report.readiness is on. */
+  verdict?: { decision: string; score?: number; source: string };
   kpis: { total: number; passed: number; failed: number; errors: number; flaky: number; healed: number; skipped: number; passRate: number; durationMs: number };
   previous?: { runId: string; kpis: ReportSummary['kpis'] };
   categories: Record<string, number>;

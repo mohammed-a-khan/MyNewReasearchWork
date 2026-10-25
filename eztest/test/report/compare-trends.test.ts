@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildProgram } from '../../src/cli/index.js';
 import { chromium, type Browser } from '../../src/browser/index.js';
-import { buildTrends, writeReports, recordIntegration } from '../../src/report/index.js';
+import { buildTrends, renderTrendsHtml, writeReports, recordIntegration } from '../../src/report/index.js';
 import { makeRichFixture, type RichFixture } from './rich-fixture.js';
 import { expectNoSeriousA11y } from '../a11y/assert.js';
 
@@ -59,7 +59,7 @@ describe('eztest report compare', () => {
 });
 
 describe('eztest report trends', () => {
-  it('builds the portfolio over history: pass-rate trend, readiness history, flakiest, slowest and most failing tests, heat map by day and suite', async () => {
+  it('builds the portfolio over history: pass-rate trend, flakiest, slowest and most failing tests, heat map by day and suite', async () => {
     const t = buildTrends(rich.history, { suiteOf: (id) => id.split('-')[0] });
     expect(t.totals.runs).toBe(15);
     expect(t.runs[t.runs.length - 1]).toMatchObject({ runId: 'run-2026-10-22-0800', readiness: 'NO_GO' });
@@ -71,7 +71,9 @@ describe('eztest report trends', () => {
     expect(r.out).toMatch(/^15 runs, 20 tests, average pass rate \d+\.\d%: .*trends\.html$/);
     const html = await readFile(join(rich.root, 'trends.html'), 'utf8');
     expect(html).toContain('Failure rate by day and suite');
-    expect(html).toContain('Readiness history');
+    // No verdict by default; the readiness history only with report.readiness.
+    expect(html).not.toMatch(/Readiness|NO GO/);
+    expect(renderTrendsHtml(t, { readiness: true })).toContain('Readiness policy history');
     const page = await browser.newPage();
     await page.goto(pathToFileURL(join(rich.root, 'trends.html')).href);
     await expectNoSeriousA11y(page, 'trends');

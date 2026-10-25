@@ -67,7 +67,6 @@ export function registerQualityCenter(): void {
           { class: 'q-links' },
           row('heal', 'Heal review', pending ? `${plural(pending, 'verified heal')} from this run to accept or reject` : s.passedHealed ? 'Heals from this run were already reviewed' : 'No heals in this run', `${link('quality', 'heals')}?run=${encodeURIComponent(id)}`, 'Review heals'),
           row('shield', 'Triage board', s.failed + s.errors ? `${plural(s.failed + s.errors, 'failure')} clustered by signature` : 'No failures', link('quality', 'triage', id), 'Open triage'),
-          row('check', 'Release readiness', 'Decision, gates, what would make it GO, sign-off', link('quality', 'readiness', id), 'Open readiness'),
           row('convert', 'Compare', 'Changes against the previous run', `${link('quality', 'compare')}?b=${encodeURIComponent(id)}`, 'Compare'),
         ),
       );
@@ -98,7 +97,6 @@ export function registerQualityCenter(): void {
             { class: 'row wrap' },
             button('Review heals', { small: true, icon: 'heal', kind: s?.pendingHeals ? 'primary' : 'default', onclick: go('heals') }),
             button('Triage', { small: true, icon: 'shield', onclick: go('triage') }),
-            button('Readiness', { small: true, icon: 'check', onclick: go('readiness') }),
             button('Flaky', { small: true, icon: 'activity', onclick: go('flaky') }),
           ),
         ),
