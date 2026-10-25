@@ -2,7 +2,7 @@
  * Sortable data tables (the-internet.herokuapp.com/tables): read every row, compute with the values, sort by a
  * column and check the order, and compare what one table shows with the other.
  */
-import { expect, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 const money = (s: string) => Number(s.replace(/[^0-9.]/g, ''));
 

@@ -2,7 +2,7 @@
  * demoqa.com web tables from code: add people from a JSON file, read the whole table back, compute with it and
  * compare with the file; then read a value in a new window and check it on the main page.
  */
-import { expect, files, inRow, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, files, inRow, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 interface Person { first: string; last: string; email: string; age: string; salary: string; department: string }
 

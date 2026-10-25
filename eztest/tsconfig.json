@@ -4,9 +4,9 @@
     "noEmit": true,
     "rootDir": ".",
     "paths": {
-      "@eztech/eztest": ["./src/index.ts"],
-      "@eztech/eztest/components": ["./src/runner/components/index.ts"],
-      "@eztech/eztest/*": ["./src/*/index.ts"],
+      "@eztech.com/eztest": ["./src/index.ts"],
+      "@eztech.com/eztest/components": ["./src/runner/components/index.ts"],
+      "@eztech.com/eztest/*": ["./src/*/index.ts"],
       "eztest/sdk": ["./src/sdk/index.ts"],
       "eztest/bdd": ["./src/bdd/index.ts"],
       "eztest/browser": ["./src/browser/index.ts"]

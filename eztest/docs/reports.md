@@ -134,7 +134,7 @@ publishers:
 
 ## report.json
 
-`report.json` has `format: "eztest-report"` and `version: 2` (`$schema: "eztest:report/2"`; print the schema with `eztest report schema`, or import `REPORT_JSON_SCHEMA` from `@eztech/eztest/report`):
+`report.json` has `format: "eztest-report"` and `version: 2` (`$schema: "eztest:report/2"`; print the schema with `eztest report schema`, or import `REPORT_JSON_SCHEMA` from `@eztech.com/eztest/report`):
 
 - `run`: the run result (journeys, steps, evidence ids, environment), as in version 1;
 - `insights`: triage, readiness, flaky scores, API coverage and heal proposals, as in version 1;

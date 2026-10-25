@@ -4,7 +4,7 @@
  *   Generate a UK IBAN as iban                      a valid (mod-97) GB IBAN, unique per run and worker
  *   Read the premium breakdown into premium         the MyCover "Premium breakdown" table as numbers
  *
- * A project that installs @eztech/eztest from npm would write `import { definePlugin } from '@eztech/eztest/plugins'`;
+ * A project that installs @eztech.com/eztest from npm would write `import { definePlugin } from '@eztech.com/eztest/plugins'`;
  * definePlugin only adds typing, so this in-repo example exports the plain object.
  */
 import { randomInt } from 'node:crypto';

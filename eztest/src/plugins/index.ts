@@ -1,7 +1,7 @@
 /**
- * `@eztech/eztest/plugins`: the stable plugin API. See docs/plugins.md.
+ * `@eztech.com/eztest/plugins`: the stable plugin API. See docs/plugins.md.
  *
- *   import { definePlugin } from '@eztech/eztest/plugins';
+ *   import { definePlugin } from '@eztech.com/eztest/plugins';
  *   export default definePlugin({ name: '@acme/eztest-sap', apiVersion: 1, setup(api) { ... } });
  */
 export { definePlugin, PLUGIN_API_VERSION, compilePhrase, type EzPlugin, type PluginApi, type CustomStepDef } from './api.js';

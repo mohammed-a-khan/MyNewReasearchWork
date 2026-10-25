@@ -1,4 +1,4 @@
-# Native BDD: Gherkin features and step definitions (`@eztech/eztest/bdd`)
+# Native BDD: Gherkin features and step definitions (`@eztech.com/eztest/bdd`)
 
 EZTest runs Gherkin `.feature` files as they are. Teams keep their features and
 write step definitions in TypeScript. Steps with no definition can still run when
@@ -28,7 +28,7 @@ Feature: Ordering
 
 ```ts
 // steps/orders.steps.ts
-import { Given, When, Then } from '@eztech/eztest/bdd';
+import { Given, When, Then } from '@eztech.com/eztest/bdd';
 
 When('I order {int} {string} for {string}', async ({ ui, world }, qty, product, customer) => {
   await ui.open('/orders/new');
@@ -126,7 +126,7 @@ runs or is validated, never when journeys are listed.
 ## Step definitions
 
 ```ts
-import { Given, When, Then, Step, defineParameterType, type DataTable } from '@eztech/eztest/bdd';
+import { Given, When, Then, Step, defineParameterType, type DataTable } from '@eztech.com/eztest/bdd';
 
 Given('the customer {string} has {int} orders', async ({ ui, api, db, vars, data, world }, name, n) => { /* ... */ });
 When(/^I pay (\d+) (EUR|USD)$/, async ({ api }, amount, currency) => { /* amount is a number (see below), currency a string */ });
@@ -228,7 +228,7 @@ By default the World is a plain object. `setWorldConstructor(MyWorld)` replaces 
 created with `{ parameters }`, the `bdd.worldParameters` from the config.
 
 ```ts
-import { setWorldConstructor } from '@eztech/eztest/bdd';
+import { setWorldConstructor } from '@eztech.com/eztest/bdd';
 class ShopWorld {
   order?: string;
   constructor(readonly options: { parameters: Record<string, unknown> }) {}
@@ -242,7 +242,7 @@ and they show up in the result's ledger.
 ## Hooks
 
 ```ts
-import { Before, After, BeforeStep, AfterStep, BeforeAll, AfterAll } from '@eztech/eztest/bdd';
+import { Before, After, BeforeStep, AfterStep, BeforeAll, AfterAll } from '@eztech.com/eztest/bdd';
 
 BeforeAll({ tags: '@api', name: 'get a token' }, async ({ api, shared }) => {
   shared.token = (await api.post('/oauth/token', { grant_type: 'client_credentials' })).body.access_token;
@@ -437,7 +437,7 @@ features/checkout.feature:9:5: a step must be inside a Scenario or a Background 
 ## API
 
 ```ts
-import { bdd } from '@eztech/eztest';   // or: import { parseGherkin, ... } from '@eztech/eztest/bdd'
+import { bdd } from '@eztech.com/eztest';   // or: import { parseGherkin, ... } from '@eztech.com/eztest/bdd'
 
 const doc = bdd.parseGherkin(text, 'checkout.feature');          // AST with line and column
 const { pickles } = bdd.compilePickles(doc);                      // scenarios and rows, backgrounds included

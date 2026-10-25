@@ -78,7 +78,7 @@ Disconnect from the mainframe
 - **Keys:** `Press Enter`, `PF1`–`PF24`, `PA1`–`PA3`, `Clear` and `SysReq` send an AID and wait for the next screen (keyboard unlock plus a short quiet time). `Tab`, `Backtab`, `Home` and `Erase EOF` act locally.
 - **Rules a real terminal enforces:** EZTest refuses to type into a protected field, past the end of a field, or non-digits into a numeric field, and says so clearly.
 - **Protocol:** EZTest negotiates TN3270 (BINARY, EOR and TERMINAL-TYPE, `IBM-3278-2-E` by default), answers the host's Read Partition Query, and handles Write, Erase/Write, Erase/Write Alternate, Erase All Unprotected and WSF, plus the SF, SFE, SBA, SA, MF, IC, PT, RA, EUA and GE orders. TN3270E (RFC 2355) is declined, so the host falls back to plain TN3270.
-- **Offline testing:** `MainframeSimulator` (from `@eztech/eztest/legacy`) serves screens you define as data. `createDemoBankApp()` is a three-screen example. EZTest's own tests use it, and they also run against a real MVS 3.8j (TK4- on Hercules) when `EZ_TK4=host:port` is set.
+- **Offline testing:** `MainframeSimulator` (from `@eztech.com/eztest/legacy`) serves screens you define as data. `createDemoBankApp()` is a three-screen example. EZTest's own tests use it, and they also run against a real MVS 3.8j (TK4- on Hercules) when `EZ_TK4=host:port` is set.
 
 ## IBM i green screens (TN5250)
 
@@ -109,7 +109,7 @@ Sign off from the IBM i
 - **Phrasings are shared with TN3270** (Connect, Type into / at row-column, Read, Expect the field, Press, Disconnect). The sign-on screen's fields default to `User` / `Password`.
 - **Keys:** `Enter`, `F1`–`F24`, `Page Up`/`Page Down` (Roll Down/Up), `Help`, `Print`, `Clear`, `SysReq` and `Attn` send an attention key; `Field Exit`, `Field+`, `Field-`, `Reset` and `Erase EOF` act locally. A Write Error Code message inhibits the keyboard until `Reset`.
 - **Fields** come from the format table's Start Of Field orders (bypass, shift/edit, monocase, mandatory-enter, right-adjust); EZTest refuses to type into a bypass field, past the end, or non-digits into a numeric field. Field finding and healing by label/length/position are the TN3270 code, so a renamed field heals the same way.
-- **Offline testing:** `Ibmi5250Simulator` and `createDemoIbmiApp()` (from `@eztech/eztest/legacy`) are a stand-in IBM i (sign-on, main menu, customer inquiry) used by EZTest's own tests; `EZ_IBMI=host:port` runs the suite against a real host.
+- **Offline testing:** `Ibmi5250Simulator` and `createDemoIbmiApp()` (from `@eztech.com/eztest/legacy`) are a stand-in IBM i (sign-on, main menu, customer inquiry) used by EZTest's own tests; `EZ_IBMI=host:port` runs the suite against a real host.
 
 ## Windows desktop apps
 
@@ -278,8 +278,8 @@ The SAP bridge's methods are `hello`, `open`, `login`, `transaction`, `dump`, `g
 ## Programmatic use
 
 ```ts
-import { createDesktopIntegration } from '@eztech/eztest/desktop';
-import { Tn3270Client, MainframeSimulator, createDemoBankApp } from '@eztech/eztest/legacy';
+import { createDesktopIntegration } from '@eztech.com/eztest/desktop';
+import { Tn3270Client, MainframeSimulator, createDemoBankApp } from '@eztech.com/eztest/legacy';
 
 const { interceptor } = createDesktopIntegration({ mainframe: { hosts: { bank: { host: '127.0.0.1', port: 3270 } } } });
 await runJourneys(journeys, { outputDir: 'out', stepInterceptors: [interceptor] });   // createEngine() wires this from config

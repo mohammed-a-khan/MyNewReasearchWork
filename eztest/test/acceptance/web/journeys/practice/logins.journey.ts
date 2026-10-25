@@ -1,5 +1,5 @@
 /** practicetestautomation.com: the login page driven from a JSON file of cases, one reported step per case. */
-import { expect, files, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, files, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 interface Case { case: string; username: string; password: string; message: string; url: string }
 

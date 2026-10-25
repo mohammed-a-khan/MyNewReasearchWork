@@ -1,6 +1,6 @@
 # Accessibility
 
-EZTest checks accessibility with **its own engine** (`src/a11y`, `@eztech/eztest/a11y`),
+EZTest checks accessibility with **its own engine** (`src/a11y`, `@eztech.com/eztest/a11y`),
 written from the W3C specifications: WCAG 2.2 success criteria, WAI-ARIA 1.2,
 HTML-AAM, Accessible Name and Description Computation (accname) 1.2 and the
 WCAG relative-luminance contrast formula. It depends on no other testing or
@@ -15,7 +15,7 @@ There are three ways to use it:
 | --- | --- | --- |
 | The **a11y lens** (`lenses: [a11y]`, `--lens a11y`, or `a11y:warn` to record only) | The static rules (WCAG 2.0-2.2 A/AA and best practices) after **every** UI step | A violation at or above `serious` |
 | The **"Check accessibility"** step | Static rules **plus** the dynamic checks (keyboard walk, reflow, text spacing) at one point of a journey | A violation at or above `serious` (configurable) |
-| The API: `scanAccessibility(page, options)` from `@eztech/eztest/a11y` (or `@eztech/eztest/lenses`) | What the options select | You decide |
+| The API: `scanAccessibility(page, options)` from `@eztech.com/eztest/a11y` (or `@eztech.com/eztest/lenses`) | What the options select | You decide |
 
 Results are stored as evidence (`lenses/a11y/...json` for the lens,
 `a11y/<journey>/lens-a11y-<step>.json` for the step). Studio's
@@ -46,7 +46,7 @@ renders back to `.ez` text as `Run step "eztest.a11y" with level="AA"`.
 ## The API
 
 ```ts
-import { scanAccessibility } from '@eztech/eztest/a11y';
+import { scanAccessibility } from '@eztech.com/eztest/a11y';
 
 const r = await scanAccessibility(page, {
   level: 'AA',                 // or tags: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice']

@@ -157,7 +157,7 @@ The Studio editor shows the same findings as warnings while you type
 
 ### Quality score
 
-`scoreLocator` / `scoreTarget` (`@eztech/eztest/lint`) rate a locator 0-100:
+`scoreLocator` / `scoreTarget` (`@eztech.com/eztest/lint`) rate a locator 0-100:
 test id 95, role + accessible name 90, label 85, placeholder/alt 70, title 62,
 CSS id 78, visible text 55, CSS classes 45, structural CSS 18, XPath by test id
 88 / id 72 / text 45, positional XPath at most 20, absolute XPath under 10.

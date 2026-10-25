@@ -5,9 +5,9 @@
     "allowImportingTsExtensions": true,
     "rootDir": "../..",
     "paths": {
-      "@eztech/eztest/sdk": ["../../src/sdk/index.ts"],
-      "@eztech/eztest/plugins": ["../../src/plugins/index.ts"],
-      "@eztech/eztest": ["../../src/index.ts"]
+      "@eztech.com/eztest/sdk": ["../../src/sdk/index.ts"],
+      "@eztech.com/eztest/plugins": ["../../src/plugins/index.ts"],
+      "@eztech.com/eztest": ["../../src/index.ts"]
     }
   },
   "include": ["server.ts", "app/**/*.ts", "tests/**/*.ts"],

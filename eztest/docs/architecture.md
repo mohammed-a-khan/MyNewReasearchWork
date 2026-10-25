@@ -1,6 +1,6 @@
 # Architecture
 
-EZTest is one npm package (`@eztech/eztest`, with the `eztest` command) made of internal modules. Each module has a public barrel (`src/<module>/index.ts`) and is published as a namespace (`import { docs } from '@eztech/eztest'`) and as a subpath (`@eztech/eztest/docs`).
+EZTest is one npm package (`@eztech.com/eztest`, with the `eztest` command) made of internal modules. Each module has a public barrel (`src/<module>/index.ts`) and is published as a namespace (`import { docs } from '@eztech.com/eztest'`) and as a subpath (`@eztech.com/eztest/docs`).
 
 ```
             .ez / YAML / JSON journeys          eztest.config.yaml (+ env layers)
@@ -32,7 +32,7 @@ EZTest is one npm package (`@eztech/eztest`, with the `eztest` command) made of 
 
 ## Browser driver
 
-`src/browser` (`@eztech/eztest/browser`) is EZTest's own browser driver; every module that touches a page imports it (`import { chromium, type Page } from '../browser/index.js'`).
+`src/browser` (`@eztech.com/eztest/browser`) is EZTest's own browser driver; every module that touches a page imports it (`import { chromium, type Page } from '../browser/index.js'`).
 
 - **Chrome, Edge, Chromium and Electron** over the Chrome DevTools Protocol, through a pipe or a WebSocket.
 - **Firefox** over WebDriver BiDi, the remote protocol built into Firefox.
@@ -66,7 +66,7 @@ It has its own selector engine (CSS, XPath, text, role, label, test id, chained 
 - **Studio:** route modules, SSE topics, pages, palette commands and run-detail tabs are covered in [studio.md](studio.md).
 
 - **Platform drivers:** journeys with `Platform: android|ios` (or another platform) run through a `PlatformDriver` (`src/runner/platform.ts`; `RunOptions.platformDrivers` or `registerPlatformDriver`). The mobile driver and its reusable executor are described in [mobile.md](mobile.md#writing-a-platform-driver).
-- **Non-browser surfaces:** `RunOptions.stepInterceptors` see every step first, and `setActiveSurface()` lets an active surface answer conditions. The desktop and legacy ladder (`@eztech/eztest/desktop`, `@eztech/eztest/legacy`: Electron, Windows/Java agents, SAP GUI, TN3270, image/OCR) is built on these; see [desktop-and-legacy.md](desktop-and-legacy.md).
+- **Non-browser surfaces:** `RunOptions.stepInterceptors` see every step first, and `setActiveSurface()` lets an active surface answer conditions. The desktop and legacy ladder (`@eztech.com/eztest/desktop`, `@eztech.com/eztest/legacy`: Electron, Windows/Java agents, SAP GUI, TN3270, image/OCR) is built on these; see [desktop-and-legacy.md](desktop-and-legacy.md).
 
 - **Custom steps:** pass `customSteps` to `createEngine(..., { runOptions })`, then call them with `Run step "name" with a=1`.
 - **Lenses:** implement `{ name, afterStep(page, step, ctx) }` and pass it in `runOptions.lenses`.

@@ -1,5 +1,5 @@
 // EZTest on Jenkins: a declarative pipeline (written by eztest init --ci jenkins; docs/pipelines.md).
-// Needs the EZTest package in package.json (npm install --save-dev @eztech/eztest): npm ci installs it and the eztest command that npx runs.
+// Needs the EZTest package in package.json (npm install --save-dev @eztech.com/eztest): npm ci installs it and the eztest command that npx runs.
 //
 //   pull requests (multibranch)  -> Smoke: --pipeline pr (@smoke, impacted journeys, 10 min budget)
 //   cron (nightly)               -> Regression: 4 parallel shards (EZTest balances them), merged into one verified run

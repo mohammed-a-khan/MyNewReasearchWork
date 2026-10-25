@@ -1,5 +1,5 @@
 # EZTest: Node 22 + Chrome for Testing (and optionally Firefox) + the eztest CLI.
-# Built from this source tree; projects install the same package from npm as @eztech/eztest.
+# Built from this source tree; projects install the same package from npm as @eztech.com/eztest.
 #
 #   docker build -t eztest .
 #   docker build --build-arg EZTEST_BROWSERS="chromium firefox" -t eztest .   # Firefox too

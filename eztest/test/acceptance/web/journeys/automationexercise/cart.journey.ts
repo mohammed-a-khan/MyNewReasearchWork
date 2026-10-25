@@ -2,7 +2,7 @@
  * automationexercise.com from code: search, check every result matches, put two products in the cart in
  * different quantities, and check each line's total and the cart against the prices read on the product pages.
  */
-import { expect, inRow, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, inRow, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 const rupees = (s: string) => Number(s.replace(/^[^0-9]+/, '').replace(/[^0-9.]/g, ''));
 

@@ -2,7 +2,7 @@
  * Sauce Demo from code: read every product's price on the inventory page, put the three cheapest in the cart,
  * and check that the overview's item total, tax and total match what was read before.
  */
-import { expect, inRow, journey, step, ui, vars } from '@eztech/eztest/sdk';
+import { expect, inRow, journey, step, ui, vars } from '@eztech.com/eztest/sdk';
 
 const price = (s: string) => Number(s.replace(/[^0-9.]/g, ''));
 

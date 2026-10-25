@@ -17,12 +17,12 @@ Selenium, Puppeteer, WebdriverIO, Appium): the driver uses only Node
 built-ins, plus the page-side selector engine described below. The browsers
 themselves are the only outside programs it starts.
 
-    import { chromium, firefox, electron, devices, type Page } from '@eztech/eztest/browser';
+    import { chromium, firefox, electron, devices, type Page } from '@eztech.com/eztest/browser';
 
 ### Layers
 
 ```
-index.ts           the public module @eztech/eztest/browser: chromium, firefox, webkit (unsupported), electron, devices, selectors, types
+index.ts           the public module @eztech.com/eztest/browser: chromium, firefox, webkit (unsupported), electron, devices, selectors, types
 locator.ts         Locator / FrameLocator: lazy, strict, chainable, auto-waiting
 actions.ts         resolve -> engine actionability check -> real input events, with retries and call logs
 firefox/           the WebDriver BiDi engine (see "Firefox engine")
@@ -149,7 +149,7 @@ eztest install-browsers --list
 
 ### The module and the test suite
 
-`src/browser/index.ts` (`@eztech/eztest/browser`) exports the browser types
+`src/browser/index.ts` (`@eztech.com/eztest/browser`) exports the browser types
 `chromium`, `firefox` and `webkit` (which rejects with a clear message),
 `electron`, `devices`, `selectors`, `TimeoutError`, the driver's building
 blocks (transports, launchers, finders, the installer) and the types `Page`,

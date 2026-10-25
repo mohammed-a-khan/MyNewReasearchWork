@@ -48,4 +48,4 @@ gates:
 
 The gate fails (a blocker) when any finding is at or above `failOn`, citing the recorded scan.
 
-Exported from `@eztech/eztest/lenses` (`scanApiSecurity`, `ApiSecurityScanner`, `targetsFromSpec`, `evaluateApiSecurityGate`).
+Exported from `@eztech.com/eztest/lenses` (`scanApiSecurity`, `ApiSecurityScanner`, `targetsFromSpec`, `evaluateApiSecurityGate`).

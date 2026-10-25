@@ -92,4 +92,4 @@ elements:
   matchDescriptions: true  # bind journeys by description / alias (default)
 ```
 
-From code: `import { elements } from '@eztech/eztest'` or `@eztech/eztest/elements`. `ElementRepository.load(root, options)` loads a repository. Then `bindJourney(journey, repo)`, `elementUsages(journeys, repo)`, `duplicateElements(repo)` and `planElementHeal(...)` work with it. To use a repository in a run, pass it as `RunOptions.elements`; the engine does this from the config.
+From code: `import { elements } from '@eztech.com/eztest'` or `@eztech.com/eztest/elements`. `ElementRepository.load(root, options)` loads a repository. Then `bindJourney(journey, repo)`, `elementUsages(journeys, repo)`, `duplicateElements(repo)` and `planElementHeal(...)` work with it. To use a repository in a run, pass it as `RunOptions.elements`; the engine does this from the config.

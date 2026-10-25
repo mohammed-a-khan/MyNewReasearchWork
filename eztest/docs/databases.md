@@ -423,7 +423,7 @@ journey run once per result row. The row's columns become variables, keeping
 the database's casing (Oracle: `<CUSTOMER_ID>`, `${CUSTOMER_ID}`).
 
 The resolver is `resolveQueryExamples(name, alias, params, ctx)` in
-`@eztech/eztest/queries`, and `engine.queryExamples(name, alias, params)` wires it to
+`@eztech.com/eztest/queries`, and `engine.queryExamples(name, alias, params)` wires it to
 the configured catalogue and connections. `parseQueryExamplesSource(text)`
 parses the `from query ...` part.
 

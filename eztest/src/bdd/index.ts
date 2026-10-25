@@ -1,8 +1,8 @@
 /**
- * Native BDD (`@eztech/eztest/bdd`): run Gherkin `.feature` files as they are, with
+ * Native BDD (`@eztech.com/eztest/bdd`): run Gherkin `.feature` files as they are, with
  * TypeScript step definitions, on EZTest's runner. See docs/bdd.md.
  *
- *   import { Given, When, Then, Before, defineParameterType } from '@eztech/eztest/bdd';
+ *   import { Given, When, Then, Before, defineParameterType } from '@eztech.com/eztest/bdd';
  *
  *   Given('the customer {string} has {int} orders', async ({ db, world }, name, n) => { ... });
  *

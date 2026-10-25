@@ -1,5 +1,5 @@
 /** Data-driven login (the-internet.herokuapp.com/login): one attempt per CSV row, each with the message it must show. */
-import { data, expect, journey, step, ui } from '@eztech/eztest/sdk';
+import { data, expect, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 journey('Login attempts from a CSV file', { tags: ['@the-internet', '@code', '@data'], baseUrl: 'https://the-internet.herokuapp.com' }, async () => {
   const rows = (await data.rows('journeys/data/logins.csv')) as Array<{ username: string; password: string; outcome: string }>;

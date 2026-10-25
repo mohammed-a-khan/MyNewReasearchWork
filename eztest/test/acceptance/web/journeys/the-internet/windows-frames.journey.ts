@@ -2,7 +2,7 @@
  * Windows and frames from code (the-internet.herokuapp.com): read a value in a popup and check it on the main page,
  * read every frame of a frameset, and count broken images through the raw page.
  */
-import { expect, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 journey('Windows, frames and images from code', { tags: ['@the-internet', '@code'], baseUrl: 'https://the-internet.herokuapp.com' }, async () => {
   await step('A popup: read its heading, close it, carry on in the main window', async () => {

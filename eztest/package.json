@@ -1,5 +1,5 @@
 {
-  "name": "@eztech/eztest",
+  "name": "@eztech.com/eztest",
   "version": "0.1.0-beta.1",
   "description": "EZTest - one-stop, verified test automation: web, API, DB, documents, identity, data, performance, accessibility, visual, security and release readiness in a single package.",
   "type": "module",
@@ -285,7 +285,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "eztest": "./dist/cli/bin.js"
+    "eztest": "dist/cli/bin.js"
   },
   "dependencies": {
     "ajv": "^8.20.0",

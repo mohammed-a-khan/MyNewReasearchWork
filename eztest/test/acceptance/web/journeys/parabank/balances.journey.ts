@@ -2,7 +2,7 @@
  * ParaBank from code: register a fresh customer, open a second account, move money between them, and check that
  * every page agrees: the overview's balances and total before and after, and the activity of each account.
  */
-import { expect, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 const money = (s: string) => Number(s.replace(/[^0-9.-]/g, ''));
 type Row = Record<string, string>;

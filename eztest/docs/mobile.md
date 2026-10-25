@@ -91,7 +91,7 @@ Mobile-specific phrasings (category **Mobile** in the Studio palette):
 An operation a platform cannot do fails the step with `Not supported: ...`; nothing
 is silently skipped (e.g. network switches and lock on iOS, shake on Android).
 
-## Code journeys (@eztech/eztest/sdk)
+## Code journeys (@eztech.com/eztest/sdk)
 
 Code journeys target a device with `platform` (and `app`, `capabilities`) in
 their options; `ui.*` calls then run on the device with the same strict
@@ -111,7 +111,7 @@ surface. Browser-only calls fail clearly: `ui.page()` (there is no browser
 page; use a custom step with `ctx.platform.session`, the DeviceSession),
 tables, downloads and uploads, tabs, frames, network mocking. Mobile-only
 operations (swipe-until, rotate, deep links, ...) have no `ui.*` method yet: put them
-in a small `.ez` journey and call it from code with `run('rotate-and-check')` (@eztech/eztest/sdk).
+in a small `.ez` journey and call it from code with `run('rotate-and-check')` (@eztech.com/eztest/sdk).
 
 ## Targets on devices
 

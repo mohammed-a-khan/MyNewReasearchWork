@@ -2,7 +2,7 @@
  * rahulshettyacademy.com/AutomationPractice from code: add up the Amount column of the fixed-header table and
  * compare it with the total the page prints; find the courses of one instructor in the other table.
  */
-import { expect, journey, step, ui } from '@eztech/eztest/sdk';
+import { expect, journey, step, ui } from '@eztech.com/eztest/sdk';
 
 journey('Practice page tables add up', { tags: ['@rahulshetty', '@code'], baseUrl: 'https://rahulshettyacademy.com' }, async () => {
   await ui.open('/AutomationPractice/', { expect: { text: 'Web Table Fixed header' } });
