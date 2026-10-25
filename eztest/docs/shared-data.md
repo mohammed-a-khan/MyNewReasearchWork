@@ -113,7 +113,7 @@ Teardown: Delete the test tenant
 Call API "DELETE /api/tenants/${tenantId}"
 ```
 
-- A file starting with `Setup:` (instead of `Journey:`) is a setup journey: it runs once, before every other journey of the run. Its `Returns:` become **run variables** that every journey of the run (and the teardown) can use as `${tenantId}`, as if it had captured them itself. `Depends on:` handoffs win over run values of the same name.
+- A file starting with `Setup:` (instead of `Journey:`) is a setup journey: it runs once, before every other journey of the run. Its `Returns:` become **run variables** that every journey of the run (and the teardown) can use as `${tenantId}`, as if it had captured them itself. `Depends on:` handoffs win over run values of the same name. A `Variables:` header can build on them too: `Variables: last=Okafor${runTag}` is `OkaforEzQ3K9D1` in every journey (and in the `@library` sub-journeys it calls).
 - `Teardown:` runs once after all others, with the same values.
 - Setup and teardown journeys are not filtered by `--tags`: they run around whatever is selected (exclude them with `--exclude-tags setup`), and a shard runs them once per shard. When nothing else is selected, they do not run.
 - When a setup journey fails, the other journeys are reported as `error: beforeAll hook "..." failed`, and the run says why.

@@ -199,8 +199,9 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
   const baseUrl = opts.baseUrlOverride ?? journey.baseUrl ?? opts.baseUrl;
   let clockContext: BrowserContext | undefined;
   // today() / now() follow the journey's browser clock once one is installed.
-  // Journey variables may refer to run and config variables, and to each other (`last=Okafor${tag}`).
-  const startVars = resolveVariableRefs({ ...journey.variables, ...(opts.variables ?? {}) });
+  // Journey variables may refer to run and config variables, to each other (`last=Okafor${tag}`) and to the values
+  // the run's Setup: journeys returned or Depends on: handed over (`last=Okafor${runTag}`).
+  const startVars = resolveVariableRefs({ ...journey.variables, ...(opts.variables ?? {}) }, seed ?? {});
   const vars = (): Record<string, unknown> => ({ ...startVars, ...ledger.view(), ...clockVars(clockContext) });
   const videoMode = opts.video ?? 'off';
   const videoDir = join(env.runDir, 'videos', `${safeName(jid)}-attempt${attempt}`);
@@ -316,7 +317,7 @@ export async function runJourneyAttempt(journey: Journey, attempt: number, runEn
     const j = scope?.journey ?? journey;
     const l = scope?.ledger ?? ledger;
     const v = scope && scope.ledger !== ledger
-      ? (): Record<string, unknown> => ({ ...resolveVariableRefs({ ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}) }), ...l.view(), ...clockVars(clockContext) })
+      ? (): Record<string, unknown> => ({ ...resolveVariableRefs({ ...j.variables, ...(opts.variables ?? {}), ...(scope.params ?? {}) }, seed ?? {}), ...l.view(), ...clockVars(clockContext) })
       : vars;
     const slot = slotOf(scope);
     const s = slot.session ?? session;
