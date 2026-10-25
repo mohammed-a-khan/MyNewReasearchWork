@@ -60,6 +60,8 @@ async function pruneOlderVersions(versions) {
     return;
   }
   const [, org, project, feed] = m;
+  // Through HTTPS_PROXY like every other EZTest call (Node's own fetch ignores it); dist/ was just built.
+  const { envProxyFetch: fetch } = await import(new URL('../dist/surfaces/proxy.js', import.meta.url).href);
   const base = `https://pkgs.dev.azure.com/${org}/${project ? `${project}/` : ''}_apis/packaging/feeds/${feed}/npm`;
   const token = process.env.EZTEST_FEED_TOKEN;
   const headers = { 'content-type': 'application/json', ...(token ? { authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` } : {}) };
