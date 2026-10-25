@@ -26,7 +26,7 @@ export interface FeatureValidation {
   bound: { definition: number; ez: number };
 }
 
-export async function validateFeature(file: string, o: BddOptions & { cwd?: string } = {}): Promise<FeatureValidation> {
+export async function validateFeature(file: string, o: BddOptions & { cwd?: string; variables?: Record<string, unknown> } = {}): Promise<FeatureValidation> {
   const cwd = o.cwd ?? process.cwd();
   const journeys = await loadFeatureJourneys(file, o);
   const problems: FeatureProblem[] = [];
@@ -42,7 +42,7 @@ export async function validateFeature(file: string, o: BddOptions & { cwd?: stri
     const key = JSON.stringify(j.examplesFrom);
     if (sources.has(key)) continue;
     sources.add(key);
-    for (const i of await validateExamplesSource(j.examplesFrom, { baseDir: cwd })) {
+    for (const i of await validateExamplesSource(j.examplesFrom, { baseDir: cwd, ...(o.variables ? { variables: o.variables } : {}) })) {
       if (i.severity === 'info') continue;
       problems.push({ severity: i.severity, line: j.bdd?.examples?.line, message: `Examples: ${i.message}` });
     }

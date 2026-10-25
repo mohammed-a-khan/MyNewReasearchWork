@@ -30,7 +30,7 @@ import { findJourneyFiles, loadJourneys, filterJourneys, bddOptionsFrom, default
 import { isCodeJourneyFile, loadCodeJourneys } from '../runner/code-journeys.js';
 import { isFeatureFile } from '../bdd/load.js';
 import { validateFeature } from '../bdd/validate.js';
-import { initProject, CI_SYSTEMS, type CiSystemName } from './init.js';
+import { initProject, CI_SYSTEMS, INIT_TEMPLATES, type CiSystemName, type InitTemplate } from './init.js';
 import { checkPipelineRequires, finishPipelineRun, isAroundJourney, preparePipelineRun, registerPipelineCommands, selectForPipeline, type PipelineRun } from './pipelines.js';
 import { registerOpsCommands } from './ops.js';
 import { registerAppCommands } from '../apps/cli.js';
@@ -140,12 +140,15 @@ export function buildProgram(io: CliIO = defaultIO): Command {
   // ------------------------------------------------------------------ init
   program
     .command('init')
-    .description('create eztest.config.yaml, an example journey and a readiness policy')
+    .description('create a project: basic (config, an example journey, a readiness policy) or enterprise (the EZTest Project Guide layout with a sample of each style); --app adds an application')
     .argument('[dir]', 'project directory', '.')
+    .addOption(new Option('--template <name>', 'basic (default), or enterprise: apps/<app>/ with journeys, features, steps, code journeys, elements, screens, helpers, data per environment and queries, config layers, .env.example, pipeline, README and npm scripts').choices([...INIT_TEMPLATES]))
+    .option('--app <name>', 'enterprise: the application to scaffold (default web), or one to add to an existing project')
     .addOption(new Option('--ci <system>', 'also add CI pipelines: PR smoke, scheduled nightly regression, on-deploy per environment, shards, JUnit, report, readiness gate').choices([...CI_SYSTEMS]))
-    .action(async (dir: string, o: { ci?: CiSystemName }) => {
-      const r = await initProject(resolve(io.cwd, dir), { ci: o.ci });
+    .action(async (dir: string, o: { ci?: CiSystemName; template?: InitTemplate; app?: string }) => {
+      const r = await initProject(resolve(io.cwd, dir), { ...(o.ci ? { ci: o.ci } : {}), ...(o.template ? { template: o.template } : {}), ...(o.app ? { app: o.app } : {}) });
       for (const f of r.created) io.out(`created  ${f}`);
+      for (const f of r.updated) io.out(`updated  ${f}`);
       for (const f of r.skipped) io.out(`exists   ${f} (left unchanged)`);
       io.out('');
       io.out('Next:');
@@ -165,6 +168,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
     .addOption(new Option('-b, --browser <name>').choices([...BROWSER_ENGINES]))
     .option('--browsers <names>', 'cross-browser run: every journey on each browser (chromium,firefox,msedge,chrome,...); result ids end in @<browser>', list)
     .option('--headed', 'show the browser')
+    .option('--headless', 'no visible browser, whatever the config or environment layer says (CI agents)')
     .option('--var <name=value...>', 'run-time variables for ${name} placeholders (e.g. --var password=...); also EZTEST_VAR_<name> in the environment or .env')
     .option('-w, --workers <n>', 'journeys in parallel', (v) => parseInt(v, 10))
     .addOption(new Option('--worker-mode <mode>', 'parallel journeys in worker processes with their own browser (default when workers > 1), or inline in this process').choices(['process', 'inline']))
@@ -215,6 +219,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       if (o.browser) overrides.browser = o.browser;
       if (o.browsers?.length) overrides.browsers = o.browsers;
       if (o.headed) overrides.headless = false;
+      if (o.headless) overrides.headless = true;
       if (o.workers) overrides.concurrency = o.workers;
       if (o.retries !== undefined) overrides.retries = o.retries;
       if (o.baseUrl) overrides.baseUrl = o.baseUrl;
@@ -473,7 +478,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
   program
     .command('validate')
     .description('parse journeys and features and report errors without running them (features: undefined and ambiguous steps too)')
-    .argument('[paths...]', 'journey files or directories', ['journeys'])
+    .argument('[paths...]', 'journey files or directories (default: journeysDir and the feature folders from config, else journeys)')
     .option('-c, --config <file>')
     .option('-e, --env <name>')
     .option('--project <name>', 'project overlay (projects.<name>)')
@@ -484,14 +489,16 @@ export function buildProgram(io: CliIO = defaultIO): Command {
       const loaded = hasConfig ? await load(o) : undefined;
       const addons = loaded ? await enableAddons(loaded, { cwd: io.cwd }) : { off: () => {} };
       const placeholder = o.placeholder ? new RegExp(o.placeholder) : DEFAULT_PLACEHOLDER;
-      const files = await findJourneyFiles(paths, io.cwd, { code: true });
+      // Config variables, for ${VAR} in Examples file names (data/${DATA_ENV}/orders.csv), as in a run.
+      const variables: Record<string, unknown> = { ...(loaded?.config.vars ?? {}) };
+      const files = await findJourneyFiles(paths.length ? paths : loaded ? defaultJourneyPaths(loaded.config, io.cwd) : ['journeys'], io.cwd, { code: true });
       let bad = 0;
       const parsed: Array<{ file: string; journey: Awaited<ReturnType<typeof loadJourneyFile>> }> = [];
       for (const f of files) {
         // Gherkin features: syntax, then every step bound to a step definition or an EZTest phrasing.
         if (isFeatureFile(f)) {
           try {
-            const v = await validateFeature(f, { ...(loaded ? bddOptionsFrom(loaded.config) : {}), cwd: io.cwd });
+            const v = await validateFeature(f, { ...(loaded ? bddOptionsFrom(loaded.config) : {}), cwd: io.cwd, variables });
             for (const j of v.journeys) parsed.push({ file: f, journey: j });
             const errs = v.problems.filter((p) => p.severity === 'error');
             bad += errs.length;
@@ -523,7 +530,7 @@ export function buildProgram(io: CliIO = defaultIO): Command {
           io.out(`ok     ${f} (${j.steps.length} steps)`);
           // External Examples: missing files, filters matching nothing, unknown columns, placeholder values.
           if (j.examplesFrom) {
-            const issues = await validateExamplesSource(j.examplesFrom, { baseDir: io.cwd, placeholder });
+            const issues = await validateExamplesSource(j.examplesFrom, { baseDir: io.cwd, placeholder, variables });
             for (const i of issues) {
               if (i.severity === 'error') bad++;
               (i.severity === 'error' ? io.err : io.out)(`${i.severity === 'error' ? 'error ' : i.severity === 'warning' ? 'warn  ' : 'info  '} ${f}: ${i.message}`);

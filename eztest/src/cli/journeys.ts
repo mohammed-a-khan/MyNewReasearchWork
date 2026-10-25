@@ -1,6 +1,6 @@
 /** Journey discovery and filtering shared by CLI commands. */
 import { existsSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import type { Journey } from '../core/index.js';
 import { loadJourneyFile } from '../intent/index.js';
@@ -15,13 +15,29 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.eztest', 'dist', 'eztest-re
 const NOT_JOURNEYS = /^(?:import-report\.json|package(?:-lock)?\.json|tsconfig.*\.json|eztest\.config\.(?:ya?ml|json)|readiness-policy\.ya?ml|.*\.template\.ya?ml)$/i;
 
 /**
+ * A YAML or JSON file is a journey only when it has a `steps` key (every YAML/JSON journey needs one).
+ * Element repositories (`elements/*.yaml`), JSON test data and other YAML kept next to journeys (the
+ * project layout of docs/project-guide.md keeps an application's files in one folder) are not journeys.
+ */
+export async function looksLikeJourneyFile(p: string): Promise<boolean> {
+  if (extname(p).toLowerCase() === '.ez') return true;
+  try {
+    return /["']?\bsteps\b["']?\s*:/.test(await readFile(p, 'utf8'));
+  } catch {
+    return true; // unreadable: the loader reports it
+  }
+}
+
+/**
  * Journey files under `paths`. With `code: true`, code journeys (`*.journey.ts`,
  * `*.journey.js`, eztest/sdk) and Gherkin features (`*.feature`, docs/bdd.md)
- * are included too (`features: false` leaves the features out).
+ * are included too (`features: false` leaves the features out). Inside folders,
+ * YAML and JSON files without a `steps` key are left out (looksLikeJourneyFile);
+ * a file named in `paths` is always included.
  */
 export async function findJourneyFiles(paths: string[], cwd: string, o: { code?: boolean; features?: boolean } = {}): Promise<string[]> {
   const out: string[] = [];
-  async function walk(p: string): Promise<void> {
+  async function walk(p: string, named = false): Promise<void> {
     const s = await stat(p);
     if (s.isDirectory()) {
       for (const name of (await readdir(p)).sort()) {
@@ -29,14 +45,14 @@ export async function findJourneyFiles(paths: string[], cwd: string, o: { code?:
         await walk(join(p, name));
       }
     } else if (EXTENSIONS.has(extname(p).toLowerCase()) && !NOT_JOURNEYS.test(p.split(/[\\/]/).pop() ?? '') && !SIDECAR_RE.test(p)) {
-      out.push(p);
+      if (named || (await looksLikeJourneyFile(p))) out.push(p);
     } else if (o.code && isCodeJourneyFile(p)) {
       out.push(p);
     } else if ((o.features ?? o.code) && isFeatureFile(p)) {
       out.push(p);
     }
   }
-  for (const p of paths) await walk(resolve(cwd, p));
+  for (const p of paths) await walk(resolve(cwd, p), true);
   return [...new Set(out)];
 }
 
