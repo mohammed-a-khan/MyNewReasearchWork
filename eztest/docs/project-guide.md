@@ -29,7 +29,7 @@ config/<app>/<env>.yaml         one application in one environment: host, databa
 .env.example                    the names of the secrets, never their values; the real .env is git-ignored
 readiness-policy.yaml           the release gate: GO / GO_WITH_RISKS / NO_GO
 pipelines/azure-pipelines.yml   validate + lint, PR smoke, nightly regression in shards, tests after deployment
-package.json                    npm scripts: test, test:<env>, test:smoke, test:<module>, test:<app>, lint, validate, studio, report
+package.json                    "type": "module"; npm scripts: test, test:<env>, test:smoke, test:<module> (every application), test:<app>, lint, validate, studio, report
 tsconfig.json                   type checking for the TypeScript parts (tsc --noEmit)
 apps/<app>/                     one folder per application under test
   journeys/<module>/*.ez          plain-English journeys
@@ -63,7 +63,7 @@ For a single application the same layout applies: `apps/web/` is the only applic
 
 ### What `--app` does
 
-`eztest init --app billing` in an existing project writes `apps/billing/` and `config/billing/<env>.yaml`, adds `projects.billing` to `eztest.config.yaml` (comments and the rest of the file are kept), adds `test:billing`, `validate:billing` and `studio:billing` to `package.json`, and adds the application's secret names to `.env.example`. It never overwrites a file: every file that exists is reported as left unchanged, and the three shared files only get entries. Add the application to the `apps` parameter of `pipelines/azure-pipelines.yml`, with its secret variables.
+`eztest init --app billing` in an existing project writes `apps/billing/` and `config/billing/<env>.yaml`, adds `projects.billing` to `eztest.config.yaml` (comments and the rest of the file are kept), adds `test:billing`, `validate:billing` and `studio:billing` to `package.json`, adds the application's secret names to `.env.example`, and adds it to the `apps` parameter of `pipelines/azure-pipelines.yml` with its secrets mapped next to the other applications' (define those secret variables in the pipeline). The project scripts (`test`, `test:<env>`, `test:smoke`, `test:regression`, `test:<module>`, `test:headed`, `test:headless`, `test:parallel`, `validate`, `doctor`) run every application one after the other; `init --app` extends them while they are as init wrote them, and reports the ones changed by hand, which it keeps. `lint` covers every application; `studio` opens the first (Studio switches projects). It never overwrites a file: every file that exists is reported as left unchanged, and the shared files only get entries. In an existing `package.json`, npm's placeholder `test` script is replaced and `"type": "module"` is added when no `type` is set.
 
 ## Naming conventions
 
@@ -389,7 +389,7 @@ eztest lint --project web --rule hard-wait=error apps/web/journeys/orders
 
 The template's pipeline (`pipelines/azure-pipelines.yml`, Azure DevOps) runs these stages, for every application in its `apps` parameter. For other systems, `eztest init --ci github|gitlab|jenkins|teamcity|bitbucket|circleci` writes a PR smoke job, a sharded nightly regression and a job per deployment ([pipelines.md](pipelines.md)); add `--project <app>` to their runs and the Checks stage's validate and lint steps in front.
 
-1. **Checks**, on every run: `eztest validate --project <app> -e dev`, `eztest elements unused --project <app> -e dev` (unknown element references fail), and `eztest lint --format junit` with the results in the Tests tab. Nothing runs before these pass.
+1. **Checks**, on every run: `eztest validate --project <app> -e dev`, `eztest elements unused --project <app> -e dev --strict` (unknown element references and elements nothing uses fail; uses in code journeys, step definitions and screens count), and `eztest lint --format junit` with the results in the Tests tab. Nothing runs before these pass.
 2. **Smoke**, on pull requests: `eztest run --project <app> --pipeline pr --headless`. The `pr` entry of `pipelines:` selects `@smoke`, uses `dev`, and fits a 10-minute budget; the readiness gate fails the job on NO_GO and `eztest pr report` sets the pull request's status and comment.
 3. **Regression**, on the nightly schedule: `--pipeline nightly` selects `@regression and not @quarantined` on SIT in two parallel jobs; each job runs its shard (shards are balanced by historical duration), `eztest merge` makes one run with one verified evidence chain, `eztest gate` decides, and `eztest ado publish` publishes the results to Azure Test Plans when `EZTEST_PUBLISH_TEST_PLANS` is `true` (with the build's own token; the plan and suite come from `config/<env>.yaml`).
 4. **TestSIT**, on main after the SIT deployment: a deployment job in the `sit` environment runs `--pipeline deploy-sit` with the readiness gate, so a NO_GO stops the release, and keeps a deployment record (on the results server and in Azure DevOps, when configured).

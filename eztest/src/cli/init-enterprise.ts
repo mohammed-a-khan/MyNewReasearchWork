@@ -166,15 +166,15 @@ npm install                      # once; installs @eztech.com/eztest
 npx eztest install-browsers      # once, if Chrome or Edge is not installed
 cp .env.example .env             # then fill in the secrets for your environment
 
-npm test                         # the first application on dev
+npm test                         # every application on dev, one after the other
 npm run test:sit                 # ... on SIT (config/sit.yaml + config/<app>/sit.yaml)
 npm run test:smoke               # @smoke only
 npm run test:orders              # one module (its tag)
 npm run test:headed              # watch the browser
 npm run test:parallel            # 4 workers
 npm run test:<app> -- -e uat     # another application; anything after -- goes to eztest run
-npm run validate                 # every journey parses; every step, query and data file resolves
-npx eztest elements unused --project <app> -e dev   # every @Screen.element reference is in the repository
+npm run validate                 # every application: every journey parses; every step, query and data file resolves
+npx eztest elements unused --project <app> -e dev --strict   # every @Screen.element reference is in the repository, every element is used
 npm run lint                     # the project guide's rules (also in the pipeline)
 npm run studio                   # EZTest Studio on the same files
 npm run report                   # trends across runs; each run's report is eztest-results/<run>/report.html
@@ -188,10 +188,11 @@ an order form at \`/orders/new\` (Customer, Your reference, Quantity, "Place ord
 ## Adding an application
 
 \`\`\`bash
-npx eztest init --app billing    # apps/billing/, config/billing/<env>.yaml, projects.billing, npm scripts
+npx eztest init --app billing    # apps/billing/, config/billing/<env>.yaml, projects.billing, npm scripts, the pipeline
 \`\`\`
 
-Then add it to the \`apps\` parameter of \`pipelines/azure-pipelines.yml\`.
+\`npm test\`, \`npm run validate\` and the other project scripts then cover billing too, and the pipeline runs it
+(the \`apps\` parameter) with its secrets mapped: define those secret variables in the pipeline.
 `;
 
 const PIPELINE = `# EZTest on Azure Pipelines (written by eztest init --template enterprise; docs/project-guide.md#ci).
@@ -234,7 +235,7 @@ stages:
           - \${{ each app in parameters.apps }}:
               - script: npx eztest validate --project \${{ app }} -e dev
                 displayName: Validate \${{ app }}
-              - script: npx eztest elements unused --project \${{ app }} -e dev
+              - script: npx eztest elements unused --project \${{ app }} -e dev --strict
                 displayName: Element references \${{ app }}
           - script: npx eztest lint --format junit -o eztest-lint.xml
             displayName: Lint (EZTest Project Guide)
@@ -649,31 +650,94 @@ export function appFiles(n: AppNames): Record<string, string> {
   };
 }
 
-/** npm scripts. The first application gets the short names (test, test:sit, ...); every one gets test:<app>. */
-export function appScripts(n: AppNames, first: boolean): Record<string, string> {
+/** The npm scripts of one application: test:<app>, validate:<app>, studio:<app>. */
+export function appScripts(n: AppNames): Record<string, string> {
   const p = `--project ${n.app}`;
-  const own: Record<string, string> = {
+  return {
     [`test:${n.app}`]: `eztest run ${p} -e dev`,
     [`validate:${n.app}`]: `eztest validate ${p} -e dev`,
     [`studio:${n.app}`]: `eztest studio ${p} -e dev`,
   };
-  if (!first) return own;
+}
+
+/**
+ * The project's npm scripts over every application (`test` runs each application's journeys on dev, one after
+ * the other; `validate` validates each one), and the ones for the whole project (`lint`, `report`). `studio`
+ * opens the first application (Studio switches between projects).
+ */
+export function projectScripts(apps: AppNames[]): Record<string, string> {
+  const each = (cmd: (p: string) => string) => apps.map((n) => cmd(`--project ${n.app}`)).join(' && ');
+  const run = (args: string) => each((p) => `eztest run ${p} ${args}`);
   return {
-    test: `eztest run ${p} -e dev`,
-    'test:dev': `eztest run ${p} -e dev`,
-    'test:sit': `eztest run ${p} -e sit`,
-    'test:uat': `eztest run ${p} -e uat`,
-    'test:smoke': `eztest run ${p} -e dev -t @smoke`,
-    'test:regression': `eztest run ${p} -e dev -t @regression`,
-    'test:orders': `eztest run ${p} -e dev -t @orders`,
-    'test:headed': `eztest run ${p} -e dev --headed`,
-    'test:headless': `eztest run ${p} -e dev --headless`,
-    'test:parallel': `eztest run ${p} -e dev -w 4`,
-    ...own,
+    test: run('-e dev'),
+    'test:dev': run('-e dev'),
+    'test:sit': run('-e sit'),
+    'test:uat': run('-e uat'),
+    'test:smoke': run('-e dev -t @smoke'),
+    'test:regression': run('-e dev -t @regression'),
+    'test:orders': run('-e dev -t @orders'),
+    'test:headed': run('-e dev --headed'),
+    'test:headless': run('-e dev --headless'),
+    'test:parallel': run('-e dev -w 4'),
     lint: 'eztest lint',
-    validate: `eztest validate ${p} -e dev`,
-    studio: `eztest studio ${p} -e dev`,
+    validate: each((p) => `eztest validate ${p} -e dev`),
+    studio: `eztest studio --project ${apps[0].app} -e dev`,
     report: 'eztest report trends -o eztest-results/trends.html',
-    doctor: `eztest doctor ${p} -e dev`,
+    doctor: each((p) => `eztest doctor ${p} -e dev`),
   };
+}
+
+/** npm's placeholder `test` script (npm init), which a project's own scripts replace. */
+export const NPM_PLACEHOLDER_TEST = /^echo \\?"Error: no test specified\\?" && exit 1$/;
+
+// ------------------------------------------------------------------ the pipeline, when an application is added
+
+/**
+ * Add an application to the pipeline `init` wrote: its name in the `apps` parameter, and its secret variables
+ * next to the other applications' in every step that maps secrets (each step gets the same kinds of secrets the
+ * others map, e.g. only the clerk's password where the smoke run maps only that). Text edits; the rest of the
+ * file is kept. Returns the new text, or undefined when there is nothing to change.
+ */
+export function addAppToPipeline(text: string, n: AppNames, known: AppNames[]): string | undefined {
+  const lines = text.split('\n');
+  let changed = false;
+  // parameters: - name: apps ... default: [web, billing]
+  const at = lines.findIndex((l) => /^\s*-\s*name:\s*apps\s*$/.test(l));
+  if (at >= 0) {
+    for (let i = at + 1; i < Math.min(lines.length, at + 6); i++) {
+      const m = /^(\s*default:\s*\[)([^\]]*)\](.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const apps = m[2].split(',').map((x) => x.trim()).filter(Boolean);
+      if (!apps.includes(n.app)) {
+        lines[i] = `${m[1]}${[...apps, n.app].join(', ')}]${m[3]}`;
+        changed = true;
+      }
+      break;
+    }
+  }
+  // Secret mappings: runs of `EZTEST_SECRET_<APP>_<KIND>: $(EZTEST_SECRET_<APP>_<KIND>)` lines.
+  const MAP = /^(\s+)EZTEST_SECRET_([A-Z0-9_]+):\s*\$\(EZTEST_SECRET_\2\)\s*$/;
+  const prefixes = known.map((k) => `${k.upper}_`).sort((a, b) => b.length - a.length);
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i]);
+    const m = MAP.exec(lines[i]);
+    if (!m || MAP.test(lines[i + 1] ?? '')) continue;
+    // The last line of a run: the kinds the run maps for the other applications, and the new one's.
+    let j = i;
+    while (j > 0 && MAP.test(lines[j - 1])) j--;
+    const names = lines.slice(j, i + 1).map((l) => MAP.exec(l)![2]);
+    const kinds = new Set<string>();
+    for (const name of names) {
+      const pre = prefixes.find((x) => name.startsWith(x));
+      if (pre) kinds.add(name.slice(pre.length));
+    }
+    for (const kind of kinds) {
+      const name = `${n.upper}_${kind}`;
+      if (names.includes(name)) continue;
+      out.push(`${m[1]}EZTEST_SECRET_${name}: $(EZTEST_SECRET_${name})`);
+      changed = true;
+    }
+  }
+  return changed ? out.join('\n') : undefined;
 }

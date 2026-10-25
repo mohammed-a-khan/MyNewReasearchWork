@@ -11,7 +11,7 @@ import { mkdir, writeFile, appendFile, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { isMap, parseDocument, type YAMLMap } from 'yaml';
 import { CI_SYSTEMS, CI_TEMPLATES, type CiSystemName } from './ci-templates.js';
-import { appFiles, appNames, appScripts, envExampleLines, projectBlock, projectFiles, type AppNames } from './init-enterprise.js';
+import { addAppToPipeline, appFiles, appNames, appScripts, APP_NAME, envExampleLines, NPM_PLACEHOLDER_TEST, projectBlock, projectFiles, projectScripts, type AppNames } from './init-enterprise.js';
 
 export const INIT_TEMPLATES = ['basic', 'enterprise'] as const;
 export type InitTemplate = (typeof INIT_TEMPLATES)[number];
@@ -215,19 +215,48 @@ export async function initProject(dir: string, opts: InitOptions = {}): Promise<
         updated.push(`.env.example (${missing.map((l) => l.replace(/=.*$/, '')).join(', ')})`);
       }
     }
-    // npm scripts: added when missing, never changed.
-    const pkg = await addScripts(dir, appScripts(names, firstApp));
+    // npm scripts: the application's own, and the project's over every application. Missing ones are added; a
+    // project script is rewritten only while it is still the one init wrote for the applications before (or npm's
+    // placeholder test script), never when someone changed it.
+    const apps = configFile ? await enterpriseApps(dir, join(dir, configFile), names) : [names];
+    const before = apps.filter((a) => a.app !== names.app);
+    const previous = before.length ? projectScripts(before) : {};
+    const pkg = await addScripts(dir, { ...projectScripts(apps), ...appScripts(names) }, (key, current) => current === previous[key] || (key === 'test' && NPM_PLACEHOLDER_TEST.test(current.trim())));
     if (pkg.created) created.push('package.json');
-    else if (pkg.added.length) updated.push(`package.json (scripts: ${pkg.added.join(', ')})`);
-    else skipped.push('package.json (scripts)');
+    else {
+      const what = [
+        ...(pkg.added.length ? [`scripts: ${pkg.added.join(', ')}`] : []),
+        ...(pkg.replaced.length ? [`now over ${apps.map((a) => a.app).join(', ')}: ${pkg.replaced.join(', ')}`] : []),
+        ...(pkg.typeModule ? ['"type": "module"'] : []),
+      ];
+      if (what.length) updated.push(`package.json (${what.join('; ')})`);
+      else skipped.push('package.json (scripts)');
+      if (pkg.kept.length && before.length) next.push(`package.json: ${pkg.kept.join(', ')} ${pkg.kept.length === 1 ? 'was' : 'were'} changed by hand and ${pkg.kept.length === 1 ? 'is' : 'are'} kept; add ${names.app} to ${pkg.kept.length === 1 ? 'it' : 'them'} if wanted`);
+    }
+    // The pipeline init wrote: the application joins the apps parameter, its secrets are mapped.
+    let pipelineSecrets: string[] = [];
+    const pipeline = join(dir, 'pipelines', 'azure-pipelines.yml');
+    if (!firstApp && !created.includes('pipelines/azure-pipelines.yml') && existsSync(pipeline)) {
+      const text = await readFile(pipeline, 'utf8');
+      const next2 = addAppToPipeline(text, names, apps);
+      if (next2) {
+        await writeFile(pipeline, next2);
+        pipelineSecrets = [...new Set([...next2.matchAll(new RegExp(String.raw`EZTEST_SECRET_${names.upper}_[A-Z0-9_]+(?=:)`, 'g'))].map((m) => m[0]))];
+        updated.push(`pipelines/azure-pipelines.yml (apps: ${names.app}${pipelineSecrets.length ? `; secrets: ${pipelineSecrets.join(', ')}` : ''})`);
+      }
+    }
     if (!(await dependsOnEztest(dir))) next.push(`npm install --save-dev ${PACKAGE_NAME}   # the project's own EZTest, so npx eztest and CI use it`);
-    const step = (cmd: string, why: string) => next.push(`${cmd.padEnd(30)}# ${why}`);
+    // At least one space before the comment, also for a long application name.
+    const step = (cmd: string, why: string) => next.push(`${cmd.padEnd(29)} # ${why}`);
     step('npx eztest install-browsers', 'once, if Chrome is not installed');
     step('cp .env.example .env', 'and fill in the secrets (git ignores .env)');
     step(`npm run validate:${names.app}`, 'every journey parses; every step, query and data file resolves');
     step('npm run lint', 'the project guide\'s rules');
     step(`npm run test:${names.app}`, `point config/${names.app}/dev.yaml (baseUrl, database) at your app first`);
-    if (!firstApp) next.push(`add ${names.app} to the apps parameter of pipelines/azure-pipelines.yml, with its secret variables`);
+    if (!firstApp) {
+      if (pipelineSecrets.length) next.push(`define the secret variables ${pipelineSecrets.join(', ')} in the pipeline (pipelines/azure-pipelines.yml maps them)`);
+      else next.push(`add ${names.app} to the apps parameter of pipelines/azure-pipelines.yml, with its secret variables`);
+    }
     return { created, skipped, updated, next };
   }
   if (!(await dependsOnEztest(dir))) next.push(`npm install --save-dev ${PACKAGE_NAME}   # the project's own EZTest, so npx eztest and CI use it`);
@@ -268,23 +297,50 @@ async function addProject(file: string, n: AppNames): Promise<boolean> {
   return true;
 }
 
-/** Add missing npm scripts to package.json (creating it when there is none). */
-async function addScripts(dir: string, scripts: Record<string, string>): Promise<{ created: boolean; added: string[] }> {
+/**
+ * Add missing npm scripts to package.json (creating it when there is none). An existing script is replaced only
+ * when `replaceable` says so (`replaced`); other differing ones are `kept`. A package.json without "type" gets
+ * "type": "module" (code journeys and step files are ES modules; without it Node warns for every file it loads).
+ */
+async function addScripts(dir: string, scripts: Record<string, string>, replaceable: (key: string, current: string) => boolean = () => false): Promise<{ created: boolean; added: string[]; replaced: string[]; kept: string[]; typeModule: boolean }> {
   const file = join(dir, 'package.json');
   if (!existsSync(file)) {
     const name = basename(dir).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[._-]+/, '') || 'tests';
     await writeFile(file, JSON.stringify({ name, private: true, type: 'module', scripts }, null, 2) + '\n');
-    return { created: true, added: Object.keys(scripts) };
+    return { created: true, added: Object.keys(scripts), replaced: [], kept: [], typeModule: true };
   }
   const text = await readFile(file, 'utf8');
-  const pkg = JSON.parse(text) as { scripts?: Record<string, string> };
+  const pkg = JSON.parse(text) as { type?: string; scripts?: Record<string, string> };
   const have = pkg.scripts ?? {};
   const added = Object.keys(scripts).filter((k) => have[k] === undefined);
-  if (!added.length) return { created: false, added };
-  pkg.scripts = { ...have, ...Object.fromEntries(added.map((k) => [k, scripts[k]])) };
+  const differs = Object.keys(scripts).filter((k) => have[k] !== undefined && have[k] !== scripts[k]);
+  const replaced = differs.filter((k) => replaceable(k, have[k]));
+  const kept = differs.filter((k) => !replaced.includes(k) && isProjectScript(k));
+  const typeModule = pkg.type === undefined;
+  if (!added.length && !replaced.length && !typeModule) return { created: false, added, replaced, kept, typeModule };
+  const out: Record<string, unknown> = {};
+  // "type" goes next to the name, as npm writes it.
+  for (const [k, v] of Object.entries(pkg as Record<string, unknown>)) {
+    out[k] = v;
+    if (typeModule && (k === 'version' || (k === 'name' && !('version' in pkg)))) out.type = 'module';
+  }
+  if (typeModule && out.type === undefined) out.type = 'module';
+  out.scripts = { ...have, ...Object.fromEntries([...added, ...replaced].map((k) => [k, scripts[k]])) };
   const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  ';
-  await writeFile(file, JSON.stringify(pkg, null, indent) + '\n');
-  return { created: false, added };
+  await writeFile(file, JSON.stringify(out, null, indent) + '\n');
+  return { created: false, added, replaced, kept, typeModule };
+}
+
+/** Scripts over every application, which `init --app` keeps current (see projectScripts). */
+function isProjectScript(key: string): boolean {
+  return ['test', 'test:dev', 'test:sit', 'test:uat', 'test:smoke', 'test:regression', 'test:orders', 'test:headed', 'test:headless', 'test:parallel', 'validate', 'doctor'].includes(key);
+}
+
+/** The applications of an enterprise project: its projects that have an apps/<name>/ folder, plus the one being added. */
+async function enterpriseApps(dir: string, configFile: string, adding: AppNames): Promise<AppNames[]> {
+  const names = (await projectNames(configFile)).filter((p) => APP_NAME.test(p) && (p === adding.app || existsSync(join(dir, 'apps', p))));
+  if (!names.includes(adding.app)) names.push(adding.app);
+  return names.map(appNames);
 }
 
 async function dependsOnEztest(dir: string): Promise<boolean> {

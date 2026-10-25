@@ -132,7 +132,7 @@ describe('eztest init --template enterprise', () => {
     expect(p.parameters[0]).toMatchObject({ name: 'apps', default: ['web'] });
     expect(p.stages.map((s) => s.stage)).toEqual(['Checks', 'Smoke', 'Regression', 'TestSIT']);
     for (const s of p.stages.slice(1)) expect(s.dependsOn).toBe('Checks');
-    for (const cmd of ['eztest validate --project ${{ app }} -e dev', 'eztest elements unused --project ${{ app }} -e dev', 'eztest lint --format junit -o eztest-lint.xml',
+    for (const cmd of ['eztest validate --project ${{ app }} -e dev', 'eztest elements unused --project ${{ app }} -e dev --strict', 'eztest lint --format junit -o eztest-lint.xml',
       '--pipeline pr', '--pipeline nightly', 'eztest merge shards', 'eztest gate eztest-results/merged', 'eztest ado publish', '--pipeline deploy-sit', 'strategy: { parallel: 2 }']) {
       expect(text).toContain(cmd);
     }
@@ -176,9 +176,13 @@ describe('eztest init --template enterprise', () => {
     expect(r.updated).toEqual([
       'eztest.config.yaml (projects.back-office)',
       '.env.example (EZTEST_SECRET_BACK_OFFICE_CLERK_PASSWORD, EZTEST_SECRET_BACK_OFFICE_DB_PASSWORD)',
-      'package.json (scripts: test:back-office, validate:back-office, studio:back-office)',
+      'package.json (scripts: test:back-office, validate:back-office, studio:back-office; now over web, back-office: test, test:dev, test:sit, test:uat, test:smoke, test:regression, test:orders, test:headed, test:headless, test:parallel, validate, doctor)',
+      'pipelines/azure-pipelines.yml (apps: back-office; secrets: EZTEST_SECRET_BACK_OFFICE_CLERK_PASSWORD, EZTEST_SECRET_BACK_OFFICE_DB_PASSWORD)',
     ]);
-    expect(r.next.at(-1)).toMatch(/add back-office to the apps parameter of pipelines\/azure-pipelines\.yml/);
+    expect(r.next.at(-1)).toBe('define the secret variables EZTEST_SECRET_BACK_OFFICE_CLERK_PASSWORD, EZTEST_SECRET_BACK_OFFICE_DB_PASSWORD in the pipeline (pipelines/azure-pipelines.yml maps them)');
+    // Every "next" line has a space before its comment, also for a long application name.
+    for (const l of r.next.filter((x) => x.includes("#"))) expect(l).toMatch(/\s#/);
+    expect(r.next).toContain(`npm run validate:back-office${' '.repeat(29 - 'npm run validate:back-office'.length)} # every journey parses; every step, query and data file resolves`);
     // The config keeps everything it had, comments included, and gains the overlay.
     const cfg = await readFile(join(dir, 'eztest.config.yaml'), 'utf8');
     for (const line of cfgBefore.split('\n').filter((l) => l.trim().startsWith('#'))) expect(cfg).toContain(line.trim());
@@ -191,12 +195,54 @@ describe('eztest init --template enterprise', () => {
     // Ids and query names carry the application, so two applications never collide.
     expect(await readFile(join(dir, 'apps/back-office/journeys/orders/place-order.ez'), 'utf8')).toMatch(/^Id: back-office-orders-place-order$/m);
     const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
-    expect(pkg.scripts.test).toBe('eztest run --project web -e dev');     // the first application keeps the short names
+    // The project scripts cover every application; each application keeps its own.
+    expect(pkg.scripts.test).toBe('eztest run --project web -e dev && eztest run --project back-office -e dev');
+    expect(pkg.scripts['test:smoke']).toBe('eztest run --project web -e dev -t @smoke && eztest run --project back-office -e dev -t @smoke');
+    expect(pkg.scripts.validate).toBe('eztest validate --project web -e dev && eztest validate --project back-office -e dev');
+    expect(pkg.scripts.lint).toBe('eztest lint');
+    expect(pkg.scripts.studio).toBe('eztest studio --project web -e dev');
     expect(pkg.scripts['test:back-office']).toBe('eztest run --project back-office -e dev');
+    // The pipeline runs it, with its secrets mapped where the others' are.
+    const pipeline = await readFile(join(dir, 'pipelines', 'azure-pipelines.yml'), 'utf8');
+    const yml = parse(pipeline) as { parameters: Array<{ name: string; default: string[] }> };
+    expect(yml.parameters.find((x) => x.name === 'apps')?.default).toEqual(['web', 'back-office']);
+    expect(pipeline.match(/EZTEST_SECRET_BACK_OFFICE_CLERK_PASSWORD: \$\(EZTEST_SECRET_BACK_OFFICE_CLERK_PASSWORD\)/g)).toHaveLength(3);
+    expect(pipeline.match(/EZTEST_SECRET_BACK_OFFICE_DB_PASSWORD: \$\(EZTEST_SECRET_BACK_OFFICE_DB_PASSWORD\)/g)).toHaveLength(2);
+    expect(pipeline.match(/EZTEST_SECRET_WEB_DB_PASSWORD: /g)).toHaveLength(2);
+    // A third application: the scripts written for two grow to three.
+    await initProject(dir, { app: 'claims' });
+    const pkg3 = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg3.scripts.validate).toBe('eztest validate --project web -e dev && eztest validate --project back-office -e dev && eztest validate --project claims -e dev');
+    expect((parse(await readFile(join(dir, 'pipelines', 'azure-pipelines.yml'), 'utf8')) as { parameters: Array<{ name: string; default: string[] }> }).parameters[0].default).toEqual(['web', 'back-office', 'claims']);
     // Adding it again changes nothing.
-    const again = await initProject(dir, { app: 'back-office' });
+    const again = await initProject(dir, { app: 'claims' });
     expect(again.created).toEqual([]);
     expect(again.updated).toEqual([]);
+  });
+
+  it('after npm init: the placeholder test script is replaced, "type": "module" is added, scripts changed by hand are kept', async () => {
+    const dir = await tempDir('init-ent-npm-init');
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'qa', version: '1.0.0', main: 'index.js', scripts: { test: 'echo "Error: no test specified" && exit 1' }, license: 'ISC' }, null, 2));
+    const r = await initProject(dir, { template: 'enterprise' });
+    const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as { type: string; scripts: Record<string, string> };
+    expect(pkg.scripts.test).toBe('eztest run --project web -e dev');
+    expect(pkg.type).toBe('module');
+    expect(Object.keys(pkg).slice(0, 3)).toEqual(['name', 'version', 'type']);
+    expect(r.updated.find((u) => u.startsWith('package.json'))).toMatch(/now over web: test; "type": "module"\)$/);
+    // A project script someone changed is kept when an application is added, and the output says so.
+    pkg.scripts.validate = 'eztest validate --project web -e dev --strict';
+    await writeFile(join(dir, 'package.json'), JSON.stringify(pkg, null, 2));
+    const added = await initProject(dir, { app: 'practice-sites' });
+    const after = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as { type: string; scripts: Record<string, string> };
+    expect(after.scripts.validate).toBe('eztest validate --project web -e dev --strict');
+    expect(after.scripts.test).toBe('eztest run --project web -e dev && eztest run --project practice-sites -e dev');
+    expect(added.next).toContain('package.json: validate was changed by hand and is kept; add practice-sites to it if wanted');
+    expect(added.next).toContain('npm run validate:practice-sites # every journey parses; every step, query and data file resolves');
+    // An explicit "type" is left alone.
+    const cjs = await tempDir('init-ent-cjs');
+    await writeFile(join(cjs, 'package.json'), JSON.stringify({ name: 'qa', type: 'commonjs' }, null, 2));
+    await initProject(cjs, { template: 'enterprise' });
+    expect((JSON.parse(await readFile(join(cjs, 'package.json'), 'utf8')) as { type: string }).type).toBe('commonjs');
   });
 
   it('rejects application names that are not folder and id safe, and unknown templates', async () => {
