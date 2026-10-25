@@ -313,7 +313,7 @@ A flaky journey goes on EZTest's quarantine list (`.eztest/quarantine.json`, com
 | `text-only-locator` | warning | visible-text-only targets on a translated UI | [Locators](#locators) |
 | `weak-locator` | info | a target whose best locator scores below 40 | [Locators](#locators) |
 | `unsafe-xpath-quotes` | error | `\'` in XPath, values pasted inside XPath quotes in code | [Locators](#locators) |
-| `repeated-selector` | warning | one raw selector (`css=`, `xpath=`, `testid=`) written in several steps | [The element repository](#the-element-repository) |
+| `repeated-selector` | warning | one raw selector (`css=`, `xpath=`, `testid=`) written in several steps (the locators EZTest builds from plain English, such as a date picker's, are not counted) | [The element repository](#the-element-repository) |
 | `missing-postcondition` | warning | a state-changing, submitting, signing-in or navigating action with nothing checked after it | [Assertions](#assertions-after-every-meaningful-action) |
 | `no-assertion` | warning | a journey that checks nothing (library, setup and manual journeys are exempt) | [Assertions](#assertions-after-every-meaningful-action) |
 | `plaintext-secret` | error | passwords, tokens and keys in journeys, code, data, config layers and `.env.example` (values redacted) | [Secrets](#secrets) |

@@ -143,7 +143,7 @@ never executed.
 | `positional-xpath` | warning | `[3]`, `position()`, `last()` |
 | `text-only-locator` | warning | targets found only by visible text, when the UI is translated (`--translated`, `lint.translatedUi`, or a journey with `Locale:`) |
 | `raw-selector` | warning | targets found only by CSS or XPath, with no name, label or test id |
-| `repeated-selector` | warning | one raw selector (`css=`, `xpath=`, `testid=`) written in several steps instead of one element entry |
+| `repeated-selector` | warning | one raw selector (`css=`, `xpath=`, `testid=`) written in several steps instead of one element entry (only selectors written in the journey; not the ones EZTest builds from plain English) |
 | `missing-postcondition` | warning | Save/Submit/Delete/Pay/Sign in/Search... clicks, link clicks, Enter in a field, non-GET API calls and INSERT/UPDATE/DELETE with nothing checked after them |
 | `no-assertion` | warning | a journey that checks nothing |
 | `plaintext-secret` | error | secret-named variables, fields, data columns and config keys with literal values, typed passwords, JWTs, AWS/GitHub/Slack tokens, private keys, credentials in URLs, values in `.env.example` (values are redacted in the report) |

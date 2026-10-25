@@ -126,6 +126,17 @@ describe('project guide lint rules: across files', () => {
     expect(by(await lintPaths(['apps'], { cwd: once }), 'repeated-selector')).toEqual([]);
   });
 
+  it('repeated-selector: locators EZTest generates from plain English are not counted (a date picker in two journeys)', async () => {
+    const pick = (id: string) => GOOD('Open /pim/addEmployee\nPick ${birthday} in the "Date of Birth" date picker\n  Expect the "Date of Birth" date picker to show ${birthday}\nChoose "Berlin" in the City combobox\n  Expect the City combobox to show "Berlin"\n', 'Variables: birthday=1990-04-15').replace('web-orders-save', id);
+    const dir = await project({ 'apps/web/journeys/orders/a.ez': pick('web-pim-a'), 'apps/web/journeys/orders/b.ez': pick('web-pim-b') });
+    const r = await lintPaths(['apps'], { cwd: dir });
+    expect(r.findings.filter((f) => f.rule === 'repeated-selector').map((f) => f.message)).toEqual([]);
+    // The same locator written by the author, twice, is still reported.
+    const raw = (id: string) => GOOD('Open /pim/addEmployee\nClick css=[aria-label="Date of Birth"]\n  Expect the page contains "1990"\n').replace('web-orders-save', id);
+    const dir2 = await project({ 'apps/web/journeys/orders/a.ez': raw('web-pim-a'), 'apps/web/journeys/orders/b.ez': raw('web-pim-b') });
+    expect((await lintPaths(['apps'], { cwd: dir2 })).findings.filter((f) => f.rule === 'repeated-selector').map((f) => f.message)).toEqual([expect.stringMatching(/^css=\[aria-label="Date of Birth"\] is written 2 times/)]);
+  });
+
   it('undeclared-dependency: a value only another journey captures, unless Depends on:, a run-wide Setup value or a config variable', async () => {
     const create = GOOD('Open /orders/new\nClick the "Place order" button\n  Expect the page contains "created"\nCapture the text of testid=order-number as orderNumber\n').replace('web-orders-save', 'web-orders-create');
     const use = (head = '') => GOOD('Open /orders/${orderNumber}\nExpect the page contains "${orderNumber}"\n', head).replace('web-orders-save', 'web-orders-approve');

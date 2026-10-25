@@ -53,9 +53,16 @@ function firstLine(lines: string[], needle: string): number | undefined {
   return i >= 0 ? i + 1 : undefined;
 }
 
-function rawSelectorsOf(t: Target | undefined): string[] {
+/**
+ * The raw selectors (css=, xpath=, testid=) a target holds that the author wrote: `written` says whether a value
+ * is in the source. Candidates EZTest generates from plain English (a date picker's `[aria-label="Date of Birth"]`
+ * and the section XPath of a widget name) are not anyone's selector and cannot be moved to the repository.
+ */
+function rawSelectorsOf(t: Target | undefined, written: (value: string) => boolean = () => true): string[] {
   if (!t || t.element) return [];
-  return t.locators.filter((c) => c.strategy === 'css' || c.strategy === 'xpath' || c.strategy === 'testId').map((c) => `${c.strategy === 'testId' ? 'testid' : c.strategy}=${c.value}`);
+  return t.locators
+    .filter((c) => (c.strategy === 'css' || c.strategy === 'xpath' || c.strategy === 'testId') && written(c.value))
+    .map((c) => `${c.strategy === 'testId' ? 'testid' : c.strategy}=${c.value}`);
 }
 
 function ownText(s: Step): string {
@@ -67,6 +74,7 @@ export const journeyFacts = {
   /** Facts of an `.ez`, YAML or JSON journey. */
   journey(j: Journey, file: string, text: string): JourneyFacts {
     const lines = text.split(/\r?\n/);
+    const isEz = /\.ez$/i.test(file);
     const steps = flattenSteps(j.steps);
     const sets = new Set<string>([...Object.keys(j.variables), ...(j.params ?? []), ...j.data.map((d) => d.as), 'error', 'item', 'row', 'index', 'i']);
     for (const row of j.examples ?? []) for (const k of Object.keys(row)) sets.add(k);
@@ -84,7 +92,9 @@ export const journeyFacts = {
       if (s.flow?.as) sets.add(s.flow.as);
       for (const m of ownText(s).matchAll(USE)) if (!uses.has(m[1])) uses.set(m[1], firstLine(lines, `\${${m[1]}`));
       const targets = [s.target, s.to, ...s.postconditions.flatMap((c) => [('target' in c ? c.target : undefined) as Target | undefined, ('of' in c ? c.of : undefined) as Target | undefined])];
-      for (const t of targets) for (const key of rawSelectorsOf(t)) selectors.push({ key, line: firstLine(lines, key.slice(0, 60)) ?? firstLine(lines, key.replace(/^\w+=/, '').slice(0, 60)) });
+      // In an .ez file a selector is written on the step's own line; in YAML / JSON anywhere in the file (escaped in JSON).
+      const written = (v: string) => (isEz ? s.intent.includes(v) : text.includes(v) || text.includes(JSON.stringify(v).slice(1, -1)));
+      for (const t of targets) for (const key of rawSelectorsOf(t, written)) selectors.push({ key, line: firstLine(lines, key.slice(0, 60)) ?? firstLine(lines, key.replace(/^\w+=/, '').slice(0, 60)) });
     }
     const idLine = lines.findIndex((l) => /^\s*(?:id\s*:|"id"\s*:)/i.test(l));
     return {
