@@ -355,7 +355,9 @@ function resolveVars(vars: Record<string, string>, env: Record<string, string>):
     const scope = { ...cur, ...env };
     const next: Record<string, string> = {};
     for (const [k, v] of Object.entries(cur)) {
-      const r = env[k] !== undefined ? env[k] : interpolate(v, scope);
+      // A variable's own name inside its value is the environment's variable of that name (`X: ${X:-https://...}`
+      // is the environment's X, else the default), never the value being defined.
+      const r = env[k] !== undefined ? env[k] : interpolate(v, { ...scope, [k]: undefined });
       if (r !== v) changed = true;
       next[k] = r;
     }
@@ -363,6 +365,39 @@ function resolveVars(vars: Record<string, string>, env: Record<string, string>):
     if (!changed) break;
   }
   return cur;
+}
+
+/**
+ * Variables of `vars` that refer to each other in a cycle, as a chain that ends where it starts (`A -> B -> A`;
+ * `X -> X` for `X: ${X}`), or undefined when there is none. A variable the environment sets takes the
+ * environment's value, so it refers to nothing; a variable's own name with a default (`X: ${X:-https://...}`) is
+ * the environment's variable, else the default, not a cycle. Another variable's name is a reference with or
+ * without a default (the variable exists, so its default never applies).
+ */
+export function varCycle(vars: Record<string, string>, env: Record<string, string | undefined> = {}): string[] | undefined {
+  const refs = (k: string) => (env[k] !== undefined ? [] : [...vars[k].matchAll(/(\$?)\$\{([A-Za-z_][\w.]*)(:-[^}]*)?\}/g)]
+    .filter((m) => !m[1] && m[2] in vars && (m[2] !== k || m[3] === undefined))
+    .map((m) => m[2]));
+  const state = new Map<string, 'open' | 'done'>();
+  const path: string[] = [];
+  const visit = (k: string): string[] | undefined => {
+    if (state.get(k) === 'done') return undefined;
+    if (state.get(k) === 'open') return [...path.slice(path.indexOf(k)), k];
+    state.set(k, 'open');
+    path.push(k);
+    for (const n of refs(k)) {
+      const c = visit(n);
+      if (c) return c;
+    }
+    path.pop();
+    state.set(k, 'done');
+    return undefined;
+  };
+  for (const k of Object.keys(vars)) {
+    const c = visit(k);
+    if (c) return c;
+  }
+  return undefined;
 }
 
 export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedConfig> {
@@ -463,6 +498,13 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
   const configVars: Record<string, string> = {};
   if (isObj(raw.vars)) for (const [k, v] of Object.entries(raw.vars)) if (v !== undefined && v !== null && typeof v !== 'object') configVars[k] = String(v);
   const resolvedVars = resolveVars(configVars, envVariables);
+  const cycle = varCycle(configVars, envVariables);
+  if (cycle) {
+    const self = cycle.length === 2;
+    throw new ConfigError('Configuration could not be resolved', [
+      `vars.${cycle[0]}: ${self ? 'refers to itself' : `the variables refer to each other in a cycle (${cycle.join(' -> ')})`} and nothing gives ${self ? 'it' : 'them'} a value: set ${cycle[0]} in the environment or .env, or give the reference a default (\${${cycle[0]}:-https://...})`,
+    ]);
+  }
   const variables: Record<string, string> = { ...resolvedVars, ...envVariables };
   const masterKey = variables[MASTER_KEY_ENV];
   if (masterKey) masker.add(masterKey);
