@@ -23,7 +23,7 @@ import type { ElementHandle, JSHandle } from './handles.js';
 import type { PageFunction } from '../eval-types.js';
 import { APIRequestContext } from '../request.js';
 import { Keyboard, Mouse, Touchscreen } from './input.js';
-import { NetworkManager, type Request, type Response, type RouteEntry, type RouteHandlerFn, type WebSocket } from './network.js';
+import { markFetchDisabled, markFetchEnabled, NetworkManager, type Request, type Response, type RouteEntry, type RouteHandlerFn, type WebSocket } from './network.js';
 import { Video } from './video.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -341,9 +341,12 @@ export class TargetSession {
     const routes = this.page.routeEntries().length + ctx.routeEntries().length > 0 || ctx.hasClientCertificates();
     const auth = !!ctx.httpCredentials();
     if (!routes && !auth) {
+      // Requests still paused are released by the browser with the domain: answers to them are no longer sent.
+      markFetchDisabled(this.cdp);
       await this.cdp.send('Fetch.disable').catch(() => undefined);
       return;
     }
+    markFetchEnabled(this.cdp);
     await this.cdp.send('Fetch.enable', { handleAuthRequests: auth, patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
   }
 }

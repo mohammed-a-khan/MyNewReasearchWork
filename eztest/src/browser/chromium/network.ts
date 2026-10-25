@@ -377,23 +377,89 @@ export interface RouteBackend {
   continue(overrides: ContinueOptions): Promise<void>;
 }
 
+// ---------------------------------------------------------------------- Fetch domain lifecycle
+
+/**
+ * The Fetch domain of one CDP session, as EZTest last set it. `epoch` counts the times interception was turned
+ * off: Fetch.disable releases every request paused until then (the browser continues them on its own), so a
+ * request paused in an earlier epoch has nothing left to answer, and the browser refuses an answer sent after the
+ * domain went off ("Fetch domain is not enabled").
+ */
+interface FetchDomainState {
+  enabled: boolean;
+  epoch: number;
+}
+const fetchDomains = new WeakMap<CDPSession, FetchDomainState>();
+
+function fetchDomain(session: CDPSession): FetchDomainState {
+  let s = fetchDomains.get(session);
+  if (!s) fetchDomains.set(session, (s = { enabled: false, epoch: 0 }));
+  return s;
+}
+
+/** Internal: Fetch.enable is being sent on this session. */
+export function markFetchEnabled(session: CDPSession): void {
+  fetchDomain(session).enabled = true;
+}
+
+/** Internal: Fetch.disable is being sent on this session; requests paused until now are the browser's again. */
+export function markFetchDisabled(session: CDPSession): void {
+  const s = fetchDomain(session);
+  if (!s.enabled) return;
+  s.enabled = false;
+  s.epoch++;
+}
+
+/** A paused request's place in its session's interception lifecycle (taken when Fetch.requestPaused arrives). */
+export interface PausedTicket {
+  session: CDPSession;
+  epoch: number;
+}
+
+export function pausedTicket(session: CDPSession): PausedTicket {
+  return { session, epoch: fetchDomain(session).epoch };
+}
+
+/** Interception was turned off since the request paused: the browser released it with the domain. */
+function releasedByDisable(t: PausedTicket): boolean {
+  const s = fetchDomain(t.session);
+  return s.epoch !== t.epoch || !s.enabled;
+}
+
+/** Errors that mean the request or its target is gone (navigated away, closed, cancelled): nothing to answer. */
+const GONE = /Invalid InterceptionId|Target closed|target closed|connection closed|was closed before|Invalid state/;
+
+/**
+ * Answer a paused request (Fetch.continueRequest, fulfillRequest, failRequest, continueWithAuth). Nothing is sent
+ * for a request that interception's end already released, and the refusal of an answer that crossed Fetch.disable
+ * on the wire is expected. Any other protocol error is the caller's.
+ */
+export async function answerPaused(t: PausedTicket, method: string, params: ProtocolParams): Promise<void> {
+  if (releasedByDisable(t)) return;
+  try {
+    await t.session.send(method, params);
+  } catch (e) {
+    if (releasedByDisable(t) || t.session.closed) return;
+    if (GONE.test((e as Error).message)) return;
+    throw e;
+  }
+}
+
 /** The CDP Fetch-domain backend for one paused request. */
-export function cdpRouteBackend(session: CDPSession, fetchRequestId: string, request: Request): RouteBackend {
+export function cdpRouteBackend(session: CDPSession, fetchRequestId: string, request: Request, ticket: PausedTicket = pausedTicket(session)): RouteBackend {
   return {
     abort: async (reason) => {
-      await session.send('Fetch.failRequest', { requestId: fetchRequestId, errorReason: ABORT_REASONS[reason] ?? 'Failed' }).catch(() => undefined);
+      await answerPaused(ticket, 'Fetch.failRequest', { requestId: fetchRequestId, errorReason: ABORT_REASONS[reason] ?? 'Failed' }).catch(() => undefined);
     },
     fulfill: async (status, responseHeaders, body) => {
-      await session.send('Fetch.fulfillRequest', {
+      await answerPaused(ticket, 'Fetch.fulfillRequest', {
         requestId: fetchRequestId,
         responseCode: status,
         responseHeaders,
         body: body.toString('base64'),
-      }).catch((e: Error) => {
-        if (!/Invalid InterceptionId|Target closed|target closed|connection closed|was closed before/.test(e.message)) throw e;
       });
     },
-    continue: (o) => continueRequest(session, fetchRequestId, o, request),
+    continue: (o) => continueRequest(ticket, fetchRequestId, o, request),
   };
 }
 
@@ -547,7 +613,7 @@ export function postDataBuffer(v: unknown): Buffer {
   return Buffer.from(JSON.stringify(v), 'utf8');
 }
 
-async function continueRequest(session: CDPSession, fetchRequestId: string, o: ContinueOptions, request: Request): Promise<void> {
+async function continueRequest(ticket: PausedTicket, fetchRequestId: string, o: ContinueOptions, request: Request): Promise<void> {
   const params: ProtocolParams = { requestId: fetchRequestId };
   if (o.url !== undefined) params.url = o.url;
   if (o.method !== undefined) params.method = o.method;
@@ -557,9 +623,7 @@ async function continueRequest(session: CDPSession, fetchRequestId: string, o: C
     // Keep request headers' original casing semantics: header names are case-insensitive.
   }
   void request;
-  await session.send('Fetch.continueRequest', params).catch((e: Error) => {
-    if (!/Invalid InterceptionId|Target closed|target closed|connection closed|was closed before|Invalid state/.test(e.message)) throw e;
-  });
+  await answerPaused(ticket, 'Fetch.continueRequest', params);
 }
 
 export type RouteHandlerFn = (route: Route, request: Request) => unknown;
@@ -664,6 +728,7 @@ export function isBrowserFavicon(url: string, resourceType: string | undefined):
 interface PendingPause {
   event: any;
   session: CDPSession;
+  ticket: PausedTicket;
 }
 
 export class NetworkManager {
@@ -737,7 +802,7 @@ export class NetworkManager {
     const paused = this.pausedByNetworkId.get(e.requestId);
     if (paused && paused.event.request.url + (paused.event.request.urlFragment ?? '') === req.url_) {
       this.pausedByNetworkId.delete(e.requestId);
-      void this.route(req, paused.session, paused.event);
+      void this.route(req, paused.ticket, paused.event);
     }
   }
 
@@ -873,30 +938,31 @@ export class NetworkManager {
 
   // -------------------------------------------------- Fetch domain (interception)
   onRequestPaused(session: CDPSession, e: any): void {
+    const ticket = pausedTicket(session);
     const networkId = e.networkId as string | undefined;
     const url = e.request.url + (e.request.urlFragment ?? '');
     if ((networkId && this.ignored.has(networkId)) || (isBrowserFavicon(url, e.resourceType) && !(networkId && this.requests.has(networkId)))) {
-      void session.send('Fetch.continueRequest', { requestId: e.requestId }).catch(() => {});
+      void answerPaused(ticket, 'Fetch.continueRequest', { requestId: e.requestId }).catch((err: Error) => this.page.reportDriverWarning(`continuing ${url} failed: ${err.message}`));
       return;
     }
     if (networkId) {
       const req = this.requests.get(networkId);
       if (req && !req.routed && !req.finished && req.url_ === url && !req.response_) {
-        void this.route(req, session, e);
+        void this.route(req, ticket, e);
         return;
       }
-      this.pausedByNetworkId.set(networkId, { event: e, session });
+      this.pausedByNetworkId.set(networkId, { event: e, session, ticket });
       // If the Network event never comes (e.g. the request is invisible to the Network domain), route with a synthetic request.
       setTimeout(() => {
         const p = this.pausedByNetworkId.get(networkId);
         if (p !== undefined && p.event === e) {
           this.pausedByNetworkId.delete(networkId);
-          void this.route(this.syntheticRequest(session, e, networkId), session, e);
+          void this.route(this.syntheticRequest(session, e, networkId), ticket, e);
         }
       }, 200);
       return;
     }
-    void this.route(this.syntheticRequest(session, e, e.requestId), session, e);
+    void this.route(this.syntheticRequest(session, e, e.requestId), ticket, e);
   }
 
   private syntheticRequest(session: CDPSession, e: any, id: string): Request {
@@ -912,9 +978,11 @@ export class NetworkManager {
   }
 
   /** Run the route handler chain for a paused request. */
-  private async route(req: Request, session: CDPSession, e: any): Promise<void> {
+  private async route(req: Request, ticket: PausedTicket, e: any): Promise<void> {
     req.routed = true;
-    await runRouteChain(this.page, req, cdpRouteBackend(session, e.requestId as string, req));
+    // A request that interception's end released before its turn came is the browser's: no handler sees it.
+    if (releasedByDisable(ticket)) return;
+    await runRouteChain(this.page, req, cdpRouteBackend(ticket.session, e.requestId as string, req, ticket));
   }
 
   onAuthRequired(session: CDPSession, e: any): void {
@@ -928,9 +996,9 @@ export class NetworkManager {
         this.authAttempts.add(key);
       }
     }
-    void session.send('Fetch.continueWithAuth', {
+    void answerPaused(pausedTicket(session), 'Fetch.continueWithAuth', {
       requestId: e.requestId,
       authChallengeResponse: response === 'ProvideCredentials' ? { response, username: creds!.username, password: creds!.password } : { response },
-    }).catch(() => undefined);
+    }).catch((err: Error) => this.page.reportDriverWarning(`answering the authentication challenge of ${e.request.url} failed: ${err.message}`));
   }
 }

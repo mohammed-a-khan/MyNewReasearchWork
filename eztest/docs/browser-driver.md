@@ -216,6 +216,13 @@ Every EZTest module that touches a page imports it.
   (before / after, target marked), network with bodies, console messages and
   screencast frames in the zip layout EZTest's trace importer reads. It is not
   meant for other trace viewers; sources and action logs are not recorded.
+- **Removing the last route (Chromium).** Interception is the CDP Fetch domain, on
+  while any route (or HTTP credentials, or a client certificate) is set. Removing
+  the last one turns it off, and the browser continues every request still paused
+  on its own. A handler that answers such a request afterwards (`route.continue()`,
+  `fulfill`, `abort`) does nothing and gets no error; requests paused before the
+  domain went off reach no handler. A protocol error for a request of the current
+  interception is still raised.
 - **HAR.** `routeFromHAR` replays HAR 1.2 files (and HAR zips). Recording
   (`update: true`) is not implemented.
 - **storageState** saves the localStorage of origins open in the context's

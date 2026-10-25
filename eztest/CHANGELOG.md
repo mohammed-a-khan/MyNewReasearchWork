@@ -6,6 +6,7 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ### Found by a consumer project on 0.1.0-beta.2, fixed in 0.1.0-beta.3
 
+- A worker died with `ProtocolError: Fetch.continueRequest: Fetch domain is not enabled` when a cached role session was checked on a page that keeps requesting (a dashboard as `verifyUrl`). The check routes requests while `verifyUrl` opens and unroutes afterwards; unrouting turns the CDP Fetch domain off, which releases every paused request, but the driver still answered the requests paused before (handlers in flight, requests waiting for their Network event) and the refusal became an unhandled rejection. The driver now tracks the Fetch domain's lifecycle per target session: an answer to a request that interception's end released is not sent (or its refusal, when it crossed `Fetch.disable` on the wire, is expected), and such a request reaches no handler. Other protocol errors are raised as before. Proven on a real OrangeHRM (dashboard as `verifyUrl`, cached session on 2 workers, 4 runs) and in the driver's tests.
 - `EZTEST_SECRET_*` variables (the env secret store's prefix in the generated templates) printed "is not an EZTest setting" on every command. Variables with the prefix `EZTEST_SECRET_`, or with the `EZTEST_` prefix of any configured `env` secret store, are secrets and no longer read as settings.
 
 ### The EZTest Project Guide, enforced
