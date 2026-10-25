@@ -14,7 +14,7 @@
 import type { LocatorCandidate, Step, Target } from '../core/index.js';
 import { literal, protectQuotes, quoteText, restoreQuotes } from './quotes.js';
 import type { IntentRule, StepBody } from './rules.js';
-import { describeTarget } from './target.js';
+import { describeTarget, ELEMENT_REF_RE } from './target.js';
 
 export type ComponentWidget =
   | 'grid' | 'combobox' | 'datepicker' | 'tree' | 'tabs' | 'accordion' | 'dialog' | 'toast' | 'richtext' | 'slider' | 'masked' | 'dropzone' | 'chart' | 'list';
@@ -133,6 +133,19 @@ function nameCandidates(name: string, kind: ComponentWidget): LocatorCandidate[]
 }
 
 /**
+ * The repository element a widget description names: `the @Pim.dateOfBirth date picker`, `@Orders.grid`. Only
+ * when nothing but an article and the widget's kind noun surrounds the reference.
+ */
+export function elementRefIn(description: string, kind: ComponentWidget): string | undefined {
+  const { text } = protectQuotes(description.trim());
+  const ref = ELEMENT_REF_RE.exec(text);
+  if (!ref) return undefined;
+  const rest = text.replace(ref[0], ' ').replace(/\s+/g, ' ').trim();
+  const noun = kind === 'dialog' ? String.raw`(?:dialog|modal|popup|pop-up|window)` : kind === 'toast' ? String.raw`(?:toast|notification|snackbar|message)` : NOUNS[kind];
+  return new RegExp(String.raw`^(?:(?:the|a|an)\s*)?(?:${noun})?$`, 'i').test(rest) ? ref[1] : undefined;
+}
+
+/**
  * Locator candidates for a widget container, most semantic first: an
  * accessible name on the widget role or a labelled region, an aria-label, a
  * <label>, or the section a heading/legend/label of that name introduces.
@@ -143,6 +156,9 @@ export function widgetTarget(description: string, kind: ComponentWidget): Target
   const pass = describeTarget(d);
   const looksSelector = pass.locators.length === 1 && ['css', 'xpath', 'testId'].includes(pass.locators[0].strategy) && !/\s/.test(d.replace(/^(css|xpath|testid)\s*=\s*/i, ''));
   if (looksSelector || /^(?:css|xpath|testid|test-id|data-testid|role|text)\s*=/i.test(d) || /\s(?:at|located\s+by)\s+(?:css|xpath|testid|role|text)\s*=/i.test(d)) return pass;
+  // "the @Pim.dateOfBirth date picker": an element of the repository, which has the locators (as in any phrasing).
+  const ref = elementRefIn(d, kind);
+  if (ref) return { description: d, locators: [], element: ref };
   // "the slider", "the date picker": the only one of its kind on the page (strict: exactly one must match).
   if (kind !== 'dialog' && kind !== 'toast' && new RegExp(String.raw`^(?:the\s+|a\s+|an\s+)?${NOUNS[kind]}$`, 'i').test(d)) {
     const locators: LocatorCandidate[] = [{ strategy: 'role', value: (ROLE_OF[kind] ?? ['region'])[0] }];

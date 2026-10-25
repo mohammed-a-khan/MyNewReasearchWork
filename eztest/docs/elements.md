@@ -51,6 +51,7 @@ eztest elements import-screens src/screens --dry-run
 | Form | Example |
 |---|---|
 | Reference | `Click the @Checkout.placeOrder button` · `Click @Checkout.placeOrder` · `Expect the @Checkout.total text has text "39.98"` |
+| Component phrasings | `Pick 1990-04-15 in the @Pim.dateOfBirth date picker` · `Choose "Berlin" in the @Orders.city combobox` · `Open the "Billing" tab in the @Settings.tabs tabs` · `Sort the @Orders.list grid by Amount` (the element is the widget, or the field or section it sits in) |
 | Description or alias | `Click the "Place order" button` or `Click the Checkout button` (matches the element's description or an alias; turn off with `elements.matchDescriptions: false`) |
 | Anchor of a relative target | `Click the "Remove" button near @Checkout.total` |
 | YAML / JSON | `target: { description: the place order button, element: Checkout.placeOrder }`, or a string step |
