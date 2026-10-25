@@ -70,8 +70,8 @@ export interface ElementUsage {
   journeyName: string;
   stepId: string;
   intent: string;
-  /** How the journey refers to the element. */
-  via: 'reference' | 'description';
+  /** How the journey refers to the element (`code`: a screen model entry or an @reference in code, read as text). */
+  via: 'reference' | 'description' | 'code';
   /** Where in the step: target, drag destination, expectation, or an anchor of a scoped target. */
   role: 'target' | 'to' | 'expect' | 'anchor';
 }

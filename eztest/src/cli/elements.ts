@@ -3,7 +3,7 @@
  * repository (docs/elements.md).
  *
  *   eztest elements list                 every element, its locators and how many journeys use it
- *   eztest elements unused               elements no journey uses (exit 1 when there are some, with --strict)
+ *   eztest elements unused               elements no journey and no code uses (exit 1 when there are some, with --strict)
  *   eztest elements duplicates           elements that look like the same element defined twice
  *   eztest elements import-screens [dir] write elements/<Screen>.yaml from TypeScript screens (e.g. screens/)
  */
@@ -13,6 +13,7 @@ import { join, relative, resolve } from 'node:path';
 import type { Command } from 'commander';
 import type { LoadedConfig } from '../config/index.js';
 import { duplicateElements, elementUsages } from '../elements/bind.js';
+import { mergeUsages, projectCodeUsages } from '../elements/code-usages.js';
 import { renderElementFile } from '../elements/render.js';
 import { ElementRepository, screenId, type RepoElement } from '../elements/repository.js';
 import { readScreenModule } from '../elements/screens.js';
@@ -34,7 +35,9 @@ async function context(io: IO, load: Load, o: Opts) {
   const repo = await ElementRepository.load(io.cwd, cfg.elements);
   const { journeys, errors } = await loadJourneys([cfg.journeysDir], io.cwd).catch(() => ({ journeys: [], errors: [] }));
   for (const e of [...repo.problems, ...errors]) io.err(`warning: ${e.file}: ${e.message}`);
-  return { cfg, repo, journeys, usages: elementUsages(journeys, repo) };
+  // Code journeys, step definitions and screens use elements too: screen model entries share the repository's ids.
+  const usages = mergeUsages(elementUsages(journeys, repo), await projectCodeUsages(io.cwd, cfg, repo));
+  return { cfg, repo, journeys, usages };
 }
 
 const common = (c: Command) => c.option('-c, --config <file>').option('-e, --env <name>').option('--project <name>', 'project overlay (projects.<name>)').option('--json', 'machine-readable output');
@@ -54,7 +57,7 @@ export function registerElementCommands(program: Command, io: IO, load: Load): v
     io.out(`${rows.length} element${rows.length === 1 ? '' : 's'}`);
   });
 
-  common(el.command('unused').description('elements no journey uses').option('--strict', 'exit 1 when there are unused elements')).action(async (o: Opts) => {
+  common(el.command('unused').description('elements no journey and no code uses').option('--strict', 'exit 1 when there are unused elements')).action(async (o: Opts) => {
     const { repo, usages } = await context(io, load, o);
     const unused = repo.list().filter((e) => !usages.get(e.id)?.length);
     const unknown = [...usages.keys()].filter((id) => !repo.get(id)).sort();

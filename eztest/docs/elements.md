@@ -59,6 +59,8 @@ eztest elements import-screens src/screens --dry-run
 
 A target bound to an element takes the repository's locators, followed by any locators of its own, plus its fingerprint and frames. A reference to an id the repository does not have fails the step with `element @X is not in the element repository`. `eztest elements unused` also lists such references.
 
+`eztest elements list` and `unused` (and Studio's Project › Elements) count uses in code too, read as text in the project's journeys folder, its `elements.screens` folders and the folders of its `bdd.steps`: a screen model entry (`ui.table(TheInternet.firstTable)` for the screen `screen('TheInternet', {...})`, also when imported under another name) and an `@Screen.element` reference in a string (`ui.click('the @Shop.cart table')`). A screen entry counts when the repository has its id; a string reference to an id it does not have is listed as unknown.
+
 ## Healing, once for every journey
 
 - **One memory per element.** The fingerprint store keeps an unscoped repository element under `@elements/<id>`, not under each journey's step. When one journey's step has passed, every journey can heal from that fingerprint. Once one journey's heal is verified, the other journeys reuse it from the T0 cache. A scoped use, such as `the @Orders.edit button in the row containing "Acme"`, keeps a per-step memory, because each row is a different element.
@@ -71,7 +73,7 @@ A target bound to an element takes the repository's locators, followed by any lo
 
 ```bash
 eztest elements list                 # every element, its locators, file:line and how many journeys use it (--json)
-eztest elements unused               # elements no journey uses, and references to unknown elements (exit 1 for unknown; --strict: also for unused)
+eztest elements unused               # elements no journey and no code uses, and references to unknown elements (exit 1 for unknown; --strict: also for unused)
 eztest elements duplicates           # elements that look like one element defined twice: same locators, same first locator, same description (--strict)
 eztest elements import-screens [dir] # write elements/<Screen>.yaml from TypeScript screens
 ```

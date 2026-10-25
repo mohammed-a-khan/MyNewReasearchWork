@@ -7,4 +7,5 @@ export { ElementRepository, parseElementFile, elementFromEntry, locatorFromStrin
 export { bindTarget, bindStep, bindJourney, elementUsages, duplicateElements, type ElementUsage, type DuplicateGroup } from './bind.js';
 export { planElementHeal, elementHealFile, locatorToString, type ElementHealPlan, type ElementPlanInput } from './heal.js';
 export { readScreenModule } from './screens.js';
+export { codeElementUsages, codeFilesUnder, mergeUsages, projectCodeDirs, projectCodeUsages, type CodeSource } from './code-usages.js';
 export { renderElementFile } from './render.js';

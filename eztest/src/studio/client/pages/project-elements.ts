@@ -47,7 +47,7 @@ export const elementsSection: SubPageDef = {
                   title: 'Usages',
                   render: (e) => e.usages.length
                     ? h('details', null, h('summary', { text: `${e.usages.length} use${e.usages.length === 1 ? '' : 's'} in ${new Set(e.usages.map((u) => u.journeyId)).size} journey(s)` }),
-                        h('ul', { class: 'bullets small' }, e.usages.map((u) => h('li', null, h('strong', { text: u.journeyName }), h('span', { text: ` · ${u.intent}` }), h('span', { class: 'muted', text: ` (${u.via === 'reference' ? '@reference' : 'by description'}${u.role !== 'target' ? `, ${u.role}` : ''})` })))))
+                        h('ul', { class: 'bullets small' }, e.usages.map((u) => h('li', null, h('strong', { text: u.journeyName }), h('span', { text: ` · ${u.intent}` }), h('span', { class: 'muted', text: ` (${u.via === 'reference' ? '@reference' : u.via === 'code' ? 'in code' : 'by description'}${u.role !== 'target' ? `, ${u.role}` : ''})` })))))
                     : sevBadge('warn', 'unused'),
                 },
                 { title: 'Fingerprint', render: (e) => (e.hasFingerprint ? badge('ok', 'stored') : h('span', { class: 'muted small', text: 'from runs' })) },

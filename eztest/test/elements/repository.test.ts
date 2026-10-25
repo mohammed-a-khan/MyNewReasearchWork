@@ -218,4 +218,42 @@ describe('eztest elements', () => {
     expect((await ElementRepository.load(dir)).get('Orders.search')?.locators).toEqual([{ strategy: 'css', value: '#q' }, { strategy: 'label', value: 'Search' }]);
     expect((await cli(dir, ['elements', 'import-screens'])).err).toMatch(/exists, not overwritten/);
   });
+
+  it('unused counts uses in code: screen model entries (imported under any name), @references in strings, step definitions', async () => {
+    const dir = await tempDir('elements-cli-code');
+    for (const d of ['apps/web/elements', 'apps/web/journeys/shop', 'apps/web/screens', 'apps/web/code/shop', 'apps/web/steps', 'shared/steps']) await mkdir(join(dir, d), { recursive: true });
+    await writeFile(join(dir, 'eztest.config.yaml'), 'baseUrl: http://127.0.0.1:9\njourneysDir: apps/web\nelements: { dir: apps/web/elements }\nbdd: { steps: ["apps/web/steps/**/*.steps.ts", "shared/steps/**/*.steps.ts"] }\n');
+    await writeFile(join(dir, 'apps/web/elements', 'shop.yaml'), [
+      'screen: TheInternet', 'elements:', '  firstTable: css=#table1', '  secondTable: css=#table2', '  result: css=#result', '  unusedOne: css=#nothing', '',
+    ].join('\n'));
+    await writeFile(join(dir, 'apps/web/elements', 'cart.yaml'), 'screen: Shop\nelements:\n  cart: the Cart table\n  basket: the Basket button\n');
+    await writeFile(join(dir, 'apps/web/screens', 'the-internet.ts'), "import { screen } from '@eztech.com/eztest/sdk';\nexport const TheInternet = screen('TheInternet', {\n  firstTable: { css: '#table1' },\n  secondTable: { css: '#table2' },\n  result: { css: '#result' },\n  unusedOne: { css: '#nothing' },\n  row: (n: number) => ({ css: `#table1 tr:nth-child(${n})` }),\n});\n");
+    await writeFile(join(dir, 'apps/web/code/shop', 'tables.journey.ts'), [
+      "import { journey, ui } from '@eztech.com/eztest/sdk';",
+      "import { TheInternet as TI } from '../../screens/the-internet.js';",
+      "journey('Tables', async () => {",
+      '  const a = await ui.table(TI.firstTable);',
+      '  await ui.click(TI.row(2));',
+      "  await ui.click('the \"OK\" button', { expect: { textOf: [TI.result, 'done'] } });",
+      "  await ui.table('the @Shop.cart table');",
+      '  void a;',
+      '});',
+      '',
+    ].join('\n'));
+    await writeFile(join(dir, 'shared/steps', 'tables.steps.ts'), "import { Given } from '@eztech.com/eztest/bdd';\nimport { TheInternet } from '../../apps/web/screens/the-internet.js';\nGiven('the second table', async ({ ui }) => ui.table(TheInternet.secondTable));\nGiven('the basket', async ({ ui }) => ui.click(`the @Shop.basket button`));\nGiven('a typo', async ({ ui }) => ui.click('the @Shop.baskett button'));\n");
+    const unused = await cli(dir, ['elements', 'unused', '--json']);
+    const r = JSON.parse(unused.out);
+    expect(r.unused.map((e: { id: string }) => e.id)).toEqual(['TheInternet.unusedOne']);
+    // A reference in code to an element the repository does not have is unknown, as in a journey.
+    expect(r.unknown).toEqual(['Shop.baskett']);
+    expect(unused.code).toBe(1);
+    const list = JSON.parse((await cli(dir, ['elements', 'list', '--json'])).out) as Array<{ id: string; usages: number; journeys: string[] }>;
+    expect(list.find((e) => e.id === 'TheInternet.firstTable')).toMatchObject({ usages: 1, journeys: ['apps/web/code/shop/tables.journey.ts'] });
+    expect(list.find((e) => e.id === 'TheInternet.secondTable')?.journeys).toEqual(['shared/steps/tables.steps.ts']);
+    // Fixed typo and the last unused entry used: --strict passes.
+    await writeFile(join(dir, 'shared/steps', 'tables.steps.ts'), "import { Given } from '@eztech.com/eztest/bdd';\nimport { TheInternet } from '../../apps/web/screens/the-internet.js';\nGiven('the second table', async ({ ui }) => ui.table(TheInternet.secondTable));\nGiven('the basket', async ({ ui }) => ui.click(`the @Shop.basket button`));\nGiven('nothing', async ({ ui }) => ui.expectVisible(TheInternet.unusedOne));\n");
+    const strict = await cli(dir, ['elements', 'unused', '--strict']);
+    expect(strict.out).toMatch(/0 unused elements/);
+    expect(strict.code).toBe(0);
+  });
 });
