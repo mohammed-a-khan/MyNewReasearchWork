@@ -4,6 +4,10 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### Found by a consumer project on 0.1.0-beta.2, fixed in 0.1.0-beta.3
+
+- `EZTEST_SECRET_*` variables (the env secret store's prefix in the generated templates) printed "is not an EZTest setting" on every command. Variables with the prefix `EZTEST_SECRET_`, or with the `EZTEST_` prefix of any configured `env` secret store, are secrets and no longer read as settings.
+
 ### The EZTest Project Guide, enforced
 
 - **[docs/project-guide.md](docs/project-guide.md)**: the EZTest way of building a test project, for architects and leads. The layout (one `apps/<app>/` folder and one project overlay per application, `config/<env>.yaml` and `config/<app>/<env>.yaml` layers, data per environment, the query catalogue, `shared/`), naming conventions, choosing between `.ez`, Gherkin and TypeScript (with one scenario in all three), the rules with the reason for each, a pull request checklist, smells mapped to lint rules, CI, and migrating from an in-house Playwright or Cucumber framework.

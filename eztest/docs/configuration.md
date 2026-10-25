@@ -16,6 +16,7 @@ One naming scheme:
 
 - **Settings** are `EZTEST_<SECTION>__<KEY>`: `__` separates the levels of the configuration, and a single `_` inside a name becomes camelCase. `EZTEST_TIMEOUTS__STEP=20000` sets `timeouts.step`, `EZTEST_ADO__ORGANIZATION_URL` sets `ado.organizationUrl`, `EZTEST_BASE_URL` sets `baseUrl`. A variable that names no setting is ignored with a warning on stderr.
 - **Credentials and switches that are not settings** are flat names: `EZTEST_ADO_PAT`, `EZTEST_SERVER_TOKEN`, `EZTEST_MASTER_KEY`, `EZTEST_ENV`, `EZTEST_PROJECT`, `EZTEST_CONFIG`, and the browser driver's `EZTEST_CHROMIUM_PATH`, `EZTEST_FIREFOX_PATH`, `EZTEST_BROWSERS_PATH`.
+- **Secrets of the env secret store** are not settings either: `EZTEST_SECRET_<NAME>` (the prefix `eztest init` configures, read by `secret://env/<NAME>`) and any other `EZTEST_` prefix of an `identity.secretStores` entry of type `env` are left alone, with no warning.
 - **Accepted aliases** (no warning; the canonical name wins when both are set): `EZTEST_ADO_ORG_URL` and `EZTEST_ADO__ORG_URL` for `EZTEST_ADO__ORGANIZATION_URL`, `EZTEST_ADO_PROJECT` for `EZTEST_ADO__PROJECT`.
 
 Unknown keys produce warnings. Invalid values stop the run with the exact path at fault. `eztest doctor` shows which layers were used. For every project (or only the one given with `--project`), it also shows the effective values: base URL, browser and channel, timeouts, evidence policy, loaders, databases, roles and client certificates. `eztest doctor --no-browser` skips the browser launch check.

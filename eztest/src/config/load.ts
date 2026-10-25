@@ -215,10 +215,34 @@ export const ENV_ALIASES: Readonly<Record<string, string>> = {
   EZTEST_ADO_PROJECT: 'EZTEST_ADO__PROJECT',
 };
 
-/** Turn EZTEST_* variables into a config object (EZTEST_HEALING__MAX_TIER -> healing.maxTier). `origin` records key path -> variable name. */
-export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>): Obj {
+/** The prefix of the env secret store that `eztest init` writes (secret://env/NAME reads EZTEST_SECRET_NAME). */
+export const DEFAULT_SECRET_ENV_PREFIX = 'EZTEST_SECRET_';
+
+/**
+ * The prefixes of the configured env secret stores (identity.secretStores) that start with EZTEST_, plus EZTEST_SECRET_: variables with
+ * these prefixes are secrets read through secret://env/..., not settings.
+ */
+export function secretEnvPrefixes(raw: Obj): string[] {
+  const out = new Set<string>([DEFAULT_SECRET_ENV_PREFIX]);
+  const identity = raw.identity;
+  const stores = isObj(identity) ? identity.secretStores : undefined;
+  if (Array.isArray(stores)) {
+    for (const s of stores) {
+      if (isObj(s) && s.type === 'env' && typeof s.prefix === 'string' && s.prefix.startsWith('EZTEST_') && s.prefix.length > 'EZTEST_'.length) out.add(s.prefix);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Turn EZTEST_* variables into a config object (EZTEST_HEALING__MAX_TIER -> healing.maxTier). `origin` records key
+ * path -> variable name. Variables that start with one of `secretPrefixes` (default: EZTEST_SECRET_) are secrets of
+ * the env secret store and are left out.
+ */
+export function envToConfig(vars: Record<string, string | undefined>, origin?: Map<string, string>, secretPrefixes: readonly string[] = [DEFAULT_SECRET_ENV_PREFIX]): Obj {
   let out: Obj = {};
   for (const [name, value] of Object.entries(vars)) {
+    if (secretPrefixes.some((p) => name.startsWith(p))) continue;
     // EZTEST_VAR_<name>: a run-time variable for ${name} (the name is kept as written, e.g. EZTEST_VAR_password).
     if (name.startsWith('EZTEST_VAR_') && value !== undefined && name.length > 'EZTEST_VAR_'.length) {
       const v = name.slice('EZTEST_VAR_'.length);
@@ -414,10 +438,11 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<LoadedCo
     }
   }
   const envOrigin = new Map<string, string>();
-  raw = deepMerge(raw, envToConfig(dotenvVars, envOrigin));
+  const secretPrefixes = secretEnvPrefixes(raw);
+  raw = deepMerge(raw, envToConfig(dotenvVars, envOrigin, secretPrefixes));
 
   // 6. real EZTEST_* variables
-  const fromEnv = envToConfig(processEnv, envOrigin);
+  const fromEnv = envToConfig(processEnv, envOrigin, secretPrefixes);
   if (Object.keys(fromEnv).length) {
     raw = deepMerge(raw, fromEnv);
     sources.push('environment');
