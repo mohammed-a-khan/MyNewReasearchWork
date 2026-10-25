@@ -94,7 +94,9 @@ Click the "Save" button
     const browser = await chromium.launch();
     try {
       const page = await browser.newPage();
-      await page.goto(`${pathToFileURL(file).href}#test/${encodeURIComponent(j.journeyId)}`);
+      await page.goto(`${pathToFileURL(file).href}#tests/${encodeURIComponent(j.journeyId)}`);
+      // The video is a sub-tab of the test's detail.
+      await page.locator('#detail [role=tab][data-sub=video]').click();
       const video = page.locator('#detail video');
       expect(await video.getAttribute('src')).toContain('.webm');
       expect(await page.locator('#detail video track[kind="chapters"]').count()).toBe(1);
@@ -108,7 +110,9 @@ Click the "Save" button
       await page.locator('#detail select[aria-label="Playback speed"]').selectOption('2');
       expect(await video.evaluate((v) => (v as HTMLVideoElement).playbackRate)).toBe(2);
       await video.evaluate((v) => { (v as HTMLVideoElement).pause(); (v as HTMLVideoElement).currentTime = 0; });
-      await page.locator('#detail .step-acts button[aria-label^="Play step 2"]').click();
+      await page.locator('#detail [role=tab][data-sub=steps]').click();
+      await page.locator('#detail .step-line button[aria-label^="Play step 2"]').click();
+      expect(await page.locator('#detail [role=tab][data-sub=video]').getAttribute('aria-selected')).toBe('true');
       await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
     } finally {
       await browser.close();

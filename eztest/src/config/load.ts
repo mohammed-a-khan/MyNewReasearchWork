@@ -198,7 +198,7 @@ function parseJsonEnv(v: string, name: string): unknown {
 /** Values under keys like these are registered with the masker even when they were not encrypted. */
 const SENSITIVE_KEY = /(password|passwd|secret|token|apikey|api_key|pat|credential|connectionstring)$/i;
 
-const RESERVED_ENV = new Set(['EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG', 'EZTEST_PROJECT', 'EZTEST_CODE_LOADER', 'EZTEST_ADO_PAT', 'EZTEST_ADO_PLAN']);
+const RESERVED_ENV = new Set(['EZTEST_BRAND_FILE', 'EZTEST_MASTER_KEY', 'EZTEST_ENV', 'EZTEST_CONFIG', 'EZTEST_PROJECT', 'EZTEST_CODE_LOADER', 'EZTEST_ADO_PAT', 'EZTEST_ADO_PLAN']);
 /**
  * Live-database test switches and driver folders (docs/databases.md), results-server and shard variables, and the
  * browser driver's own variables (docs/browser-driver.md): not config keys.

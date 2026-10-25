@@ -29,7 +29,7 @@ export function contextRows(m: ReportModel): Array<[string, string]> {
     ['Pull request', c?.pullRequest ? `#${c.pullRequest.number}` : undefined],
     ['Trigger', c?.trigger],
     ['Run by', c?.user],
-    ['EZTest', c?.eztestVersion],
+    [m.brand.whiteLabel ? 'Engine version' : 'EZTest', c?.eztestVersion],
     ['Node.js', c?.node],
     ['Machine', c ? [c.machine.host, c.machine.os, c.machine.cpus ? `${c.machine.cpus} CPUs` : '', c.machine.memoryGb ? `${c.machine.memoryGb} GB` : ''].filter(Boolean).join(', ') : undefined],
     ['Time zone', c?.timeZone],

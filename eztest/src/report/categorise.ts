@@ -76,7 +76,7 @@ const RULES: Rule[] = [
   },
   {
     c: 'test',
-    re: /timeout \d+ ?ms exceeded[\s\S]*(waiting for|locator|selector|element)|waiting for (locator|selector|element|get[A-Z]\w*\()|element is not (visible|enabled|stable)|covered by another element|not clickable/i,
+    re: /timeout \d+ ?ms exceeded[\s\S]*(waiting for|locator|selector|element)|waiting for (locator|selector|element|get[A-Z]\w*\()|element is not (visible|enabled|stable)|covered by another element|is covered by|\(an overlay\)|not clickable/i,
     why: 'the element did not become ready in time',
     fix: 'The element existed but was hidden, disabled, covered or still moving. Wait for the state the step needs (an explicit "Expect ... to be visible" before it) or close the overlay that covers it; if the page is genuinely slower, raise the step timeout.',
   },
@@ -118,8 +118,16 @@ const RULES: Rule[] = [
   },
 ];
 
-const FLAKY_FIX = 'It passed only on a retry. Open "Why it was flaky" and the attempts side by side; the usual causes are timing (wait for the state, not for time), shared data and order dependence. Quarantine it while it is fixed so it does not block releases.';
+const FLAKY_FIX = 'It passed only on a retry. Compare the attempts in the test detail; the usual causes are timing (wait for the state, not for time), shared data and order dependence. Quarantine it while it is fixed so it does not block releases.';
 const UNKNOWN_FIX = 'No rule recognised this failure. Open the failing step, its screenshot and the console: decide whether the application or the test is wrong and record the decision (Studio triage) so similar failures are classified next time.';
+
+/** The next step for a category when no rule of that category matched the error (the triage decided). */
+const CATEGORY_FIX: Record<Exclude<FailureCategory, 'flaky' | 'unknown'>, string> = {
+  product: 'The application did not behave as the test expects: compare "Expected" and "Found" in the failing step; if the change is intended, update the journey, otherwise use "Copy for bug" to file it with the evidence.',
+  test: 'The test could not drive the page as written: open the failing step, its screenshot and DOM snapshot, then fix the locator, the wait or the step (or accept a heal proposal with eztest heal).',
+  environment: 'Check that the application and the services it needs are up and reachable from the test machine, then run the failed tests again (eztest run --only-failed <runDir>).',
+  data: 'Reset or regenerate the data the test uses (seed scripts, shared data store, unique values with gen: generators), then run the test again.',
+};
 
 /** Categorise one failing or flaky test. */
 export function categoriseFailure(t: {
@@ -135,7 +143,7 @@ export function categoriseFailure(t: {
   const text = `${t.error?.name ?? ''} ${t.error?.message ?? ''}\n${(t.error?.stack ?? '').split('\n').slice(0, 6).join('\n')}`;
   const rule = RULES.find((r) => r.re.test(text));
   if (fromTriage && (t.triage!.confidence >= 0.5 || !rule)) {
-    const fix = (rule && rule.c === fromTriage ? rule.fix : RULES.find((r) => r.c === fromTriage)?.fix) ?? UNKNOWN_FIX;
+    const fix = rule && rule.c === fromTriage ? rule.fix : fromTriage === 'flaky' ? FLAKY_FIX : CATEGORY_FIX[fromTriage as keyof typeof CATEGORY_FIX] ?? UNKNOWN_FIX;
     return { c: fromTriage, src: 'triage', why: `triage: ${t.triage!.category} (${Math.round(t.triage!.confidence * 100)}%)`, fix };
   }
   if (rule) return { c: rule.c, src: 'rule', why: rule.why, fix: rule.fix };

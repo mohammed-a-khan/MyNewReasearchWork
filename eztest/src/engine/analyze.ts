@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadRunArtifacts, HistoryStore, scoreHistory, failureSignature, triageRun, loadReadinessPolicy, evaluateReadiness, loadQuarantine, quarantineStatus, readinessByBrowser } from '../insights/index.js';
 import type { FlakyScore, TriageReport, ReadinessResult, QuarantineStatus } from '../insights/index.js';
-import { writeReports, journeyFilesAndOwners, loadLogo, type ReportFormat, type ReportModelInput } from '../report/index.js';
+import { writeReports, journeyFilesAndOwners, loadBrand, type BrandConfig, type ReportFormat, type ReportModelInput } from '../report/index.js';
 import { readFile } from 'node:fs/promises';
 import { isDebugRunId, type RunResult } from '../core/index.js';
 import type { EzTestConfig } from '../config/index.js';
@@ -42,7 +42,9 @@ export interface AnalyzeOptions {
   /** Accessibility scopes (config accessibility.scopes) for the new-issue comparison. */
   a11yScopes?: A11yScope[];
   /** Report branding and options (config report.*). */
-  report?: { title?: string; name?: string; logo?: string; trendRuns?: number; baseline?: string; studioUrl?: string; brandColor?: string; videoPolicy?: string };
+  report?: { title?: string; name?: string; logo?: string; trendRuns?: number; baseline?: string; studioUrl?: string; brandColor?: string; videoPolicy?: string; brand?: BrandConfig; brandFile?: string; readiness?: boolean };
+  /** A brand file that overrides report.brand (--brand-file, EZTEST_BRAND_FILE). */
+  brandFile?: string;
   /** Azure DevOps settings for test case / work item links (config ado.*). */
   ado?: ReportModelInput['ado'];
   /** Jira base URL for issue links. */
@@ -110,7 +112,7 @@ export function reportOptionsFromConfig(cfg: EzTestConfig, cwd: string, env: Rec
   return {
     cwd,
     config: cfg,
-    report: { ...cfg.report, videoPolicy: cfg.video },
+    report: { ...cfg.report, videoPolicy: cfg.video, ...(env.EZTEST_BRAND_FILE && !cfg.report.brandFile ? { brandFile: env.EZTEST_BRAND_FILE } : {}) },
     ...(s.collectionUrl && s.project ? { ado: { collectionUrl: s.collectionUrl, project: s.project, ...(cfg.ado.testPlanId ? { testPlanId: cfg.ado.testPlanId } : {}), ...(cfg.ado.testSuiteId ? { testSuiteId: cfg.ado.testSuiteId } : {}) } } : {}),
     ...(jira ? { jira: { baseUrl: String(jira.baseUrl) } } : {}),
   };
@@ -217,13 +219,13 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
   } catch (e) {
     warnings.push(`report baseline not loaded: ${(e as Error).message}`);
   }
-  let logo: string | undefined;
-  if (rep.logo) {
-    try {
-      logo = await loadLogo(resolve(cwd, rep.logo));
-    } catch (e) {
-      warnings.push((e as Error).message);
-    }
+  // Branding: report.brand (+ the legacy report.name / logo / brandColor), overridden by a brand file.
+  let brand: Awaited<ReturnType<typeof loadBrand>> | undefined;
+  try {
+    brand = await loadBrand(rep, { cwd, defaultName: projectName(cwd), brandFile: opts.brandFile });
+    warnings.push(...brand.warnings);
+  } catch (e) {
+    warnings.push((e as Error).message);
   }
   const fo = opts.journeys?.length ? await journeyFilesAndOwners(opts.journeys, cwd).catch(() => undefined) : undefined;
   let requirementsCatalog: ReportModelInput['requirementsCatalog'];
@@ -238,16 +240,18 @@ export async function analyzeRun(runDir: string, opts: AnalyzeOptions = {}): Pro
   }
   const reports = await writeReports(runDir, run, {
     formats: opts.formats ?? ['html', 'json', 'junit'],
-    title: opts.title ?? rep.title ?? `${rep.name ?? projectName(cwd)} test report`,
+    title: opts.title ?? brand?.title ?? rep.title ?? `${rep.name ?? projectName(cwd)} test report`,
     triage,
     flaky,
     readiness,
+    // The policy's decision is shown (a secondary Policy tab) only when report.readiness is on.
+    showPolicy: rep.readiness === true,
     evidence,
     ...(contractInputs.apiCoverage ? { apiCoverage: contractInputs.apiCoverage.map((c) => c.report) } : {}),
     history: scoped.runs,
     failureTags: tags,
     ...(baseline ? { baseline } : {}),
-    brand: { name: rep.name ?? projectName(cwd), ...(logo ? { logo } : {}), ...(rep.brandColor ? { color: rep.brandColor } : {}) },
+    brand: brand?.brand ?? { name: rep.name ?? projectName(cwd), ...(rep.brandColor ? { color: rep.brandColor } : {}) },
     ...(rep.videoPolicy ? { videoPolicy: rep.videoPolicy } : {}),
     ...(rep.trendRuns ? { trendRuns: rep.trendRuns } : {}),
     ...(rep.studioUrl ? { studioUrl: rep.studioUrl } : {}),

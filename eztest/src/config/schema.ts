@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { ApiSpecOptionsSchema, ContractsSchema } from '../contracts/config.js';
 import { BatchSchema, FilesSchema, GrpcSchema, MessagingSchema } from '../integration/config.js';
 import { SoapConfigSchema } from '../surfaces/soap-config.js';
+import { BrandSchema } from '../report/brand.js';
 
 const positiveMs = z.number().int().positive();
 
@@ -1041,8 +1042,14 @@ export const EzTestConfigSchema = z.object({
       baseline: z.string().min(1).default('previous'),
       /** EZTest Studio URL for "open trace in Studio" links. */
       studioUrl: z.string().url().optional(),
-      /** Brand colour (#rrggbb) for the report header mark and accents. */
+      /** Brand colour (#rrggbb) for the report header mark and accents (report.brand.colors.primary wins). */
       brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').optional(),
+      /** White-label branding of every report output (docs/reports.md#branding). */
+      brand: BrandSchema.optional(),
+      /** A brand file (YAML/JSON with the report.brand keys) that overrides report.brand; --brand-file and EZTEST_BRAND_FILE set it for CI. */
+      brandFile: z.string().min(1).optional(),
+      /** Show the readiness policy's decision in a secondary "Policy" tab (and the exports). Off by default: readers judge the run from its results. */
+      readiness: z.boolean().default(false),
     })
     .prefault({}),
   /** Results server for publishing runs, shared team state and cross-machine locks. */

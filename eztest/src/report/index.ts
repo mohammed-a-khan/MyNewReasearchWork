@@ -5,6 +5,8 @@ export * from './charts.js';
 export * from './context.js';
 export * from './integrations.js';
 export * from './html.js';
+export * from './brand.js';
+export * from './causes.js';
 export * from './json.js';
 export * from './schema.js';
 export * from './junit.js';

@@ -25,6 +25,7 @@ import { parseAdoTags } from '../alm-ado/tags.js';
 import { categoriseFailure, FAILURE_CATEGORIES, type CategoryVerdict, type FailureCategory } from './categorise.js';
 import { summariseLenses, type LensFile, type LensSummary } from './lenses.js';
 import { configSnapshot } from './config-snapshot.js';
+import { normalizeBrand, type ReportBrand } from './brand.js';
 
 export const REPORT_MODEL_VERSION = 2 as const;
 
@@ -188,6 +189,8 @@ export interface TrendPoint {
   total: number;
   failed: number;
   current?: boolean;
+  /** Tests that passed only on retry. */
+  flaky?: number;
   readiness?: string;
 }
 
@@ -270,7 +273,8 @@ export interface ReportModel {
   version: typeof REPORT_MODEL_VERSION;
   generatedAt: string;
   title: string;
-  brand: { name: string; logo?: string; color?: string };
+  /** Branding (white label): names, embedded logos, palette, labels, hidden sections (brand.ts). */
+  brand: ReportBrand;
   runId: string;
   startedAt: string;
   finishedAt: string;
@@ -278,7 +282,8 @@ export interface ReportModel {
   context?: RunContext;
   kpis: Kpis;
   previous?: { runId: string; startedAt: string; kpis: Kpis };
-  verdict: VerdictModel;
+  /** The readiness policy's decision: only when a policy ran and report.readiness is on (the secondary Policy tab). */
+  verdict?: VerdictModel;
   trend: TrendPoint[];
   slowest: Array<{ id: string; name: string; durationMs: number; state: TestState }>;
   failureGroups: FailureGroup[];
@@ -314,14 +319,8 @@ export interface ReportModel {
   warnings: string[];
 }
 
-export interface ReportBranding {
-  /** Project name shown in the header. */
-  name?: string;
-  /** data: URI of the logo (svg/png/jpeg), already loaded. */
-  logo?: string;
-  /** Brand colour, #rrggbb. */
-  color?: string;
-}
+/** Branding as callers pass it (assets already loaded as data: URIs; see brand.ts loadBrand). */
+export type ReportBranding = Partial<ReportBrand>;
 
 export interface StepArtifacts {
   /** `${journeyId}\u0000${stepId}` -> API entries. */
@@ -351,6 +350,8 @@ export interface ReportModelInput {
   brand?: ReportBranding;
   triage?: TriageReport;
   readiness?: ReadinessResult;
+  /** Show the readiness decision (report.readiness): without it the report carries no verdict. */
+  showPolicy?: boolean;
   flaky?: FlakyScore[];
   evidence?: EvidenceRef[];
   apiCoverage?: ApiCoverageReport[];
@@ -408,10 +409,11 @@ export function kpisOf(journeys: JourneyResult[], durationMs: number, flakyIds?:
   return k;
 }
 
-function historyKpis(e: RunHistoryEntry): { passRate: number; durationMs: number; total: number; failed: number } {
+function historyKpis(e: RunHistoryEntry): { passRate: number; durationMs: number; total: number; failed: number; flaky: number } {
   let passed = 0;
   let failed = 0;
   let skipped = 0;
+  let flaky = 0;
   let dur = 0;
   const last = new Map<string, (typeof e.outcomes)[number]>();
   for (const o of e.outcomes) {
@@ -420,12 +422,14 @@ function historyKpis(e: RunHistoryEntry): { passRate: number; durationMs: number
   }
   for (const o of last.values()) {
     dur += o.durationMs;
-    if (PASS(o.status)) passed++;
-    else if (o.status === 'skipped') skipped++;
+    if (PASS(o.status)) {
+      passed++;
+      if (o.attempt > 1 || o.flakeCause) flaky++;
+    } else if (o.status === 'skipped') skipped++;
     else failed++;
   }
   const executed = last.size - skipped;
-  return { passRate: executed ? passed / executed : 0, durationMs: e.durationMs ?? dur, total: last.size, failed };
+  return { passRate: executed ? passed / executed : 0, durationMs: e.durationMs ?? dur, total: last.size, failed, flaky };
 }
 
 /** Pass rate and duration of the last `n` runs of history (oldest first), this run marked current. */
@@ -433,7 +437,7 @@ export function trendFromHistory(history: readonly RunHistoryEntry[], run: RunRe
   const pts: TrendPoint[] = history
     .filter((h) => h.runId !== run.runId)
     .map((h) => ({ runId: h.runId, startedAt: h.startedAt, ...historyKpis(h), ...(h.readiness ? { readiness: h.readiness } : {}) }));
-  pts.push({ runId: run.runId, startedAt: run.startedAt, passRate: k.passRate, durationMs: k.durationMs, total: k.total, failed: k.failed + k.errors, current: true });
+  pts.push({ runId: run.runId, startedAt: run.startedAt, passRate: k.passRate, durationMs: k.durationMs, total: k.total, failed: k.failed + k.errors, flaky: k.flaky, current: true });
   pts.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   return pts.slice(-n);
 }
@@ -535,21 +539,7 @@ export function unitOf(j: Pick<JourneyResult, 'journeyId' | 'browser'>): string 
   return j.browser && j.journeyId.endsWith(`@${j.browser}`) ? j.journeyId.slice(0, -(j.browser.length + 1)) : j.journeyId;
 }
 
-function defaultVerdict(k: Kpis): VerdictModel {
-  const reasons: VerdictModel['reasons'] = [];
-  const bad = k.failed + k.errors;
-  if (bad) reasons.push({ kind: 'violation', text: `${bad} of ${k.total} tests failed or errored`, tests: [], requirements: [], evidence: [] });
-  if (k.flaky) reasons.push({ kind: 'risk', text: `${k.flaky} test(s) only passed on retry (flaky)`, tests: [], requirements: [], evidence: [] });
-  if (k.healed) reasons.push({ kind: 'risk', text: `${k.healed} test(s) passed with healed locators awaiting review`, tests: [], requirements: [], evidence: [] });
-  if (k.total && k.skipped === k.total) reasons.push({ kind: 'violation', text: 'nothing was executed', tests: [], requirements: [], evidence: [] });
-  if (!reasons.length) reasons.push({ kind: 'pass', text: `all ${k.total} tests passed`, tests: [], requirements: [], evidence: [] });
-  const decision = bad || (k.total && k.skipped === k.total) ? 'NO_GO' : k.flaky || k.healed ? 'GO_WITH_RISKS' : 'GO';
-  reasons.push({ kind: 'info', text: 'no readiness policy is configured (readiness.policyPath); this is EZTest’s built-in rule', tests: [], requirements: [], evidence: [] });
-  return { decision, source: 'built-in', reasons, gates: [], exceptions: [] };
-}
-
-function verdictOf(r: ReadinessResult | undefined, k: Kpis): VerdictModel {
-  if (!r) return defaultVerdict(k);
+function verdictOf(r: ReadinessResult): VerdictModel {
   return {
     decision: r.decision,
     score: r.score,
@@ -905,13 +895,15 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     : undefined;
 
   const lenses = input.artifacts?.lenses?.length ? summariseLenses(input.artifacts.lenses) : undefined;
-  const brandName = input.brand?.name ?? 'EZTest';
+  const brandWarnings: string[] = [];
+  const brand = normalizeBrand(input.brand ?? {}, brandWarnings);
+  const brandName = brand.name;
   const model: ReportModel = {
     format: 'eztest-report-model',
     version: REPORT_MODEL_VERSION,
     generatedAt: new Date().toISOString(),
     title: input.title ?? `${brandName} test report`,
-    brand: { name: brandName, ...(input.brand?.color && /^#[0-9a-f]{6}$/i.test(input.brand.color) ? { color: input.brand.color } : {}), ...(input.brand?.logo && /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(input.brand.logo) ? { logo: input.brand.logo } : {}) },
+    brand,
     runId: run.runId,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
@@ -919,7 +911,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     ...(input.context ? { context: input.context } : {}),
     kpis: k,
     ...(previous ? { previous } : {}),
-    verdict: verdictOf(input.readiness, k),
+    ...(input.readiness && input.showPolicy ? { verdict: verdictOf(input.readiness) } : {}),
     trend: trendFromHistory(history, run, k, input.trendRuns ?? 20),
     slowest: [...tests].filter((t) => t.state !== 'skipped').sort((a, b) => b.durationMs - a.durationMs).slice(0, 10).map((t) => ({ id: t.id, name: t.name, durationMs: t.durationMs, state: t.state })),
     failureGroups,
@@ -941,7 +933,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
     linkConfig: { ...(input.ado ? { ado: input.ado } : {}), ...(input.jira ? { jira: input.jira } : {}) },
     ...(input.artifacts?.snapshots?.size ? { snapshots: Object.fromEntries(input.artifacts.snapshots) } : {}),
     ...(input.videoPolicy ? { videoPolicy: input.videoPolicy } : {}),
-    warnings: [],
+    warnings: brandWarnings,
   };
   return applyIntegrationLinks(model, input);
 }

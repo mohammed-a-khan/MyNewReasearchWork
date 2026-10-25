@@ -51,11 +51,16 @@ describe('test states and key figures', () => {
 });
 
 describe('the report model of a realistic run', () => {
-  it('has the verdict, KPIs against the previous run, trend, slowest tests, coverage and comparison', () => {
+  it('has KPIs against the previous run, trend, slowest tests, coverage and comparison; the verdict only with showPolicy', () => {
     const m = buildReportModel(rich.run, rich.insights);
     expect(m.format).toBe('eztest-report-model');
-    expect(m.verdict).toMatchObject({ decision: 'NO_GO', source: 'policy' });
-    expect(m.verdict.reasons.some((r) => r.kind === 'violation' && r.tests.includes('checkout-card'))).toBe(true);
+    // A policy ran, but without report.readiness the model carries no verdict.
+    expect(m.verdict).toBeUndefined();
+    const withPolicy = buildReportModel(rich.run, { ...rich.insights, showPolicy: true });
+    expect(withPolicy.verdict).toMatchObject({ decision: 'NO_GO', source: 'policy' });
+    expect(withPolicy.verdict!.reasons.some((r) => r.kind === 'violation' && r.tests.includes('checkout-card'))).toBe(true);
+    // Without a policy there is no built-in verdict either.
+    expect(buildReportModel(rich.run, { ...rich.insights, readiness: undefined, showPolicy: true }).verdict).toBeUndefined();
     expect(m.kpis).toMatchObject({ total: 20, failed: 4, errors: 1, flaky: 2, healed: 2, skipped: 2, passed: 9 });
     expect(m.previous?.runId).toBe('run-h14');
     expect(m.trend).toHaveLength(15);
@@ -178,8 +183,8 @@ describe('evidence, video and branding', () => {
   });
 
   it('brand colour: the mark gets readable text, bad values are ignored', () => {
-    expect(brandCss('#0f766e')).toContain('color:#ffffff');
-    expect(brandCss('#ffe066')).toContain('color:#141413');
+    expect(brandCss('#0f766e')).toContain('--on-brand:#ffffff');
+    expect(brandCss('#ffe066')).toMatch(/--brand-btn:#[0-9a-f]{6};--on-brand:#16181d|--on-brand:#ffffff/);
     expect(brandCss('red')).toBe('');
     expect(brandCss(undefined)).toBe('');
   });
@@ -226,18 +231,21 @@ describe('exports', () => {
     const card = buildTeamsCard(m, links) as { type: string; version: string; msteams: unknown; body: Array<Record<string, any>>; actions: Array<Record<string, string>> };
     expect(card).toMatchObject({ type: 'AdaptiveCard', version: '1.5', msteams: { width: 'Full' } });
     expect(card.body[0]).toMatchObject({ type: 'Container', style: 'attention' });
-    expect(card.body[0].items[2].text).toBe('NO GO — 5 of 20 tests failed');
+    // No verdict: the card says what happened, coloured by the result.
+    expect(card.body[0].items[2].text).toBe('5 of 20 tests failed');
+    expect(JSON.stringify(card)).not.toMatch(/NO GO|Readiness/);
     const kpis = card.body.find((b) => b.type === 'ColumnSet')!;
     expect(kpis.columns.map((c: any) => c.items[1].text)).toEqual(['Tests', 'Passed', 'Failed', 'Flaky', 'Pass rate']);
     expect(card.body.find((b) => b.type === 'FactSet')!.facts).toEqual(expect.arrayContaining([{ title: 'Branch', value: 'feature/checkout-v2' }]));
     const failures = card.body.find((b) => b.type === 'Container' && b.items?.[0]?.text?.startsWith('Top failures'))!;
-    expect(failures.items[1].selectAction.url).toMatch(/report\.html#test\/(checkout-card|checkout-voucher|api-orders)$/);
+    expect(failures.items[1].selectAction.url).toMatch(/report\.html#tests\/(checkout-card|checkout-voucher|api-orders)$/);
     expect(card.actions.map((a) => a.title)).toEqual(['Open the report', 'Azure DevOps test run', 'Build', 'Pull request']);
     for (const a of card.actions) expect(a.type).toBe('Action.OpenUrl');
     const slack = buildSlackMessage(m, links) as { text: string; blocks: Array<Record<string, any>> };
-    expect(slack.text).toContain('NO GO');
+    expect(slack.text).toBe('Contoso Shop: 5 of 20 tests failed');
+    expect(JSON.stringify(slack)).not.toMatch(/NO GO|Readiness/);
     expect(slack.blocks.find((b) => b.type === 'actions')!.elements).toHaveLength(4);
-    expect(JSON.stringify(slack.blocks)).toContain('<https://ci.example/artifacts/report.html#test/');
+    expect(JSON.stringify(slack.blocks)).toContain('<https://ci.example/artifacts/report.html#tests/');
   });
 });
 

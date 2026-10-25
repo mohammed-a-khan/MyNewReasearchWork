@@ -40,7 +40,7 @@ export async function publishEmail(ctx: PublishContext): Promise<PublishResult> 
   if (!m) return { ok: false, message: 'email: no report model in the run directory (run with the html or json reporter)' };
   const when = String(o.when ?? 'always');
   const bad = m.kpis.failed + m.kpis.errors > 0;
-  if ((when === 'failed' && !bad) || (when === 'not-go' && m.verdict.decision !== 'NO_GO')) return { ok: true, message: `email: not sent (when: ${when})` };
+  if ((when === 'failed' && !bad) || (when === 'not-go' && (m.verdict ? m.verdict.decision !== 'NO_GO' : !bad))) return { ok: true, message: `email: not sent (when: ${when})` };
   const to = list(o.to);
   if (!to.length) return { ok: false, message: 'email: needs "to" (one or more addresses)' };
   const from = typeof o.from === 'string' && o.from ? o.from : undefined;

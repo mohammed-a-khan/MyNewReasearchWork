@@ -64,17 +64,18 @@ const test = {
 
 const model = {
   type: 'object',
-  required: ['format', 'version', 'generatedAt', 'title', 'brand', 'runId', 'startedAt', 'finishedAt', 'durationMs', 'kpis', 'verdict', 'trend', 'slowest', 'failureGroups', 'clusters', 'coverage', 'integrations', 'healProposals', 'evidenceKinds', 'evidence', 'tests', 'linkConfig', 'warnings'],
+  required: ['format', 'version', 'generatedAt', 'title', 'brand', 'runId', 'startedAt', 'finishedAt', 'durationMs', 'kpis', 'trend', 'slowest', 'failureGroups', 'clusters', 'coverage', 'integrations', 'healProposals', 'evidenceKinds', 'evidence', 'tests', 'linkConfig', 'warnings'],
   properties: {
     format: { const: 'eztest-report-model' },
     version: { const: 2 },
     generatedAt: str, title: str,
-    brand: { type: 'object', required: ['name'], properties: { name: str, logo: str, color: str } },
+    brand: { type: 'object', required: ['name'], description: 'Branding (white label): names, embedded logos (data: URIs), the derived palette, labels, hidden sections, whiteLabel, theme.', properties: { name: str, company: str, subtitle: str, preparedBy: str, footer: str, logo: str, logoDark: str, favicon: str, mark: str, color: str, colors: { type: 'object' }, palette: { type: 'object' }, font: { type: 'object' }, labels: { type: 'object' }, hide: strs, whiteLabel: { type: 'boolean' }, theme: { enum: ['light', 'dark'] } } },
     runId: str, startedAt: str, finishedAt: str, durationMs: num,
     context: { type: 'object', required: ['browsers', 'devices', 'eztestVersion', 'node', 'machine', 'startedAt', 'finishedAt', 'timeZone', 'extra'] },
     kpis,
     previous: { type: 'object', required: ['runId', 'startedAt', 'kpis'], properties: { runId: str, startedAt: str, kpis } },
     verdict: {
+      description: 'The readiness policy decision: present only when a policy ran and report.readiness is on.',
       type: 'object', required: ['decision', 'source', 'reasons', 'gates', 'exceptions'],
       properties: { decision: { enum: ['GO', 'GO_WITH_RISKS', 'NO_GO'] }, score: num, source: { enum: ['policy', 'built-in'] }, reasons: { type: 'array', items: { type: 'object', required: ['kind', 'text', 'tests', 'requirements', 'evidence'] } }, gates: { type: 'array' }, exceptions: { type: 'array' }, browsers: { type: 'object' } },
     },

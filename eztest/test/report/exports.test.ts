@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import ExcelJS from 'exceljs';
 import { chromium, type Browser, type Page } from '../../src/browser/index.js';
 import {
-  attentionOf, categoriseFailure, configSnapshot, emailSubject, maskConfigValue, readReportModel, renderEmailHtml, renderEmailText, renderReportPdf, summariseLenses, writeReports,
+  attentionOf, categoriseFailure, causeGroups, configSnapshot, emailSubject, maskConfigValue, readReportModel, renderEmailHtml, renderEmailText, renderReportPdf, summariseLenses, writeReports,
   type ReportModel,
 } from '../../src/report/index.js';
 import { buildMime, parseMime, sendSmtp, SmtpSink } from '../../src/messaging/index.js';
@@ -147,67 +147,72 @@ describe('quality lenses', () => {
 });
 
 describe('HTML report: run-level analysis in the browser', () => {
-  it('shows what needs attention, the categories chart that filters the list, quality lenses and the masked configuration', async () => {
+  it('groups the failures by cause with the next step, filters the list by category, and shows the quality lenses and the masked configuration', async () => {
     const { page, errors } = await open(out.html!);
-    const attn = page.getByRole('region', { name: 'Needs attention' });
-    expect(await attn.locator('.card').count()).toBe(5);
-    expect(await attn.textContent()).toMatch(/Regressions/);
-    expect(await attn.getByRole('link', { name: 'Edit the profile' }).count()).toBeGreaterThan(0);
-    // The categories chart: one bar per category; selecting one filters the test list.
-    const chart = page.locator('#categories svg');
-    expect(await chart.locator('.mark').count()).toBe(Object.keys(model.categories!).length);
-    await page.locator('#categories a', { hasText: 'Test data' }).first().click();
-    await expect.poll(() => page.locator('#f-cat').evaluate((s) => (s as HTMLSelectElement).value)).toBe('data');
-    await expect.poll(() => page.locator('#count').textContent()).toMatch(/^1 of 20 tests/);
+    // Overview: the top failure reasons, each once with its count, link to the Failures tab.
+    const reasons = page.locator('#p-overview .reason');
+    expect(await reasons.count()).toBeGreaterThan(0);
+    await reasons.first().locator('a').click();
+    await expect.poll(() => page.evaluate('location.hash')).toMatch(/^#failures\//);
+    expect(await page.locator('#p-failures').isVisible()).toBe(true);
+    // Failures: by category, every failing test exactly once, each cause with its next step.
+    const listed = await page.locator('#p-failures .group-tests a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+    const failing = model.tests.filter((t) => ['failed', 'error', 'flaky'].includes(t.state));
+    expect(listed.sort()).toEqual(failing.map((t) => `#tests/${encodeURIComponent(t.id)}`).sort());
+    expect(await page.locator('#p-failures .cat-sec h3 .cat').allTextContents()).toEqual(expect.arrayContaining(['Product defect', 'Test data', 'Flaky']));
+    expect(await page.locator('#p-failures .cause-card').count()).toBe(await page.locator('#p-failures .cause-card .next').count());
+    // A category filter in the list (deep link), and grouping by category.
+    await page.goto(pathToFileURL(out.html!).href + '#tests?cat=data');
+    await expect.poll(() => page.locator('#f-cat').evaluate((x) => (x as HTMLSelectElement).value)).toBe('data');
+    await expect.poll(() => page.locator('#count').textContent()).toBe('1 shown');
     expect(await page.locator('#vinner .row[data-id] .cat').first().textContent()).toBe('Test data');
-    // Group the list by category.
     await page.locator('#f-cat').selectOption('');
     await page.locator('#group').selectOption('category');
-    expect(await page.locator('#vinner .row.group .rname').allTextContents()).toEqual(expect.arrayContaining(['Product defect', 'Flaky', 'Not failing']));
-    // History sparklines in the list.
-    await page.locator('#group').selectOption('none');
-    expect(await page.locator('#vinner .row .spark.sm').count()).toBeGreaterThan(0);
-    // Failure analysis: category and suggested fix per signature and per cluster.
-    expect(await page.locator('#failures table').first().textContent()).toMatch(/Product defect/);
-    expect(await page.locator('.clusters .fixline').count()).toBe(model.clusters.length);
+    expect(await page.locator('#vinner .row.group .rname').first().textContent()).toBe('Product defect');
     // Quality lenses.
-    const q = page.locator('#quality');
+    await page.locator('#tab-quality').click();
+    const q = page.locator('#p-quality');
     expect(await q.getByRole('heading', { name: 'Accessibility' }).count()).toBe(1);
-    expect(await q.locator('table').first().textContent()).toMatch(/name\.button[\s\S]*critical[\s\S]*contrast\.text/);
+    expect(await q.locator('table').filter({ hasText: 'name.button' }).first().textContent()).toMatch(/name\.button[\s\S]*critical[\s\S]*contrast\.text/);
     expect(await q.textContent()).toMatch(/cookie-insecure[\s\S]*high/);
     expect(await q.textContent()).toMatch(/LCP[\s\S]*fail[\s\S]*4800 ms/);
-    expect(await page.locator('.sections a[href="#quality"]').count()).toBe(1);
-    // Configuration: masked, filterable.
-    await page.locator('#config summary').click();
+    // Environment: the configuration, masked and filterable, behind a collapsed section.
+    await page.locator('#tab-environment').click();
+    await page.locator('#env-config summary').click();
     const cfg = page.locator('#cfg-table');
     expect(await cfg.textContent()).toMatch(/identity\.roles\.admin\.password\s*\*\*\*\*/);
     expect(await page.content()).not.toContain('hunter2-plain');
     await page.locator('#cfg-q').fill('healing');
     await expect.poll(() => cfg.locator('tbody tr:not([hidden])').count()).toBe(2);
-    expect(await page.locator('#cfg-count').textContent()).toMatch(/^2 of \d+ settings$/);
-    // The export menu lists the new files.
+    expect(await page.locator('#cfg-count').textContent()).toMatch(/^2 of \d+$/);
+    // The export menu lists the files.
     await page.locator('#exports-btn').click();
     expect(await page.locator('#exports-list a').allTextContents()).toEqual(expect.arrayContaining(['PDF report', 'Excel workbook', 'E-mail summary (HTML)']));
     expect(errors).toEqual([]);
     await page.close();
   });
 
-  it('gives each failing test its category and next step, and copies them into the bug text', async () => {
-    const { page } = await open(out.html!, { hash: '#test/data-import' });
-    const box = page.locator('#detail .catbox');
-    await expect.poll(() => box.count()).toBe(1);
-    expect(await box.textContent()).toMatch(/Test data[\s\S]*Suggested next step: Reset or regenerate the data/);
+  it('gives each failing test its category and next step once, and copies them into the bug text', async () => {
+    const { page } = await open(out.html!, { hash: '#tests/data-import' });
+    const cause = page.locator('#detail .cause');
+    await expect.poll(() => cause.count()).toBe(1);
+    expect(await cause.textContent()).toMatch(/Test data[\s\S]*Next step: Reset or regenerate the data/);
+    expect((await page.locator('#detail').textContent())!.match(/Reset or regenerate the data/g)).toHaveLength(1);
     await page.close();
   });
 
-  it('has no serious accessibility violations and fits a phone, in light and dark', async () => {
+  it('has no serious accessibility violations and fits a phone, in light and dark, on every tab', async () => {
     for (const scheme of ['light', 'dark'] as const) {
       for (const width of [1400, 390]) {
         const { page } = await open(out.html!, { width, scheme });
-        await page.locator('#config summary').click();
-        await expectNoSeriousA11y(page, `report-${scheme}-${width}`);
-        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-        expect(overflow).toBeLessThanOrEqual(1);
+        for (const tab of ['overview', 'failures', 'trends', 'quality', 'environment']) {
+          await page.evaluate(`location.hash = '#${tab}'`);
+          await expect.poll(() => page.locator(`#p-${tab}`).isVisible()).toBe(true);
+          if (tab === 'environment') await page.locator('#env-config summary').click();
+          await expectNoSeriousA11y(page, `report-${scheme}-${width}-${tab}`);
+          const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+          expect(overflow, `${tab} at ${width}px`).toBeLessThanOrEqual(1);
+        }
         await page.close();
       }
     }
@@ -220,24 +225,28 @@ describe('e-mail summary', () => {
     expect(html).not.toMatch(/<script|<svg|<link |@import|display:\s*grid|<img/i);
     expect(html).toMatch(/role="presentation"/);
     expect(html).not.toMatch(/src="https?:/);
-    expect(emailSubject(model)).toBe(`[NO GO] Shop web - end-to-end regression: 5 of 20 tests failed (${model.runId})`);
+    // No verdict: the subject says what happened.
+    expect(emailSubject(model)).toBe(`Shop web - end-to-end regression: 5 of 20 tests failed (${model.runId})`);
+    expect(html).not.toMatch(/READINESS|NO GO|GO WITH RISKS/);
     const text = renderEmailText(model, { reportUrl: 'https://ci.example.test/r/report.html' });
-    expect(text).toMatch(/Regressions: .*Edit the profile/);
-    expect(text).toContain('https://ci.example.test/r/report.html#test/checkout-card');
+    expect(text).toMatch(/Failures by cause:/);
+    expect(text).not.toMatch(/NO GO|readiness/i);
+    expect(text).toContain('https://ci.example.test/r/report.html#tests/checkout-card');
     expect(text).toMatch(/next step: /);
   });
 
-  it('renders the verdict, figures, attention, categories and failures with permalinks, on desktop and phone, light and dark', async () => {
+  it('renders the counts once, the outcome, the failures by cause with permalinks and the environment, on desktop and phone, light and dark', async () => {
     const file = join(rich.runDir, 'email-linked.html');
     await writeFile(file, renderEmailHtml(model, { reportUrl: 'https://ci.example.test/r/report.html' }));
     for (const scheme of ['light', 'dark'] as const) {
       for (const width of [800, 390]) {
         const { page } = await open(file, { width, scheme });
         const body = (await page.locator('body').textContent()) ?? '';
-        expect(body).toMatch(/RELEASE READINESS\s*NO GO/);
-        expect(body).toMatch(/Needs attention/);
-        expect(body).toMatch(/Failure categories[\s\S]*Product defect/);
-        expect(await page.getByRole('link', { name: 'Checkout with a saved card' }).first().getAttribute('href')).toBe('https://ci.example.test/r/report.html#test/checkout-card');
+        expect(body).not.toMatch(/READINESS|NO GO/);
+        expect(body).toMatch(/Outcome · 72\.2% pass rate/);
+        expect(body).toMatch(/Failures by cause[\s\S]*Product defect[\s\S]*Next step:/);
+        expect(body).toMatch(/Environment[\s\S]*Run id/);
+        expect(await page.getByRole('link', { name: 'Checkout with a saved card' }).first().getAttribute('href')).toBe('https://ci.example.test/r/report.html#tests/checkout-card');
         expect(await page.getByRole('link', { name: 'Open the full report' }).getAttribute('href')).toBe('https://ci.example.test/r/report.html');
         expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
         // Text keeps its contrast on the dark background too.
@@ -249,7 +258,7 @@ describe('e-mail summary', () => {
 });
 
 describe('PDF report', () => {
-  it('is drawn by pdf.js with the summary, failures with their screenshots, every test, bookmarks and permalinks', async () => {
+  it('is drawn by pdf.js with sections that mirror the tabs, failures by cause, screenshots, every test, bookmarks and permalinks', async () => {
     const pdf = await readFile(out.pdf!);
     expect(pdf.subarray(0, 8).toString('latin1')).toBe('%PDF-1.7');
     const r = await renderPdfInBrowser(browser, pdf);
@@ -257,15 +266,17 @@ describe('PDF report', () => {
       const pages = r.pdf.pages;
       expect(pages.length).toBeGreaterThanOrEqual(4);
       expect(r.pdf.title).toBe(`Shop web - end-to-end regression - ${model.runId}`);
-      expect(r.pdf.outline).toEqual(expect.arrayContaining(['Executive summary', `Failures (${model.tests.filter((t) => ['failed', 'error', 'flaky'].includes(t.state)).length})`, 'All tests (20)', 'Quality lenses', 'Run context', 'Configuration (secrets masked)']));
-      const all = pages.map((p) => p.text).join('\n');
-      expect(pages[0].text).toMatch(/Executive summary[\s\S]*RELEASE READINESS[\s\S]*NO GO/);
-      expect(pages[0].text).toMatch(/Failure categories[\s\S]*Product defect/);
+      // The sections mirror the report's tabs; no verdict without report.readiness.
+      expect(r.pdf.outline).toEqual(['Overview', 'Failures', 'Tests', 'Trends', 'Quality', 'Environment']);
+      const all = pages.map((p) => p.text).join('\n').replace(/[ ]{2,}/g, ' ');
+      expect(all).not.toMatch(/READINESS|NO GO/);
+      expect(pages[0].text).toMatch(/Overview[\s\S]*Outcome[\s\S]*Results by feature/);
+      expect(pages[0].text).toMatch(/Top failure reasons[\s\S]*Product defect/);
       expect(all).toMatch(/Expected the order total "42.00" but the page shows "40.00"/);
-      expect(all).toMatch(/Suggested next step: /);
+      expect(all).toMatch(/Next step: /);
       expect(all).toMatch(/identity\.roles\.admin\.password\s+\*\*\*\*/);
       expect(all).not.toContain('hunter2-plain');
-      expect(pages.flatMap((p) => p.links)).toEqual(expect.arrayContaining(['report.html#test/checkout-card']));
+      expect(pages.flatMap((p) => p.links)).toEqual(expect.arrayContaining(['report.html#tests/checkout-card']));
       // Every page has visible content; the failures page carries embedded screenshots.
       for (const p of pages) expect(p.ink).toBeGreaterThan(0.01);
       expect((pdf.toString('latin1').match(/\/Subtype \/Image/g) ?? []).length).toBeGreaterThan(0);
@@ -290,10 +301,10 @@ describe('PDF report', () => {
 });
 
 describe('Excel workbook', () => {
-  it('has one sheet per view with filters, links to the report and masked configuration', async () => {
+  it('has one sheet per tab with filters, links to the report and masked configuration, and no verdict', async () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out.xlsx!);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'Tests', 'Steps', 'Failures', 'Requirements', 'Trend', 'Quality', 'Configuration', 'Environment']);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Overview', 'Tests', 'Steps', 'Failures', 'Requirements', 'Trends', 'Quality', 'Configuration', 'Environment']);
     const tests = wb.getWorksheet('Tests')!;
     expect(tests.rowCount).toBe(21);
     expect(tests.autoFilter).toBeTruthy();
@@ -304,18 +315,20 @@ describe('Excel workbook', () => {
     expect(row.getCell(col('State')).value).toBe('Error');
     expect(row.getCell(col('Category')).value).toBe('Test data');
     expect(String(row.getCell(col('Suggested next step')).value)).toMatch(/Reset or regenerate/);
-    expect((row.getCell(col('Report')).value as { hyperlink: string }).hyperlink).toBe('report.html#test/data-import');
+    expect((row.getCell(col('Report')).value as { hyperlink: string }).hyperlink).toBe('report.html#tests/data-import');
     expect((row.getCell(col('State')).fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBe('FFFCEFE8');
     const steps = wb.getWorksheet('Steps')!;
     expect(steps.rowCount - 1).toBe(model.tests.reduce((n, t) => n + t.steps.length, 0));
     const failures = wb.getWorksheet('Failures')!;
-    expect(failures.rowCount - 1).toBe(model.failureGroups.length);
+    expect(failures.rowCount - 1).toBe(causeGroups(model).length);
     const cfg = wb.getWorksheet('Configuration')!;
     const cfgText = JSON.stringify(cfg.getSheetValues());
     expect(cfgText).toContain('identity.roles.admin.password');
     expect(cfgText).not.toContain('hunter2-plain');
     expect(JSON.stringify(wb.getWorksheet('Quality')!.getSheetValues())).toMatch(/contrast\.text/);
-    expect(JSON.stringify(wb.getWorksheet('Summary')!.getSheetValues())).toMatch(/NO GO/);
+    const overview = JSON.stringify(wb.getWorksheet('Overview')!.getSheetValues());
+    expect(overview).toMatch(/Top failure reasons/);
+    expect(JSON.stringify(wb.worksheets.map((w) => w.getSheetValues()))).not.toMatch(/NO GO|Release readiness/);
   });
 });
 
@@ -381,7 +394,8 @@ describe('e-mail publisher', () => {
       expect(s.commands).toEqual(expect.arrayContaining(['AUTH LOGIN', Buffer.from('reports').toString('base64'), Buffer.from('s3cret').toString('base64'), 'MAIL FROM:<qa@example.test>', 'RCPT TO:<team@example.test>', 'RCPT TO:<lead@example.test>', 'RCPT TO:<pm@example.test>']));
       const mime = parseMime(s.data);
       expect(mime.headers.subject).toBe(emailSubject(model));
-      expect(mime.html).toMatch(/RELEASE READINESS/);
+      expect(mime.html).toMatch(/Failures by cause/);
+      expect(mime.html).not.toMatch(/READINESS/);
       expect(mime.text).toMatch(/Full report: https:\/\/ci\.example\.test\/r\/report\.html/);
       const pdfPart = /Content-Disposition: attachment; filename="report\.pdf"\r\n\r\n([A-Za-z0-9+/=\r\n]+)/.exec(s.data);
       expect(Buffer.from(pdfPart![1].replace(/\r\n/g, ''), 'base64').subarray(0, 5).toString('latin1')).toBe('%PDF-');
@@ -397,8 +411,8 @@ describe('e-mail publisher', () => {
       const r = await publishEmail(ctxFor({ host: sink.host, port: sink.port, from: 'qa@example.test', to: 'team@example.test' }));
       expect(r.ok).toBe(true);
       const m = await sink.latest({ to: 'team@example.test', timeoutMs: 5000 });
-      expect(m.subject).toMatch(/^\[NO GO\] /);
-      expect(m.html).toMatch(/Failure categories/);
+      expect(m.subject).toMatch(/^Shop web - end-to-end regression: /);
+      expect(m.html).toMatch(/Failures by cause/);
       expect((await publishEmail(ctxFor({ host: sink.host, port: sink.port, from: 'qa@example.test', to: 'x@example.test', when: 'not-go' }))).ok).toBe(true);
       const dry = await publishEmail(ctxFor({ from: 'qa@example.test', to: 'x@example.test', dryRun: true, attach: ['pdf', 'nope'] }));
       expect(dry.details).toMatchObject({ attachments: ['report.pdf'], skipped: [expect.stringMatching(/^nope/)] });
