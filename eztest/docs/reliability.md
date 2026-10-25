@@ -308,6 +308,9 @@ reliability:
   fails, nothing runs: every journey is `skipped` with
   `not run: environment unavailable (pre-flight health check failed: app: HTTP 503 from ...)`,
   `run.health.preflight` holds the results, and `health-checks.json` is stored as evidence.
+- **Behind a proxy.** URL and API checks (and the circuit breaker's probe) go
+  through `HTTPS_PROXY` / `HTTP_PROXY`, except the hosts of `NO_PROXY`, like the
+  browser and the API steps; nothing to configure.
 - **Classification.** A failed journey whose page came back 5xx, or whose error
   is DNS, refused/reset connections, TLS, navigation timeouts or a 502/503/504,
   gets `reliability.environment` with the reason and the network log as evidence;

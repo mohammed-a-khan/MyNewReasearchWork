@@ -6,6 +6,7 @@
  * instead of producing dozens of misleading product failures.
  */
 import type { HealthCheckResult, JourneyResult } from '../../core/index.js';
+import { envProxyFetch } from '../../surfaces/proxy.js';
 import type { DbHandler } from '../types.js';
 
 export type HealthCheck =
@@ -16,7 +17,7 @@ export type HealthCheck =
 export interface HealthEnv {
   baseUrl?: string;
   db?: DbHandler;
-  /** Test seam (default global fetch). */
+  /** Test seam (default: fetch through the environment's proxy, HTTPS_PROXY / HTTP_PROXY / NO_PROXY). */
   fetch?: typeof fetch;
 }
 
@@ -70,7 +71,9 @@ async function one(c: HealthCheck, env: HealthEnv): Promise<HealthCheckResult> {
     return done(kind, false, `cannot resolve "${raw}" without a baseUrl`);
   }
   try {
-    const f = env.fetch ?? fetch;
+    // Through HTTPS_PROXY / HTTP_PROXY / NO_PROXY like the browser and the API steps: behind a proxy, Node's own fetch
+    // cannot resolve the host and every journey of the run would be skipped as "environment unavailable".
+    const f = env.fetch ?? envProxyFetch;
     const res = await f(url, { method: 'api' in c ? (c.method ?? 'GET') : 'GET', headers: 'api' in c ? c.headers : undefined, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
     const status = res.status;
     const body = 'contains' in c && c.contains ? await res.text() : '';
