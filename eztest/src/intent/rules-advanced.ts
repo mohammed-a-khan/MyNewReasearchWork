@@ -556,6 +556,11 @@ export const ADVANCED_RULES: IntentRule[] = [
     { name: 'capture-texts', keywords: ['capture', 'collect', 'get'], example: 'Capture the texts of the "Name" cells as names',
       re: new RegExp(String.raw`^(?:capture|collect|get|read|store)\s+(?:all\s+)?(?:the\s+)?(?:texts|list|labels|values\s+of\s+the\s+texts|text\s+of\s+(?:all|every|each))\s+(?:of\s+)?(?:the\s+)?(.+?)\s+as\s+${KEY}$`, 'i'),
       build: (m, q) => ({ action: 'query', target: T(m[1], q), captureAs: m[2], args: { what: 'texts' } }) },
+    // "the rows of" names a table whatever follows: an element reference (`the @Users.table`, `@Users.list`), a selector
+    // or a named area. Without this the line fell through to "capture the text" of "the rows of ...".
+    { name: 'capture-rows-of', keywords: ['capture', 'read'], example: 'Capture the rows of the @Users.table as uiRows',
+      re: new RegExp(String.raw`^(?:capture|read|get|store)\s+(?:all\s+)?(?:the\s+)?rows\s+(?:of|from|in)\s+(.+?)\s+as\s+${KEY}$`, 'i'),
+      build: (m, q) => (/\s(?:table|grid)$/i.test(m[1].trim()) ? undefined : { action: 'query', target: T(m[1], q), captureAs: m[2], args: { what: 'table' } }) },
     { name: 'capture-table', keywords: ['capture', 'read'], example: 'Capture the rows of the Orders table as orders',
       re: new RegExp(String.raw`^(?:capture|read|get|store)\s+(?:the\s+)?(?:rows\s+of\s+|data\s+(?:of|in)\s+)?(?:the\s+)?(.+?\s+(?:table|grid))(?:\s+rows)?\s+as\s+${KEY}$`, 'i'),
       build: (m, q) => (/^(?:the\s+)?(?:text|value)\s+(?:of|from|in)\s/i.test(m[1]) ? undefined

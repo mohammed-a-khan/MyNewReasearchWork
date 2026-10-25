@@ -46,6 +46,15 @@ export const viewportRatio = onElement<undefined, number>(String.raw`(el) => {
 /** A table as header-mapped records. */
 export const tableRows = onElement<undefined, Array<Record<string, string>>>(String.raw`(table) => {
   var clean = function (s) { return (s || '').replace(/\s+/g, ' ').trim(); };
+  // An element that is not a table itself (a section, a card, an element entry naming the area): the one table in
+  // it; with no table and no rows at all, it is not a table, which is an error rather than an empty list.
+  var TABLES = 'table, [role=table], [role=grid], [role=treegrid]';
+  if (!table.matches(TABLES)) {
+    var inner = Array.from(table.querySelectorAll(TABLES)).filter(function (t) { var up = t.parentElement && t.parentElement.closest(TABLES); return !up || !table.contains(up); });
+    if (inner.length === 1) table = inner[0];
+    else if (inner.length > 1) throw new Error('the ' + table.tagName.toLowerCase() + ' holds ' + inner.length + ' tables: name the one to read');
+    else if (!table.querySelector('tr') && !table.querySelector('[role=row]')) throw new Error('the ' + table.tagName.toLowerCase() + ' (' + clean(table.innerText || table.textContent).slice(0, 60) + ') is not a table and holds none: name the table (the Users table) or its element');
+  }
   // An ARIA table built from divs (role=table / grid with role=row, columnheader and cell), as Vue and React
   // component kits render them: rows and cells by role, rows of nested tables left out.
   if (!table.querySelector('tr') && table.querySelector('[role=row]')) {

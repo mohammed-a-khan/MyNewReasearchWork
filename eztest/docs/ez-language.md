@@ -63,7 +63,7 @@ Post-conditions matter beyond checking. They are how a heal gets verified: if a 
 
 To write a standalone assertion, start the line with `Assert that …` or `Check that …`. A **soft assertion** (`Soft expect …`, `Expect softly …`, or `[soft]`) records its failure and lets the journey continue; the journey still ends as failed.
 
-## Actions (374 phrasings)
+## Actions (375 phrasings)
 
 Each phrasing accepts natural variants (articles, "I"/"the user", third person, synonyms such as switch/go/move, tab/window/page).
 
@@ -170,7 +170,7 @@ Drag and drop picks the right technique: elements with `draggable="true"` get re
 | Purpose | Examples |
 |---|---|
 | Element facts | `Capture the "href" attribute of the "Docs" link as docsUrl` · `Capture the "checked" property of the Terms checkbox as terms` · `Capture the "color" css of #badge as color` · `Capture the bounding box of the Logo image as box` · `Capture the outer HTML of the Summary panel as html` · `Capture whether the Newsletter checkbox is checked as subscribed` · `Capture the text of #toast matching "ORD-\d+" as orderNumber` |
-| Many elements | `Count the "Order" rows as orderCount` · `Capture the texts of the "Name" cells as names` · `Capture the rows of the Orders table as orders` (header-mapped records) |
+| Many elements | `Count the "Order" rows as orderCount` · `Capture the texts of the "Name" cells as names` · `Capture the rows of the Orders table as orders` (header-mapped records) · `Capture the rows of the @Users.table as users` (an element: the table, or the one table inside it; anything else fails the step) |
 | Page | `Capture the current URL as pageUrl` · `Capture the page title as title` |
 
 No query runs code: each is a fixed, declarative read. **Shadow DOM:** role, label, text and CSS locators pierce open shadow roots automatically (`Type "SAVE10" into the Coupon field` works inside a web component; `css=ez-coupon .result` too). XPath does not pierce shadow roots.
