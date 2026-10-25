@@ -597,6 +597,8 @@ export function buildProgram(io: CliIO = defaultIO): Command {
         ...(loaded ? reportOptionsFromConfig(loaded.config, io.cwd, io.env) : { cwd: io.cwd }),
         ...(o.brandFile ? { brandFile: resolve(io.cwd, o.brandFile) } : io.env.EZTEST_BRAND_FILE && !loaded ? { brandFile: resolve(io.cwd, io.env.EZTEST_BRAND_FILE) } : {}),
       });
+      // Brand assets that were rejected, colours replaced by an accessible shade, a missing policy file...
+      for (const w of a.warnings) io.err(`warning: ${w}`);
       io.out(JSON.stringify({ triage: a.triage.counts, needsHuman: a.triage.needsHuman, readiness: a.readiness?.decision, reports: a.reports }, null, 2));
       // The readiness gate for a pipeline: an explicit --policy whose decision is NO_GO fails the step.
       if (o.policy && a.readiness?.decision === 'NO_GO') process.exitCode = 1;

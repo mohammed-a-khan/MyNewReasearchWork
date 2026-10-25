@@ -219,6 +219,7 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
       doc.rect(Lx + 240, doc.y - 1, ((W - 300) * s.durationMs) / max, 7, { fill: BRAND });
       doc.text(Lx + W - textWidth(fmtMs(s.durationMs), 8.5), doc.y, fmtMs(s.durationMs), { size: 8.5, color: MUTED });
     }
+    doc.y -= 8;
   }
   if (groups.length) {
     sub(L.sections.topFailures);
