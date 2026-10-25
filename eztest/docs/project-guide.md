@@ -235,7 +235,7 @@ Secrets never appear in a journey, a data file, a config file or `.env.example`:
 - a recorded password becomes `${password}`, supplied with `--var`, `EZTEST_VAR_password` or `vars: { password: secret://env/... }`; a `${name}` nobody supplied fails the step before anything is typed;
 - `.env.example` names the secrets with empty values; the real `.env` is git-ignored (`eztest init` adds `.env`, `.env.*` and `!.env.example` to `.gitignore`); pipelines provide them as secret variables with the same names.
 
-Every resolved secret is masked in logs, reports and evidence. **Why:** test passwords in git end up in production more often than anyone admits, and a leaked test account still opens real systems. Lint: `plaintext-secret` (error) in journeys, code, CSV/TSV/XLSX/JSON data, YAML config layers and `.env.example`; the field names of a role's login form (`fields: { password: Passphrase }`) are not secrets.
+Every resolved secret is masked in logs, reports and evidence. **Why:** test passwords in git end up in production more often than anyone admits, and a leaked test account still opens real systems. Lint: `plaintext-secret` (error) in journeys, code, CSV/TSV/XLSX/JSON data, YAML config layers and `.env.example`; the field names of a role's login form (`fields: { password: Passphrase }`), element entries (`password: the Password field` in `elements/*.yaml`) and screen model entries (`password: 'the Password field'`, `'css=#pwd'`) are not secrets; a token-shaped value is reported wherever it is.
 
 ### Locators
 

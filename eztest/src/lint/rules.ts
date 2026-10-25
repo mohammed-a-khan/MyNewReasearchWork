@@ -109,6 +109,17 @@ export const SECRET_VALUE_PATTERNS: Array<[RegExp, string]> = [
 ];
 
 /** A name that holds a secret: password, apiToken, CLIENT_SECRET, db.pwd ... (camelCase is split first). */
+/**
+ * A value that names an element rather than holding a secret: a locator (`css=#pwd`, `label=Password`,
+ * `role=textbox[name="Password"]`) or a plain-English description with a kind word (`the Password field`,
+ * `the "Password" input`). Element entries and screen models called `password` hold such values.
+ */
+export function looksLikeLocator(v: string): boolean {
+  const t = v.trim();
+  if (/^(?:css|xpath|testid|test-id|data-testid|role|text|label|placeholder|alt|title)\s*=/i.test(t)) return true;
+  return /^(?:the|a|an)\s+(?:.+\s+)?(?:field|input|box|text\s*box|textbox|text\s*field|textarea|text\s*area|area|control|button|link|checkbox|toggle|switch|element|label|icon)$/i.test(t);
+}
+
 export function isSecretName(k: string): boolean {
   return SECRET_KEY.test(`_${k.replace(/([a-z0-9])([A-Z])/g, '$1_$2')}_`);
 }

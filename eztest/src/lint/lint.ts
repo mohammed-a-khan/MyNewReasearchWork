@@ -36,7 +36,7 @@ import type { Condition, Journey, LocatorCandidate, Step, Target } from '../core
 import { flattenSteps } from '../core/index.js';
 import { describeCandidateText, isAbsoluteXPath, isPositionalXPath, isTextOnly, scoreTarget, type TargetScore } from './locator-score.js';
 import {
-  applySeverities, finding, LINT_RULES, redact, SAFE_SECRET_VALUE, SECRET_FIELD, SECRET_VALUE_PATTERNS, isSecretName,
+  applySeverities, finding, LINT_RULES, redact, SAFE_SECRET_VALUE, SECRET_FIELD, SECRET_VALUE_PATTERNS, isSecretName, looksLikeLocator,
   type LintFinding, type LintOptions, type LintRule, type LintSeverity,
 } from './rules.js';
 import { checkLayout, journeyFacts, lintDataFile, lintFeature, lintLayout, lintProject, loadStepIndex, type JourneyFacts, type StepIndex } from './project.js';
@@ -288,7 +288,7 @@ export function lintCode(text: string, file: string, o: LintOptions = {}): LintF
     // Secrets assigned in code.
     const assign = /\b(\w*(?:password|passwd|pwd|secret|token|apikey|api_key|clientsecret|client_secret)\w*)\s*[:=]\s*(['"])([^'"\n]{4,})\2/i.exec(code);
     const notSecretName = assign ? /(?:type|kind|name|url|uri|field|label|header|endpoint|prefix|length|count|expires?(?:_?in)?|policy|regex|pattern|hint|placeholder|selector|locator)$/i.test(assign[1]) : true;
-    if (assign && !notSecretName && !assign[3].includes('${') && !/^(?:bearer|basic|true|false|null|none|undefined)$/i.test(assign[3]) && !SAFE_SECRET_VALUE.test(assign[3]) && !/process\.env|getenv|System\.getenv|os\.environ/.test(code)) {
+    if (assign && !notSecretName && !assign[3].includes('${') && !looksLikeLocator(assign[3]) && !/^(?:bearer|basic|true|false|null|none|undefined)$/i.test(assign[3]) && !SAFE_SECRET_VALUE.test(assign[3]) && !/process\.env|getenv|System\.getenv|os\.environ/.test(code)) {
       add({ rule: 'plaintext-secret', line, message: `${assign[1]} is assigned a plain-text value (${redact(assign[3])})`, suggestion: 'read it from the environment or a secret store (EZTest: secret://env/NAME, Azure Key Vault, the Identity Vault)' });
     } else {
       const hit = SECRET_VALUE_PATTERNS.find(([re]) => re.test(code));

@@ -265,6 +265,12 @@ export async function lintDataFile(abs: string, rel: string, text: string | unde
           const k = isScalar(p.key) ? String(p.key.value) : '';
           // Field descriptions of a role's login form ("password: Passphrase") name a field, not a secret.
           if (k === 'fields' && path.includes('roles')) continue;
+          // An element file's entries are locators: `password: the Password field` names the field. Token-shaped
+          // values are still reported (valueHit).
+          if (k === 'elements' && path.length === 0) {
+            if (isMap(p.value)) for (const e of p.value.items) walkElement(e.value as YamlNode, isScalar(e.key) ? String(e.key.value) : '', ['elements', isScalar(e.key) ? String(e.key.value) : '']);
+            continue;
+          }
           walk(p.value as YamlNode, k, [...path, k]);
         }
         return;
@@ -278,6 +284,22 @@ export async function lintDataFile(abs: string, rel: string, text: string | unde
         const hit = s ? undefined : valueHit(n.value);
         const line = n.range ? lc.linePos(n.range[0]).line : undefined;
         if (s || hit) add({ ...(line ? { line } : {}), message: s ? `${path.join('.')} holds a plain-text secret (${redact(s)})` : `${path.join('.')} holds ${hit![1]}`, suggestion: SECRET_FIX });
+      }
+    };
+    const walkElement = (n: YamlNode | null | undefined, key: string, path: string[]): void => {
+      if (!n) return;
+      if (isMap(n)) {
+        for (const p of n.items) walkElement(p.value as YamlNode, isScalar(p.key) ? String(p.key.value) : '', [...path, isScalar(p.key) ? String(p.key.value) : '']);
+        return;
+      }
+      if (isSeq(n)) {
+        for (const x of n.items) walkElement(x as YamlNode, key, path);
+        return;
+      }
+      if (isScalar(n)) {
+        const hit = valueHit(n.value);
+        const line = n.range ? lc.linePos(n.range[0]).line : undefined;
+        if (hit) add({ ...(line ? { line } : {}), message: `${path.join('.')} holds ${hit[1]}`, suggestion: SECRET_FIX });
       }
     };
     walk(doc.contents as YamlNode, '', []);

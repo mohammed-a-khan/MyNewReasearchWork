@@ -190,6 +190,17 @@ describe('project guide lint rules: across files', () => {
     expect(r.findings.map((f) => f.message).join(' ')).not.toMatch(/Summer#2026|Winter#2026|k-12345678|abc123xyz/);
   });
 
+  it('plaintext-secret: an element or a screen model entry named password is a locator, not a secret', async () => {
+    const dir = await project({
+      'apps/web/elements/practice.yaml': 'screen: Practice\nelements:\n  username: the Username field\n  password: the Password field\n  pin: label=PIN\n  apiToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\n',
+      'apps/web/screens/practice.ts': "import { screen } from '@eztech.com/eztest/sdk';\nexport const Practice = screen('Practice', {\n  password: 'the Password field',\n  secret: 'css=#secret-answer',\n});\n",
+      'apps/web/code/orders/c.journey.ts': "const password = 'Summer#2026';\nexport default password;\n",
+    });
+    const r = await lintPaths(['apps'], { cwd: dir });
+    // The JWT in an element file and the password assigned in code are still reported; the locators are not.
+    expect(by(r, 'plaintext-secret')).toEqual(['apps/web/code/orders/c.journey.ts:1', 'apps/web/elements/practice.yaml:6']);
+  });
+
   it('outside-layout: test files where the layout does not put them, only in projects with apps/', async () => {
     const files = {
       'apps/web/journeys/orders/fine.ez': GOOD(),
