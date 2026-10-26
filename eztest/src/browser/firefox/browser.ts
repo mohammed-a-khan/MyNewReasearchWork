@@ -935,6 +935,7 @@ export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
     if (!this.closing) {
       this.closing = (async () => {
         for (const ctx of [...this.contexts_.values()]) await ctx.close().catch(() => undefined);
+        if (this.helper) await this.helper.then((h) => h.close()).catch(() => undefined);
         if (this.proc) {
           await withTimeout(this.bidi.send('browser.close'), 5000, () => 'browser.close timed out').catch(() => undefined);
           await this.proc.kill();
@@ -957,11 +958,33 @@ export class FirefoxBrowser extends TypedEmitter<FirefoxBrowserEvents> {
     this.emitEvent('disconnected', this);
   }
 
-  /** VP8 encoding for recordVideo (WebCodecs in a scratch page of this browser). */
+  /** Internal (set by launch): how this browser was started, for a headless helper of the same build. */
+  launchedAs?: { headless: boolean; executablePath?: string; env?: Record<string, string | undefined> };
+  private helper?: Promise<FirefoxBrowser>;
+
+  /**
+   * VP8 encoding for recordVideo (WebCodecs in a scratch page). A visible browser must not show that page to the
+   * person watching the run: a headless Firefox of the same build does the encoding, started on first use.
+   */
   vp8Encoder(): Vp8Encoder | undefined {
     if (!this.connected) return undefined;
-    if (!this.encoder) this.encoder = browserVp8Encoder(async () => this.newContext({ viewport: { width: 200, height: 100 } }));
+    if (!this.encoder) {
+      const visible = this.launchedAs?.headless === false;
+      this.encoder = browserVp8Encoder(async () => (visible ? await this.headlessHelper() : this).newContext({ viewport: { width: 200, height: 100 } }));
+    }
     return this.encoder;
+  }
+
+  private async headlessHelper(): Promise<FirefoxBrowser> {
+    if (!this.helper) {
+      const o = this.launchedAs ?? { headless: true };
+      const started = this.browserType_.launch({ headless: true, ...(o.executablePath ? { executablePath: o.executablePath } : {}), ...(o.env ? { env: o.env } : {}) });
+      started.catch(() => {
+        if (this.helper === started) this.helper = undefined;
+      });
+      this.helper = started;
+    }
+    return this.helper;
   }
 
   /** Internal: the browser process (undefined when connected to a running Firefox). */
@@ -1028,11 +1051,13 @@ export class FirefoxBrowserType {
     const proc = await launchFirefoxProcess(this.processOptions(options));
     const bidi = new BidiConnection(proc.transport);
     try {
-      return await withTimeout(
+      const browser = await withTimeout(
         FirefoxBrowser.create(bidi, proc, options.slowMo ?? 0, this, { downloadsPath: options.downloadsPath }),
         options.timeout ?? 180_000,
         () => `browserType.launch: timed out after ${options.timeout ?? 180_000} ms waiting for Firefox to start\n${proc.stderrTail.slice(-15).join('\n')}`,
       );
+      browser.launchedAs = { headless: options.headless ?? !(options as { devtools?: boolean }).devtools, ...(options.executablePath ? { executablePath: options.executablePath } : {}), ...(options.env ? { env: options.env as Record<string, string | undefined> } : {}) };
+      return browser;
     } catch (e) {
       await proc.kill().catch(() => undefined);
       const err = e as Error;

@@ -128,6 +128,9 @@ export interface ContextEvents {
   backgroundpage: ChromiumPage;
 }
 
+/** Room around the page in a visible browser window (title bar, tabs, address bar, borders). */
+const WINDOW_FRAME = { width: 16, height: 88 };
+
 export class ChromiumContext extends TypedEmitter<ContextEvents> {
   readonly pages_ = new Set<ChromiumPage>();
   protected readonly pageWaiters = new Map<string, Deferred<ChromiumPage>>();
@@ -287,7 +290,11 @@ export class ChromiumContext extends TypedEmitter<ContextEvents> {
   async newPage(): Promise<ChromiumPage> {
     if (this.closed) throw new TargetClosedError(closedMessage('browserContext.newPage'));
     if (this.ownerPage) throw new Error('This context belongs to browser.newPage() and holds one page; create a context with browser.newContext() to open more pages');
-    const { targetId } = await this.browser_.connection.root.send('Target.createTarget', { url: 'about:blank', ...(this.id ? { browserContextId: this.id } : {}) });
+    // A visible browser opens each context in a window of its own: give it the page's size as a normal window
+    // (Chrome's default on a desktop is nearly the whole screen); a headless browser ignores this.
+    const vp = this.options.viewport === null ? undefined : this.options.viewport ?? { width: 1280, height: 720 };
+    const size = vp ? { width: vp.width + WINDOW_FRAME.width, height: vp.height + WINDOW_FRAME.height, windowState: 'normal' } : {};
+    const { targetId } = await this.browser_.connection.root.send('Target.createTarget', { url: 'about:blank', ...(this.id ? { browserContextId: this.id } : {}), ...size });
     return this.waitForPage(targetId);
   }
 
@@ -765,6 +772,7 @@ export class ChromiumBrowser extends TypedEmitter<BrowserEvents> {
     if (!this.closing) {
       this.closing = (async () => {
         for (const ctx of [...this.contexts_.values()]) await ctx.close().catch(() => undefined);
+        if (this.helper) await this.helper.then((h) => h.close()).catch(() => undefined);
         if (this.proc) {
           await this.connection.root.send('Browser.close').catch(() => undefined);
           await this.proc.kill();
@@ -786,15 +794,34 @@ export class ChromiumBrowser extends TypedEmitter<BrowserEvents> {
   }
 
   private encoder?: Vp8Encoder;
+  /** Internal (set by launch): how this browser was started, for a headless helper of the same build. */
+  launchedAs?: { headless: boolean; executablePath?: string; channel?: string; env?: Record<string, string | undefined> };
+  private helper?: Promise<ChromiumBrowser>;
 
   /**
-   * VP8 encoding for recordVideo, done by this browser (WebCodecs in a scratch
-   * page served on a secure origin we fulfill ourselves).
+   * VP8 encoding for recordVideo (WebCodecs in a scratch page served on a secure origin we fulfill ourselves).
+   * A headless browser does it itself. A visible one must not show that page to the person watching the run, and a
+   * hidden target cannot run the encoder, so a headless browser of the same build does it, started on first use.
    */
   vp8Encoder(): Vp8Encoder | undefined {
     if (!this.connected) return undefined;
-    if (!this.encoder) this.encoder = browserVp8Encoder(async () => this.newContext({ viewport: { width: 200, height: 100 } }));
+    if (!this.encoder) {
+      const visible = this.launchedAs?.headless === false;
+      this.encoder = browserVp8Encoder(async () => (visible ? await this.headlessHelper() : this).newContext({ viewport: { width: 200, height: 100 } }));
+    }
     return this.encoder;
+  }
+
+  private async headlessHelper(): Promise<ChromiumBrowser> {
+    if (!this.helper) {
+      const o = this.launchedAs ?? { headless: true };
+      const started = this.browserType_.launch({ headless: true, ...(o.executablePath ? { executablePath: o.executablePath } : {}), ...(o.channel ? { channel: o.channel } : {}), ...(o.env ? { env: o.env } : {}) });
+      started.catch(() => {
+        if (this.helper === started) this.helper = undefined;
+      });
+      this.helper = started;
+    }
+    return this.helper;
   }
 
   /** Internal: register a manual attach target id (newCDPSession). */
@@ -911,11 +938,13 @@ export class ChromiumBrowserType {
     });
     const connection = new CDPConnection(proc.transport);
     try {
-      return await withTimeout(
+      const browser = await withTimeout(
         ChromiumBrowser.create(connection, proc, options.slowMo ?? 0, this, options.downloadsPath),
         options.timeout ?? 180_000,
         () => `browserType.launch: timed out after ${options.timeout ?? 180_000} ms waiting for the browser to start\n${stderrTailOf(proc)}`,
       );
+      browser.launchedAs = { headless: options.headless ?? !options.devtools, ...(options.executablePath ? { executablePath: options.executablePath } : {}), ...(options.channel ? { channel: options.channel } : {}), ...(options.env ? { env: options.env as Record<string, string | undefined> } : {}) };
+      return browser;
     } catch (e) {
       await proc.kill().catch(() => undefined);
       const tail = stderrTailOf(proc);

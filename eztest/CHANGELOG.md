@@ -4,6 +4,11 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### 0.1.0-beta.7: a visible browser shows only the test
+
+- **No "eztest-encoder.invalid" window.** With a visible browser and video recording on, EZTest's video encoder page (`https://eztest-encoder.invalid/`) opened as an extra window. The encoding now runs in a headless browser of the same build, started only when a video is recorded and closed with the run's browser; the visible browser shows only the pages under test (Chromium and Firefox).
+- **Windows the size of the page, not nearly the whole screen.** Each test's window in a visible Chromium opens as a normal window sized to its viewport (Chrome's own default on a desktop filled most of the screen, which looked like every test maximised its window).
+
 ### 0.1.0-beta.6: the run report, rebuilt
 
 - **Fixed, found by the consumer project on beta.5:** the built-in `${env}` and `${project}` now work in `Examples: from data "data/${env}/..."` paths, at run time and in `eztest validate` (the data file was "not found" and the outline skipped). A derived column with a string argument (`with ref = unique('H', 10)`) keeps its single quotes, so `"<ref>"` in step text binds to `{string}` (it became `unique("H", 10)` and ended the step's string early).
