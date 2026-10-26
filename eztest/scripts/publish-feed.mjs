@@ -71,10 +71,16 @@ async function pruneOlderVersions(versions) {
     const r = await fetch(`${base}/${path}/versions/${encodeURIComponent(v)}?api-version=7.1-preview.1`, { method: 'DELETE', headers });
     console.log(`--prune: deleted ${pkg.name}@${v}: HTTP ${r.status}`);
   }
-  const purge = await fetch(`${base}/RecycleBin/packagesBatch?api-version=7.1-preview.1`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ operation: 'PermanentDelete', packages: versions.map((version) => ({ id: pkg.name, version })) }),
-  });
+  // A deleted version reaches the recycle bin a few seconds later: retry while it is not there yet (404).
+  let purge;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 5000));
+    purge = await fetch(`${base}/RecycleBin/packagesBatch?api-version=7.1-preview.1`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ operation: 'PermanentDelete', packages: versions.map((version) => ({ id: pkg.name, version })) }),
+    });
+    if (purge.status !== 404) break;
+  }
   console.log(`--prune: removed ${versions.length} version(s) from the recycle bin: HTTP ${purge.status}`);
 }
