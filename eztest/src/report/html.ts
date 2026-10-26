@@ -226,7 +226,8 @@ function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: 
 }
 
 function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): string {
-  const health = m.health
+  // Only when something is wrong: an unavailable environment or an opened circuit breaker (health checks that passed say nothing).
+  const health = m.health && ((m.health.preflight && !m.health.preflight.ok) || m.health.circuit)
     ? `<div class="banner" role="note">${icon('alert')}<div>${m.health.preflight && !m.health.preflight.ok ? `<strong>Environment unavailable:</strong> ${e(m.health.preflight.failed.join('; '))} (nothing ran). ` : ''}${m.health.circuit ? `<strong>Circuit breaker opened</strong> after ${e(m.health.circuit.afterJourney)}: ${e(m.health.circuit.notRun)} test(s) not run (${e(m.health.circuit.reason)}).` : ''}</div></div>`
     : '';
   const bySuite = new Map<string, TestModel[]>();
