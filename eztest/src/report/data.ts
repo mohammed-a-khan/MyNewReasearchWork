@@ -27,6 +27,7 @@ import { summariseLenses, type LensFile, type LensSummary } from './lenses.js';
 import { configSnapshot } from './config-snapshot.js';
 import { normalizeBrand, type ReportBrand } from './brand.js';
 import { scenarioEntry } from './bdd.js';
+import { failureHeadline } from './headline.js';
 
 export const REPORT_MODEL_VERSION = 2 as const;
 
@@ -50,8 +51,8 @@ export interface StepModel {
   t: number;
   /** Evidence ids (see ReportModel.evidence). */
   e?: string[];
-  /** Error: name and message (stack separately). */
-  x?: { name?: string; message: string; stack?: string };
+  /** Error: name, message, stack, and the human headline of the message (headline.ts). */
+  x?: { name?: string; message: string; stack?: string; headline?: string };
   /** Healing: tier, from, to, confidence, verified, reason, evidence ids, shared element. */
   h?: { tier: string; from: string[]; to: string; confidence: number; verified: boolean; reason: string; evidence: string[]; element?: string };
   /** Post-conditions: condition text, held, actual. */
@@ -132,7 +133,8 @@ export interface TestModel {
   owners: string[];
   file?: string;
   suite: string[];
-  error?: { name?: string; message: string; stack?: string };
+  /** The error, with the human headline of its message (headline.ts); the raw message stays for the technical details. */
+  error?: { name?: string; message: string; stack?: string; headline?: string };
   failedStep?: string;
   signature?: string;
   cluster?: string;
@@ -484,7 +486,7 @@ function stepModel(s: StepResult, testStart: number, art: StepArtifacts | undefi
   const st = Date.parse(s.startedAt);
   const m: StepModel = { n: s.intent, s: STEP_CODE[s.status] ?? 'S', d: s.durationMs, t: Number.isFinite(st) && Number.isFinite(testStart) ? Math.max(0, st - testStart) : 0 };
   if (s.evidence.length) m.e = s.evidence;
-  if (s.error) m.x = { ...(s.error.name ? { name: s.error.name } : {}), message: trunc(s.error.message, 4000)!, ...(s.error.stack ? { stack: trunc(s.error.stack, 4000) } : {}) };
+  if (s.error) m.x = { ...(s.error.name ? { name: s.error.name } : {}), message: trunc(s.error.message, 4000)!, ...(s.error.stack ? { stack: trunc(s.error.stack, 4000) } : {}), headline: failureHeadline(s.error.message) };
   if (s.heal) m.h = { tier: s.heal.tier, from: s.heal.original.map(formatLocator), to: formatLocator(s.heal.healed), confidence: s.heal.confidence, verified: s.heal.verified, reason: s.heal.reason, evidence: s.heal.evidence, ...(s.heal.element ? { element: s.heal.element } : {}) };
   if (s.conditions.length) m.c = s.conditions.map((c) => [condText(c), c.passed, String(c.actual ?? c.message ?? '').slice(0, 300)]);
   if (s.usedLocator) m.l = formatLocator(s.usedLocator);
@@ -766,7 +768,7 @@ export function buildReportModel(run: RunResult, input: ReportModelInput = {}): 
       owners: ownersFor(j.journeyId, unit),
       ...(file ? { file } : {}),
       suite: suiteOf(j, file, root, perFile),
-      ...(err ? { error: { ...(err.name ? { name: err.name } : {}), message: trunc(err.message, 4000)!, ...(err.stack ? { stack: trunc(err.stack, 4000) } : {}) } } : {}),
+      ...(err ? { error: { ...(err.name ? { name: err.name } : {}), message: trunc(err.message, 4000)!, ...(err.stack ? { stack: trunc(err.stack, 4000) } : {}), headline: failureHeadline(err.message) } } : {}),
       ...(f ? { failedStep: f.intent } : {}),
       ...(signature ? { signature } : {}),
       ...(failure ? { failure } : {}),

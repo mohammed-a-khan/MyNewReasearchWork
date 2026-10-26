@@ -64,7 +64,7 @@ const RULES: Rule[] = [
   },
   {
     c: 'data',
-    re: /duplicate key|unique constraint|already exists|violates (foreign key|not-null|check) constraint|deadlock|no rows? (returned|found)|row not found|record not found|data (row|source) .*(missing|empty|not found)|REPLACE_WITH_/i,
+    re: /duplicate key|unique constraint|already exists|violates (foreign key|not-null|check) constraint|deadlock|no rows? (returned|found)|returned no rows|row not found|record not found|data (row|source) .*(missing|empty|not found)|REPLACE_WITH_/i,
     why: 'the test data was missing, stale or already used',
     fix: 'Reset or regenerate the data the test uses (seed scripts, shared data store, unique values with gen: generators), then run the test again. If several tests share the same record, give each its own.',
   },

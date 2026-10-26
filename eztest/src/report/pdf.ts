@@ -21,6 +21,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { STATE_LABEL, TEST_STATES, type ReportModel, type TestModel, type TestState } from './data.js';
 import { CATEGORY_LABEL, FAILURE_CATEGORIES, type FailureCategory } from './categorise.js';
 import { causeGroups } from './causes.js';
+import { failureHeadline } from './headline.js';
 import { fmtMs, fmtPct } from './charts.js';
 import { contextRows, failingStepOf, flatSteps, STEP_LABEL } from './export-common.js';
 import { PdfDoc, textWidth, wrapText, type FontKey, type Rgb } from './pdf-doc.js';
@@ -227,8 +228,8 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
       doc.ensure(17);
       doc.y -= 15;
       doc.text(Lx, doc.y, String(g.tests.length), { size: 9, font: 'B', color: STATE_INK.failed });
-      const cw = chip(Lx + 22, doc.y, CATEGORY_LABEL[g.cat], CAT_RGB[g.cat], light(CAT_RGB[g.cat]) ? INK : [255, 255, 255], 7);
-      doc.text(Lx + 28 + cw, doc.y, wrapText(g.message, W - 34 - cw, 8, 'M', 1)[0] ?? '', { size: 8, font: 'M' });
+      const cw = g.cat === 'unknown' ? -6 : chip(Lx + 22, doc.y, CATEGORY_LABEL[g.cat], CAT_RGB[g.cat], light(CAT_RGB[g.cat]) ? INK : [255, 255, 255], 7);
+      doc.text(Lx + 28 + cw, doc.y, wrapText(g.headline, W - 34 - cw, 8.5, 'R', 1)[0] ?? '', { size: 8.5 });
     }
   }
 
@@ -244,7 +245,8 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
       chip(Lx, doc.y, CATEGORY_LABEL[c], CAT_RGB[c], light(CAT_RGB[c]) ? INK : [255, 255, 255], 9);
       doc.y -= 6;
       for (const g of list) {
-        const msg = wrapText(g.message, W - 70, 8.5, 'M', 4);
+        // The headline (the raw engine message is in each test's section).
+        const msg = wrapText(g.headline, W - 70, 9, 'B', 3);
         const fix = g.fix ? wrapText(`Next step: ${g.fix}`, W - 20, 8.5, 'R', 4) : [];
         const names = g.tests.slice(0, 12).map((t) => t.name);
         const h = 14 + msg.length * 11 + fix.length * 11 + names.length * 11 + 14;
@@ -253,7 +255,7 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
         doc.rect(Lx, top - h, W, h, { stroke: BORDER });
         doc.rect(Lx, top - h, 3, h, { fill: g.kind === 'flaky' ? STATE_RGB.flaky : STATE_RGB.failed });
         let yy = top - 14;
-        msg.forEach((l) => { doc.text(Lx + 10, yy, l, { size: 8.5, font: 'M' }); yy -= 11; });
+        msg.forEach((l) => { doc.text(Lx + 10, yy, l, { size: 9, font: 'B' }); yy -= 11; });
         const n = `${g.tests.length} ${g.tests.length === 1 ? L.test : L.tests}`;
         doc.text(Lx + W - 8 - textWidth(n, 9, 'B'), top - 14, n, { size: 9, font: 'B', color: g.kind === 'flaky' ? STATE_INK.flaky : STATE_INK.failed });
         if (g.kind === 'failure' && !g.known) chip(Lx + W - 40, top - 28, 'NEW', [255, 255, 255], STATE_INK.failed, 7);
@@ -303,7 +305,7 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
     doc.y -= 16;
     const sw = chip(Lx, doc.y, STATE_LABEL[t.state].toUpperCase(), STATE_RGB[t.state], light(STATE_RGB[t.state]) ? INK : [255, 255, 255]);
     let cx2 = Lx + sw + 6;
-    if (t.cat) cx2 += chip(cx2, doc.y, CATEGORY_LABEL[t.cat.c], CAT_RGB[t.cat.c], light(CAT_RGB[t.cat.c]) ? INK : [255, 255, 255]) + 6;
+    if (t.cat && t.cat.c !== 'unknown') cx2 += chip(cx2, doc.y, CATEGORY_LABEL[t.cat.c], CAT_RGB[t.cat.c], light(CAT_RGB[t.cat.c]) ? INK : [255, 255, 255]) + 6;
     const nameLines = wrapText(t.name, Lx + W - cx2, 11, 'B', 2);
     doc.text(cx2, doc.y, nameLines[0], { size: 11, font: 'B', color: LINK });
     doc.link(cx2, doc.y - 3, Math.min(Lx + W - cx2, textWidth(nameLines[0], 11, 'B')), 14, permalink(t.id));
@@ -314,9 +316,10 @@ export function renderReportPdf(m: ReportModel, o: PdfReportOptions = {}): Buffe
     doc.y -= 4;
     doc.paragraph([fmtMs(t.durationMs), t.browser, t.suite.join(' / '), t.attempt > 1 ? `${t.attempt} attempts` : undefined, t.ado?.testCases.length ? `test case ${t.ado.testCases.map((c) => `#${c.id}`).join(', ')}` : undefined, t.row ? `data ${Object.entries(t.row).map(([x, y]) => `${x}=${y}`).join(', ')}` : undefined].filter(Boolean).join('  |  '), { size: 8, color: MUTED });
     if (t.failedStep) doc.paragraph(`Failed at: ${t.failedStep}`, { size: 9, font: 'B', gap: 2 });
+    if (t.error) doc.paragraph(t.error.headline ?? failureHeadline(t.error.message), { size: 9.5, font: 'B', gap: 2, maxLines: 3 });
     const msg = t.error?.message ?? t.flake?.reason;
-    if (msg) {
-      const lines = wrapText(msg, W - 16, 8, 'M', 10);
+    if (msg && msg.trim() !== (t.error?.headline ?? '').trim()) {
+      const lines = wrapText(msg, W - 16, 8, 'M', 6);
       const h = lines.length * 10 + 8;
       doc.ensure(h + 4);
       doc.rect(Lx, doc.y - h, W, h, { fill: hex(pal?.['soft-failed']) ?? [253, 236, 236] });

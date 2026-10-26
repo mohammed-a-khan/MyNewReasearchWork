@@ -4,6 +4,20 @@ All notable changes to EZTest are recorded here. The project follows [Semantic V
 
 ## [Unreleased]
 
+### 0.1.0-beta.8: report polish
+
+The run report, checked against real runs (long scenario titles, long Gherkin steps with `${...}` expressions, up to 20 steps, several evidence files per step, a dozen tags, long engine messages; 13 and 350 tests, one and two browsers) at 1366, 1536, 1920 and 390 px:
+
+- **The Overview's notice appears only when something is wrong** (a failed preflight or an opened circuit breaker); a healthy run has none.
+- **Failure headlines.** Every failure reads as a short sentence first - "Expected the URL to contain /pim/viewPersonalDetails/empNumber/", "The database query returned no rows", "Expected testid=order-total to read "21.50", but it reads "21.00"" - in the Overview, the Failures tab, the test detail, the PDF, the e-mail and the one-page summary. The engine's message, the error type and the stack stay under "Technical details", in monospace. Grouping is unchanged. `query returned no rows` is now categorised as test data.
+- **Tests list:** no horizontal scroll; titles wrap to two lines at most (the full title as a tooltip); the duration and the category in a column of their own; the subtitle says where the test failed, else its data row or three tags and "+n"; the browser only in a cross-browser run. The list column is wider on wide screens.
+- **Grouping fits the run:** the list groups by feature by default, and a grouping or filter with a single value in the run (one browser, no owners, the same tags on every test) is not offered; a grouping remembered from another report falls back to the feature.
+- **The opened test starts at its title.** The list and the detail are two panes of the window's height that scroll on their own; opening a test (a click or a `#tests/<id>` link) shows its title below the sticky header, with the result and actions in a bar that stays at the top of the detail.
+- **Evidence:** one filter row (kind, step, search) with bounded selects and short options ("Step 7 · Then I get the value of query…"); a compact list grouped by step - a thumbnail or kind mark, a title such as "Screenshot after step 2", the size and time, Open / Download - with the file path, SHA-256 and chain position under each row's "Integrity details".
+- **No zero-information lines:** no "Probable cause: unknown (0% confidence), needs review"; the category chip shows only when a category is known; "Same cause as 12 other tests" lists three and links to the group in Failures.
+- Long lists collapse: tags in the detail ("+4 more"), results by feature and by tag ("Show all 33 tags"), a cause's tests ("Show all 13 tests"), requirements; long labels clamp to two lines with the full text as a tooltip; table headings no longer wrap; numbers stay right-aligned.
+- Trends: no empty "Flaky tests" chart when no run had a flaky test, no stray axis title, and duration axes that fit "1 min 20 s". Quality: requirements list their tests by name. Environment: the commit author without the e-mail address. BDD steps no longer show their keyword twice ("When When I ...").
+
 ### 0.1.0-beta.7: a visible browser shows only the test
 
 - **No "eztest-encoder.invalid" window.** With a visible browser and video recording on, EZTest's video encoder page (`https://eztest-encoder.invalid/`) opened as an extra window. The encoding now runs in a headless browser of the same build, started only when a video is recorded and closed with the run's browser; the visible browser shows only the pages under test (Chromium and Firefox).

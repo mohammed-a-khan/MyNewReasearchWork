@@ -67,7 +67,7 @@ export function renderEmailText(m: ReportModel, o: EmailOptions = {}): string {
     '',
     ...(groups.length ? ['Failures by cause:'] : []),
     ...groups.slice(0, 10).flatMap((g) => [
-      `- ${g.tests.length} x ${firstLine(g.message, 200)} [${CATEGORY_LABEL[g.cat]}${g.kind === 'failure' && !g.known ? ', new' : ''}]`,
+      `- ${g.tests.length} x ${firstLine(g.headline, 200)}${g.cat !== 'unknown' || (g.kind === 'failure' && !g.known) ? ` [${[g.cat !== 'unknown' ? CATEGORY_LABEL[g.cat] : '', g.kind === 'failure' && !g.known ? 'new' : ''].filter(Boolean).join(', ')}]` : ''}`,
       ...(g.fix ? [`  next step: ${g.fix}`] : []),
       ...g.tests.slice(0, 5).map((t) => `  * ${t.name}${permalink(links.report, t.id) ? ` ${permalink(links.report, t.id)}` : ''}`),
     ]),
@@ -135,10 +135,10 @@ export function renderEmailHtml(m: ReportModel, o: EmailOptions = {}): string {
   const trendRows = trend.length >= 2 && !isHidden(b, 'trends') ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${trend.map((t) => `<tr>${td(e(t.startedAt.slice(5, 16).replace('T', ' ')) + (t.current ? ' <strong>(this run)</strong>' : ''), `font-size:12px;color:${C.muted};width:150px;padding:2px 8px 2px 0;white-space:nowrap`)}<td style="padding:2px 0">${bar([{ pct: t.passRate * 100, color: t.current ? brand : '#a9bbf5', label: fmtPct(t.passRate) }, { pct: 100 - t.passRate * 100, color: '#eff1f4', label: '' }], 10)}</td>${td(e(fmtPct(t.passRate, 0)), 'font-size:12px;width:46px;text-align:right;padding-left:8px')}</tr>`).join('')}</table>` : '';
   const groups = isHidden(b, 'failures') ? [] : causeGroups(m);
   const groupRow = (g: CauseGroup) => `<tr><td style="padding:10px 0;border-top:1px solid ${C.border}">
-<div style="${FONT};font-size:14px;line-height:20px"><strong style="color:${g.kind === 'flaky' ? STATE_INK.flaky : STATE_INK.failed}">${e(g.tests.length)} &times;</strong> ${chip(CATEGORY_LABEL[g.cat], CAT_BG[g.cat], CAT_INK[g.cat])}${g.kind === 'failure' && !g.known ? ` ${chip('new', '#ffffff', STATE_INK.failed)}` : ''}</div>
-<div class="ez-err" style="font-family:Consolas,Menlo,monospace;font-size:12px;line-height:17px;color:${C.ink};background:${C.soft};padding:6px 8px;margin-top:4px;border-radius:4px;word-break:break-word">${e(firstLine(g.message, 300))}</div>
+<div style="${FONT};font-size:14px;line-height:20px"><strong style="color:${g.kind === 'flaky' ? STATE_INK.flaky : STATE_INK.failed}">${e(g.tests.length)} &times;</strong> ${g.cat !== 'unknown' ? chip(CATEGORY_LABEL[g.cat], CAT_BG[g.cat], CAT_INK[g.cat]) : ''}${g.kind === 'failure' && !g.known ? ` ${chip('new', '#ffffff', STATE_INK.failed)}` : ''}</div>
+<div class="ez-err" style="${FONT};font-size:13px;line-height:18px;color:${C.ink};background:${C.soft};padding:6px 8px;margin-top:4px;border-radius:4px;word-break:break-word">${e(firstLine(g.headline, 300))}</div>
 ${g.fix ? `<div style="${FONT};font-size:13px;line-height:18px;margin-top:4px;color:${C.ink}"><strong>Next step:</strong> ${e(g.fix)}</div>` : ''}
-<div style="${FONT};font-size:13px;line-height:19px;margin-top:4px">${g.tests.slice(0, 6).map((t) => a(permalink(links.report, t.id), t.name)).join(' &middot; ')}${g.tests.length > 6 ? ` <span style="color:${C.muted}">+${e(g.tests.length - 6)} more</span>` : ''}</div>
+<div style="${FONT};font-size:13px;line-height:19px;margin-top:4px">${g.tests.slice(0, 6).map((t) => a(permalink(links.report, t.id), t.name.length > 90 ? `${t.name.slice(0, 89).trimEnd()}…` : t.name)).join(' &middot; ')}${g.tests.length > 6 ? ` <span style="color:${C.muted}">+${e(g.tests.length - 6)} more</span>` : ''}</div>
 </td></tr>`;
   const ctx = m.context;
   const ctxRows: Array<[string, string]> = [

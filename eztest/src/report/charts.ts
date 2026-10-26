@@ -184,18 +184,21 @@ export interface Column {
   cls?: string;
 }
 
-export function columnChart(cols: Column[], o: { title: string; yLabel: string; yFormat?: (v: number) => string; width?: number; height?: number; cls?: string }): string {
+export function columnChart(cols: Column[], o: { title: string; yLabel: string; yFormat?: (v: number) => string; width?: number; height?: number; cls?: string; axisTitle?: boolean }): string {
   const id = uid('c');
   const W = o.width ?? 560;
   const H = o.height ?? 200;
-  const m = { l: 44, r: 12, t: 16, b: 34 };
-  const iw = W - m.l - m.r;
-  const ih = H - m.t - m.b;
-  const fmt = o.yFormat ?? ((v: number) => compact(v));
+  const fmt0 = o.yFormat ?? ((v: number) => compact(v));
+  // Zero reads as 0 on every axis ("0 ms" is noise).
+  const fmt = (v: number) => (v === 0 ? '0' : fmt0(v));
   const peak = Math.max(...cols.map((c) => c.value), 0) || 1;
   // Counts get whole-number ticks only (no 0, 0, 1, 1, 1 axis for small numbers).
   const counts = cols.every((c) => Number.isInteger(c.value));
   const ticks = counts && peak <= 4 ? Array.from({ length: Math.ceil(peak) + 1 }, (_, i) => i) : niceTicks(peak);
+  // The left margin fits the longest tick label ("1 min 20 s").
+  const m = { l: Math.max(44, 10 + 6.4 * Math.max(...ticks.map((t) => fmt(t).length))), r: 12, t: 16, b: o.axisTitle === false ? 24 : 34 };
+  const iw = W - m.l - m.r;
+  const ih = H - m.t - m.b;
   const top = ticks[ticks.length - 1] || 1;
   const band = iw / Math.max(1, cols.length);
   const bw = Math.min(24, Math.max(2, band - 2));
@@ -207,10 +210,10 @@ export function columnChart(cols: Column[], o: { title: string; yLabel: string; 
       const cx = m.l + band * i + band / 2;
       const h = (c.value / top) * ih;
       const tip = c.tip ?? `${c.label}: ${fmt(c.value)}`;
-      return `<g class="hit"${tipAttr(tip, cols.length <= 40)}><rect x="${(cx - band / 2).toFixed(1)}" y="${m.t}" width="${band.toFixed(1)}" height="${ih}" fill="transparent"/>${h > 0 ? `<path class="mark ${e(c.cls ?? o.cls ?? 'series-1')}" d="${vbar(cx - bw / 2, y(c.value), bw, h)}"/>` : ''}</g>${i % every === 0 ? `<text class="tick" x="${cx.toFixed(1)}" y="${H - 18}" text-anchor="middle">${e(c.label)}</text>` : ''}`;
+      return `<g class="hit"${tipAttr(tip, cols.length <= 40)}><rect x="${(cx - band / 2).toFixed(1)}" y="${m.t}" width="${band.toFixed(1)}" height="${ih}" fill="transparent"/>${h > 0 ? `<path class="mark ${e(c.cls ?? o.cls ?? 'series-1')}" d="${vbar(cx - bw / 2, y(c.value), bw, h)}"/>` : ''}</g>${i % every === 0 ? `<text class="tick" x="${cx.toFixed(1)}" y="${H - (o.axisTitle === false ? 6 : 18)}" text-anchor="middle">${e(c.label)}</text>` : ''}`;
     })
     .join('');
-  const body = `${grid}${bars}<line class="axis" x1="${m.l}" x2="${m.l + iw}" y1="${m.t + ih}" y2="${m.t + ih}"/><text class="tick" x="${m.l + iw / 2}" y="${H - 3}" text-anchor="middle">${e(o.yLabel)}</text>`;
+  const body = `${grid}${bars}<line class="axis" x1="${m.l}" x2="${m.l + iw}" y1="${m.t + ih}" y2="${m.t + ih}"/>${o.axisTitle === false ? '' : `<text class="tick" x="${m.l + iw / 2}" y="${H - 3}" text-anchor="middle">${e(o.yLabel)}</text>`}`;
   const desc = cols.map((c) => `${c.label}: ${fmt(c.value)}`).join('; ');
   return `${frame(id, W, H, o.title, desc, body, 'colchart')}${table({ caption: o.title, head: [o.yLabel, 'Value'], rows: cols.map((c) => [c.label, fmt(c.value)]) })}`;
 }

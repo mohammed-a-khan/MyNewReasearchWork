@@ -291,9 +291,11 @@ describe('HTML report in a real browser', () => {
     await detail.locator('[role=tab][data-sub=evidence]').click();
     expect(await shownSub()).toEqual(['evidence']);
     const vault = detail.locator('[role=tabpanel]:not([hidden])');
-    const vrows = await vault.locator('tbody tr').count();
+    const vrows = await vault.locator('.evrow').count();
     expect(vrows).toBeGreaterThan(0);
-    expect(await vault.locator('tbody tr').first().textContent()).toMatch(/#\d+/);
+    // The chain position and the hash are integrity details, one click away.
+    await vault.locator('.evrow').first().getByRole('button', { name: /Integrity details/ }).click();
+    expect(await vault.locator('.evrow .ev-int').first().textContent()).toMatch(/position \d+/);
     // API exchange and DB rows render as code and tables inside the step.
     await page.goto(pathToFileURL(out.html!).href + '#tests/api-orders');
     await expect.poll(() => page.locator('#d-title').textContent()).toBe('Orders API: create and read');

@@ -215,14 +215,23 @@ function colOf(section: string, fallback: string): string {
   return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : fallback;
 }
 
-function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: string }>, caption: string, first: string, more: number, noun = 'Tests', tab = 'Tests'): string {
+let moreSeq = 0;
+/**
+ * Results per feature / tag / browser: label (two lines at most, the full label as its tooltip), tests,
+ * failing, a bar and the pass rate. The first `show` rows are visible; the rest (up to 200) behind
+ * "Show all <n> <what>".
+ */
+function breakdownTable(rows: Array<{ label: string; tests: TestModel[]; href?: string }>, caption: string, first: string, show: number, noun = 'Tests', what = 'rows'): string {
   if (!rows.length) return '';
-  const body = rows.map((r) => {
+  const id = `more-${++moreSeq}`;
+  const body = rows.slice(0, 200).map((r, i) => {
     const c = countsOf(r.tests);
     const failing = c.failed + c.error;
-    return `<tr><th scope="row">${r.href ? `<a href="${e(r.href)}">${e(r.label)}</a>` : e(r.label)}</th><td class="num">${e(r.tests.length)}</td><td class="num${failing ? ' ink-failed' : ''}">${e(failing)}</td><td class="bar-cell bar-col">${stateBar(c)}</td><td class="num rate">${e(fmtPct(passRateOf(c), 0))}</td></tr>`;
+    const label = `<span class="clamp2" title="${e(r.label)}">${e(r.label)}</span>`;
+    return `<tr${i >= show ? ` class="more-row" data-more="${id}"` : ''}><th scope="row">${r.href ? `<a href="${e(r.href)}">${label}</a>` : label}</th><td class="num">${e(r.tests.length)}</td><td class="num${failing ? ' ink-failed' : ''}">${e(failing)}</td><td class="bar-cell bar-col">${stateBar(c)}</td><td class="num rate">${e(fmtPct(passRateOf(c), 0))}</td></tr>`;
   }).join('');
-  return `<div class="tbl-wrap"><table><caption class="sr-only">${e(caption)}</caption><thead><tr><th scope="col">${e(first)}</th><th scope="col" class="num">${e(noun)}</th><th scope="col" class="num">Failing</th><th scope="col" class="bar-col"><span class="sr-only">Outcome</span></th><th scope="col" class="num">Pass rate</th></tr></thead><tbody>${body}</tbody></table></div>${more > 0 ? `<p class="small muted" style="margin:8px 0 0">${e(more)} more in the ${e(tab)} tab.</p>` : ''}`;
+  const extra = Math.min(rows.length, 200) - show;
+  return `<div class="tbl-wrap"><table class="breakdown"><caption class="sr-only">${e(caption)}</caption><thead><tr><th scope="col">${e(first)}</th><th scope="col" class="num">${e(noun)}</th><th scope="col" class="num">Failing</th><th scope="col" class="bar-col"><span class="sr-only">Outcome</span></th><th scope="col" class="num">Pass rate</th></tr></thead><tbody>${body}</tbody></table></div>${extra > 0 ? `<button type="button" class="btn quiet more-btn no-print" data-more-btn="${id}" aria-expanded="false" data-show="Show all ${e(Math.min(rows.length, 200))} ${e(what)}" data-hide="Show fewer">Show all ${e(Math.min(rows.length, 200))} ${e(what)}</button>` : ''}`;
 }
 
 function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): string {
@@ -240,7 +249,7 @@ function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): st
   for (const t of m.tests) for (const g of t.tags) if (!ADO_TAG.test(g)) byTag.set(g, [...(byTag.get(g) ?? []), t]);
   const tags = [...byTag.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
   const fail = groups.filter((g) => g.kind === 'failure');
-  const reasons = groups.slice(0, 6).map((g) => `<div class="reason"><span class="cnt" title="${e(plural(g.tests.length, L.test, L.tests))}">${e(g.tests.length)}</span><a href="#failures/${e(g.id)}"><div class="msg" title="${e(g.message)}">${e(g.message)}</div></a>${catChip(g.cat)}</div>`).join('');
+  const reasons = groups.slice(0, 6).map((g) => `<div class="reason"><span class="cnt" title="${e(plural(g.tests.length, L.test, L.tests))}">${e(g.tests.length)}</span><a href="${isHidden(m.brand, 'failures') ? testHref(g.tests[0].id) : `#failures/${e(g.id)}`}"><div class="msg" title="${e(g.message)}">${e(g.headline)}</div></a>${g.cat !== 'unknown' ? catChip(g.cat) : '<span></span>'}</div>`).join('');
   const slow = m.slowest.slice(0, 6);
   const maxSlow = Math.max(1, ...slow.map((s) => s.durationMs));
   const slowList = slow.length
@@ -248,13 +257,13 @@ function overviewPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): st
     : emptyState('Nothing executed', 'Every test was skipped.', false);
   const b = m.browsers;
   const browserCard = b
-    ? `<section class="card span-6" aria-labelledby="ov-browser"><div class="card-h"><h3 id="ov-browser">${e(L.sections.byBrowser)}</h3></div>${breakdownTable(b.names.map((n) => ({ label: `${n}${b.perBrowser[n].version ? ` ${b.perBrowser[n].version!.split('.')[0]}` : ''}`, tests: m.tests.filter((t) => t.browser === n) })), L.sections.byBrowser, colOf(L.sections.byBrowser, 'Browser'), 0, cap(L.tests), L.tabs.tests)}</section>`
+    ? `<section class="card span-6" aria-labelledby="ov-browser"><div class="card-h"><h3 id="ov-browser">${e(L.sections.byBrowser)}</h3></div>${breakdownTable(b.names.map((n) => ({ label: `${n}${b.perBrowser[n].version ? ` ${b.perBrowser[n].version!.split('.')[0]}` : ''}`, tests: m.tests.filter((t) => t.browser === n) })), L.sections.byBrowser, colOf(L.sections.byBrowser, 'Browser'), 10, cap(L.tests), 'browsers')}</section>`
     : '';
   return `${health}<div class="grid">
 <section class="card span-4" aria-labelledby="ov-outcome"><div class="card-h"><h3 id="ov-outcome">${e(L.sections.outcome)}</h3>${info('the pass rate', 'Passed tests (healed and flaky included) out of the tests that ran; skipped tests are not counted.')}</div>${outcomeDonut(m)}</section>
 <section class="card span-8" aria-labelledby="ov-reasons"><div class="card-h"><h3 id="ov-reasons" class="grow">${e(L.sections.topFailures)}</h3>${groups.length && !isHidden(m.brand, 'failures') ? `<a class="btn quiet" href="#failures">All causes</a>` : ''}</div>${fail.length || groups.length ? `<div>${reasons}</div>` : emptyState('No failures', `Every ${L.test} that ran passed.`)}</section>
-<section class="card span-6" aria-labelledby="ov-feature"><div class="card-h"><h3 id="ov-feature">${e(L.sections.byFeature)}</h3>${info('features', 'The first level of the suite: the feature of a Gherkin scenario, else the folder or file of the journey.')}</div>${breakdownTable(suites.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byFeature, colOf(L.sections.byFeature, 'Feature'), suites.length - 10, cap(L.tests), L.tabs.tests)}</section>
-<section class="card span-6" aria-labelledby="ov-tag"><div class="card-h"><h3 id="ov-tag">${e(L.sections.byTag)}</h3></div>${tags.length ? breakdownTable(tags.slice(0, 10).map(([label, tests]) => ({ label, tests })), L.sections.byTag, colOf(L.sections.byTag, 'Tag'), tags.length - 10, cap(L.tests), L.tabs.tests) : emptyState('No tags', 'Tag journeys (Tags: @smoke) to see results per tag.', false)}</section>
+<section class="card span-6" aria-labelledby="ov-feature"><div class="card-h"><h3 id="ov-feature">${e(L.sections.byFeature)}</h3>${info('features', 'The first level of the suite: the feature of a Gherkin scenario, else the folder or file of the journey.')}</div>${breakdownTable(suites.map(([label, tests]) => ({ label, tests })), L.sections.byFeature, colOf(L.sections.byFeature, 'Feature'), 8, cap(L.tests), colOf(L.sections.byFeature, 'Feature').toLowerCase() + 's')}</section>
+<section class="card span-6" aria-labelledby="ov-tag"><div class="card-h"><h3 id="ov-tag">${e(L.sections.byTag)}</h3></div>${tags.length ? breakdownTable(tags.map(([label, tests]) => ({ label, tests })), L.sections.byTag, colOf(L.sections.byTag, 'Tag'), 8, cap(L.tests), colOf(L.sections.byTag, 'Tag').toLowerCase() + 's') : emptyState('No tags', 'Tag journeys (Tags: @smoke) to see results per tag.', false)}</section>
 <section class="card span-6" aria-labelledby="ov-slow"><div class="card-h"><h3 id="ov-slow">${e(L.sections.slowest)}</h3></div>${slowList}</section>
 ${browserCard}
 </div>`;
@@ -262,13 +271,46 @@ ${browserCard}
 
 // ------------------------------------------------------------------ tests
 
+/** How many distinct values a property has across the tests (a test without one counts as its own value). */
+function distinctOf(tests: TestModel[], f: (t: TestModel) => string[]): number {
+  const seen = new Set<string>();
+  for (const t of tests) {
+    const v = f(t);
+    if (!v.length) seen.add('\u0000none');
+    for (const x of v) seen.add(x);
+  }
+  return seen.size;
+}
+
+/** A multi-valued property (tags, owners) splits the tests only when some test lacks one of its values. */
+function splits(tests: TestModel[], f: (t: TestModel) => string[]): boolean {
+  const counts = new Map<string, number>();
+  for (const t of tests) for (const v of new Set(f(t))) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.values()].some((n) => n < tests.length);
+}
+
+/** The grouping options worth offering: a property with one value would make one group of everything. */
+export function groupOptions(m: ReportModel): Array<[string, string]> {
+  const T = m.tests;
+  const opts: Array<[string, string, boolean]> = [
+    ['suite', 'Feature', true],
+    ['file', 'File', distinctOf(T, (t) => (t.file ? [t.file] : [])) > 1],
+    ['tag', 'Tag', splits(T, (t) => t.tags.filter((g) => !ADO_TAG.test(g)))],
+    ['browser', 'Browser', new Set(T.map((t) => t.browser).filter(Boolean)).size > 1],
+    ['owner', 'Owner', splits(T, (t) => t.owners)],
+    ['category', 'Failure category', distinctOf(T, (t) => (t.cat ? [t.cat.c] : [])) > 1],
+    ['none', 'No grouping', true],
+  ];
+  return opts.filter((o) => o[2]).map(([v, l]) => [v, l]);
+}
+
 function testsPanel(m: ReportModel, L: BrandLabels): string {
   const present = TEST_STATES.filter((s) => m.tests.some((t) => t.state === s));
   return `<div class="explorer" id="explorer">
 <div class="ex-side"><div class="ex-tools" role="search" aria-label="Find ${e(L.tests)}">
 <div class="search">${icon('search')}<label for="q" class="sr-only">Search ${e(L.tests)}</label><input type="search" id="q" placeholder="Search name, tag, error, step" autocomplete="off"></div>
 <div class="filters" role="group" aria-label="Filter by result"><button type="button" class="fchip" data-state="all" aria-pressed="true">All</button>${present.map((s) => `<button type="button" class="fchip" data-state="${s}" aria-pressed="false"><span class="dot st-${s}" aria-hidden="true"></span>${e(STATE_LABEL[s])}</button>`).join('')}</div>
-<div class="ex-row2"><label>Group<select id="group"><option value="suite">Feature</option><option value="file">File</option><option value="tag">Tag</option><option value="browser">Browser</option><option value="owner">Owner</option><option value="category">Failure category</option><option value="none">No grouping</option></select></label>
+<div class="ex-row2" id="ex-row2"><label>Group<select id="group">${groupOptions(m).map(([v, l]) => `<option value="${v}">${e(l)}</option>`).join('')}</select></label>
 <label>Sort<select id="sort"><option value="default">Run order</option><option value="severity">Failures first</option><option value="duration">Slowest first</option><option value="name">Name</option></select></label>
 <label>Tag<select id="f-tag"><option value="">Any</option></select></label></div>
 <details class="more" id="more-filters"><summary>More filters</summary><div class="ex-row2" style="margin-top:6px"><label>Owner<select id="f-owner"><option value="">Any</option></select></label><label>Browser<select id="f-browser"><option value="">Any</option></select></label><label>Category<select id="f-cat"><option value="">Any</option></select></label></div></details>
@@ -294,11 +336,12 @@ function failuresPanel(m: ReportModel, L: BrandLabels, groups: CauseGroup[]): st
     const shared = list.length > 1 && list.every((g) => g.fix && g.fix === list[0].fix) ? list[0].fix : undefined;
     const cards = list.map((g) => {
       const first = g.tests[0];
-      const tests = g.tests.slice(0, 50).map((t) => `<li><span class="sicon si-${t.state}" title="${e(STATE_LABEL[t.state])}">${icon(STATE_ICON[t.state])}</span><a href="${testHref(t.id)}" title="${e(t.name)}">${e(t.name)}</a>${t.failedStep ? `<span class="where" title="${e(t.failedStep)}">${e(t.failedStep)}</span>` : ''}</li>`).join('');
+      const listId = `more-g-${g.id}`;
+      const tests = g.tests.slice(0, 50).map((t, i) => `<li${i >= 8 ? ` class="more-row" data-more="${e(listId)}"` : ''}><span class="sicon si-${t.state}" title="${e(STATE_LABEL[t.state])}">${icon(STATE_ICON[t.state])}</span><a href="${testHref(t.id)}" title="${e(t.name)}">${e(t.name)}</a>${t.failedStep ? `<span class="where" title="Failed at: ${e(t.failedStep)}">${e(t.failedStep)}</span>` : ''}</li>`).join('');
       return `<article class="cause-card${g.kind === 'flaky' ? ' flaky' : ''}" id="failures/${e(g.id)}" tabindex="-1" aria-labelledby="g-${e(g.id)}">
-<div class="group-h"><div class="grow"><p class="group-msg" id="g-${e(g.id)}">${e(g.message)}</p><div class="group-meta">${g.kind === 'failure' ? (g.known ? `<span>Seen before${g.firstSeenAt ? ` &middot; first on ${e(shortDay(g.firstSeenAt))}` : ''}</span>` : '<span class="cat c-new">new</span>') : ''}${first.signature ? `<span class="mono" title="Error signature">${e(first.signature.slice(0, 10))}</span>` : ''}<button type="button" class="btn quiet no-print" data-copy-bug="${e(first.id)}" style="min-height:26px;padding:2px 8px">${icon('copy')}Copy for bug</button></div></div><div class="group-n">${e(g.tests.length)}<small>${e(g.tests.length === 1 ? L.test : L.tests)}</small></div></div>
+<div class="group-h"><div class="grow"><p class="group-msg" id="g-${e(g.id)}">${e(g.headline)}</p><div class="group-meta">${g.kind === 'failure' ? (g.known ? `<span>Seen before${g.firstSeenAt ? ` &middot; first on ${e(shortDay(g.firstSeenAt))}` : ''}</span>` : '<span class="cat c-new">new</span>') : ''}${first.signature ? `<span class="mono" title="Error signature">${e(first.signature.slice(0, 10))}</span>` : ''}<button type="button" class="btn quiet no-print" data-copy-bug="${e(first.id)}" style="min-height:26px;padding:2px 8px">${icon('copy')}Copy for bug</button></div>${g.message.trim() !== g.headline.trim() ? `<details class="tech"><summary>Technical details</summary><pre class="code">${e(g.tests[0]?.error?.message ?? g.message)}</pre></details>` : ''}</div><div class="group-n">${e(g.tests.length)}<small>${e(g.tests.length === 1 ? L.test : L.tests)}</small></div></div>
 ${g.fix && !shared ? `<div class="next">${icon('bulb')}<div><strong>Next step:</strong> ${e(g.fix)}</div></div>` : ''}
-<ul class="group-tests">${tests}${g.tests.length > 50 ? `<li class="muted">${e(g.tests.length - 50)} more: filter the Tests tab by this category.</li>` : ''}</ul></article>`;
+<ul class="group-tests">${tests}${g.tests.length > 50 ? `<li class="muted more-row" data-more="${e(listId)}">${e(g.tests.length - 50)} more: filter the Tests tab by this category.</li>` : ''}</ul>${g.tests.length > 8 ? `<button type="button" class="btn quiet more-btn no-print group-more" data-more-btn="${e(listId)}" aria-expanded="false" data-show="Show all ${e(g.tests.length)} ${e(L.tests)}" data-hide="Show fewer">Show all ${e(g.tests.length)} ${e(L.tests)}</button>` : ''}</article>`;
     }).join('');
     return `<section class="cat-sec" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${catChip(c)} <span class="muted small" style="font-weight:500">${e(plural(n, L.test, L.tests))} &middot; ${e(plural(list.length, 'cause', 'causes'))}</span></h3>${shared ? `<div class="next cat-next">${icon('bulb')}<div><strong>Next step:</strong> ${e(shared)}</div></div>` : ''}${cards}</section>`;
   }).join('');
@@ -316,19 +359,20 @@ function trendsPanel(m: ReportModel, L: BrandLabels): string {
   if (t.length >= 2) {
     const pts = t.map((x) => ({ label: lbl(x.startedAt), value: x.passRate, detail: `${fmtWhen(x.startedAt)}, ${x.total} ${L.tests}, ${x.failed} failing`, current: x.current }));
     parts.push(`<section class="card span-12" aria-labelledby="tr-pass"><div class="card-h"><h3 id="tr-pass">Pass rate</h3><span class="muted small">last ${e(t.length)} runs</span></div>${lineChart(pts, { title: `Pass rate, last ${t.length} runs`, yMax: 1, yFormat: (v) => fmtPct(v, 0), series: 'series-1', area: true, width: 1000, height: 220 })}</section>`);
-    parts.push(`<section class="card span-6" aria-labelledby="tr-dur"><div class="card-h"><h3 id="tr-dur">Duration</h3></div>${columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.durationMs, tip: `${fmtWhen(x.startedAt)}: ${fmtMs(x.durationMs)}${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-1' : 'muted' })), { title: `Run duration, last ${t.length} runs`, yLabel: 'run', yFormat: fmtMs, width: 560, height: 220 })}</section>`);
-    parts.push(`<section class="card span-6" aria-labelledby="tr-flaky"><div class="card-h"><h3 id="tr-flaky">Flaky ${e(L.tests)}</h3>${info('flaky', 'Tests that failed first and passed on a retry, per run.')}</div>${columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.flaky ?? 0, tip: `${fmtWhen(x.startedAt)}: ${x.flaky ?? 0} flaky${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-2' : 'muted' })), { title: `Flaky tests, last ${t.length} runs`, yLabel: 'run', yFormat: (v) => String(Math.round(v)), width: 560, height: 220 })}</section>`);
+    parts.push(`<section class="card span-6" aria-labelledby="tr-dur"><div class="card-h"><h3 id="tr-dur">Duration</h3></div>${columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.durationMs, tip: `${fmtWhen(x.startedAt)}: ${fmtMs(x.durationMs)}${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-1' : 'muted' })), { title: `Run duration, last ${t.length} runs`, yLabel: 'Run', axisTitle: false, yFormat: fmtMs, width: 560, height: 220 })}</section>`);
+    const anyFlaky = t.some((x) => (x.flaky ?? 0) > 0);
+    parts.push(`<section class="card span-6" aria-labelledby="tr-flaky"><div class="card-h"><h3 id="tr-flaky">Flaky ${e(L.tests)}</h3>${info('flaky', 'Tests that failed first and passed on a retry, per run.')}</div>${!anyFlaky ? emptyState('No flaky ' + L.tests, `None of the last ${t.length} runs had a ${L.test} that passed only on a retry.`) : columnChart(t.map((x) => ({ label: lbl(x.startedAt), value: x.flaky ?? 0, tip: `${fmtWhen(x.startedAt)}: ${x.flaky ?? 0} flaky${x.current ? ' (this run)' : ''}`, cls: x.current ? 'series-2' : 'muted' })), { title: `Flaky tests, last ${t.length} runs`, yLabel: 'Run', axisTitle: false, yFormat: (v) => String(Math.round(v)), width: 560, height: 220 })}</section>`);
   }
   const c = m.comparison;
   if (c) {
     const list = (title: string, items: Array<{ id: string; name: string }>, extra: (x: never) => string = () => '') =>
-      items.length ? `<div><h4 style="margin:0 0 6px">${e(title)} <span class="cnt">${e(items.length)}</span></h4><ul class="list">${items.slice(0, 50).map((x) => `<li><a class="grow" href="${testHref(x.id)}">${e(x.name)}</a>${extra(x as never)}</li>`).join('')}</ul></div>` : '';
+      items.length ? `<div><h4 style="margin:0 0 6px">${e(title)} <span class="cnt">${e(items.length)}</span></h4><ul class="list">${items.slice(0, 10).map((x) => `<li><a class="grow" href="${testHref(x.id)}" title="${e(x.name)}">${e(x.name)}</a>${extra(x as never)}</li>`).join('')}${items.length > 10 ? `<li class="small muted">${e(items.length - 10)} more</li>` : ''}</ul></div>` : '';
     const blocks = [
       list('Newly failing', c.newlyFailing, (x: { before: string }) => `<span class="muted small">was ${e(x.before)}</span>`),
       list('Fixed', c.fixed),
       list('Slower', c.slower, (x: { beforeMs: number; afterMs: number }) => `<span class="muted small">${e(fmtMs(x.beforeMs))} &rarr; ${e(fmtMs(x.afterMs))}</span>`),
       list(`New ${L.tests}`, c.added),
-      c.removed.length ? `<div><h4 style="margin:0 0 6px">Removed <span class="cnt">${e(c.removed.length)}</span></h4><ul class="list">${c.removed.slice(0, 50).map((x) => `<li><span class="grow">${e(x.name)}</span></li>`).join('')}</ul></div>` : '',
+      c.removed.length ? `<div><h4 style="margin:0 0 6px">Removed <span class="cnt">${e(c.removed.length)}</span></h4><ul class="list">${c.removed.slice(0, 10).map((x) => `<li><span class="grow" title="${e(x.name)}">${e(x.name)}</span></li>`).join('')}${c.removed.length > 10 ? `<li class="small muted">${e(c.removed.length - 10)} more</li>` : ''}</ul></div>` : '',
     ].filter(Boolean);
     parts.push(`<section class="card span-12" aria-labelledby="tr-cmp"><div class="card-h"><h3 id="tr-cmp">Changes since ${e(fmtWhen(c.baselineStartedAt))}</h3>${info('the baseline', `Compared with run ${c.baselineRunId} (report.baseline).`)}</div>${blocks.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${blocks.join('')}</div>` : emptyState('No changes', `Every ${L.test} has the same outcome as in the baseline run.`, false)}</section>`);
   }
@@ -345,8 +389,11 @@ function qualityPanel(m: ReportModel): string {
     ...(cov.api ?? []).map((a) => meter(a.ratio, { label: `API coverage: ${a.title}`, detail: `${a.covered} of ${a.operations} operations; status codes ${fmtPct(a.statusRatio, 0)}; ${a.violations} contract violation(s)` })),
     cov.ui ? meter(cov.ui.percent, { label: 'UI coverage', detail: `${cov.ui.tested} of ${cov.ui.elements} elements on ${cov.ui.pages} page(s)` }) : '',
   ].filter(Boolean).join('');
-  const req = cov.requirements?.items.length
-    ? `<div class="tbl-wrap" style="margin-top:8px"><table><caption class="sr-only">Requirements</caption><thead><tr><th scope="col">Requirement</th><th scope="col">State</th><th scope="col">Tests</th></tr></thead><tbody>${cov.requirements.items.slice(0, 300).map((r) => `<tr><th scope="row">${ext(r.url, r.id)}${r.title ? `<div class="small muted">${e(r.title)}</div>` : ''}</th><td>${badge(r.state === 'passing' ? 'passed' : r.state === 'failing' ? 'failed' : 'skipped', r.state)}</td><td>${r.tests.slice(0, 6).map((t) => `<a class="chip" href="${testHref(t)}">${e(t)}</a>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`
+  const names = new Map(m.tests.map((t) => [t.id, t.name]));
+  const reqItems = cov.requirements?.items.slice(0, 300) ?? [];
+  const reqShow = 12;
+  const req = reqItems.length
+    ? `<div class="tbl-wrap" style="margin-top:8px"><table class="req"><caption class="sr-only">Requirements</caption><thead><tr><th scope="col">Requirement</th><th scope="col">State</th><th scope="col">Tests</th></tr></thead><tbody>${reqItems.map((r, i) => `<tr${i >= reqShow ? ' class="more-row" data-more="more-req"' : ''}><th scope="row">${ext(r.url, r.id)}${r.title ? `<div class="small muted clamp2" title="${e(r.title)}">${e(r.title)}</div>` : ''}</th><td>${badge(r.state === 'passing' ? 'passed' : r.state === 'failing' ? 'failed' : 'skipped', r.state)}</td><td><div class="chips">${r.tests.slice(0, 3).map((t) => `<a class="chip" href="${testHref(t)}" title="${e(names.get(t) ?? t)}">${e(names.get(t) ?? t)}</a>`).join('')}${r.tests.length > 3 ? `<span class="small muted">+${e(r.tests.length - 3)} more</span>` : ''}</div></td></tr>`).join('')}</tbody></table></div>${reqItems.length > reqShow ? `<button type="button" class="btn quiet more-btn no-print" data-more-btn="more-req" aria-expanded="false" data-show="Show all ${e(reqItems.length)} requirements" data-hide="Show fewer">Show all ${e(reqItems.length)} requirements</button>` : ''}`
     : '';
   const parts = [
     meters ? `<section class="card span-12" aria-labelledby="q-cov"><div class="card-h"><h3 id="q-cov">Coverage</h3></div>${meters}${req}</section>` : '',
@@ -404,7 +451,7 @@ function environmentPanel(m: ReportModel): string {
     ['Release', c?.release ? ext(c.release.url, `${c.release.name ?? ''}${c.release.environment ? ` (${c.release.environment})` : ''}`) : undefined],
     ['Repository', git?.repository ? ext(git.repositoryUrl, git.repository) : undefined],
     ['Branch', c?.branch ? `<code>${e(c.branch)}</code>${c.targetBranch ? ` &rarr; <code>${e(c.targetBranch)}</code>` : ''}` : undefined],
-    ['Commit', c?.commit ? `${ext(c.commit.url, c.commit.sha.slice(0, 12), 'mono')}${c.commit.author ? ` by ${e(c.commit.author)}` : ''}` : undefined],
+    ['Commit', c?.commit ? `${ext(c.commit.url, c.commit.sha.slice(0, 12), 'mono')}${c.commit.author ? ` by ${e(c.commit.author.replace(/\s*<[^>]*>\s*$/, ''))}` : ''}` : undefined],
     ['Pull request', c?.pullRequest ? ext(c.pullRequest.url, `#${c.pullRequest.number}`) : undefined],
     ['Owners of failing tests', owners.length ? e(owners.join(', ')) : undefined],
   ]);
